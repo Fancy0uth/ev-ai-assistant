@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10121c" />
+    <title>Orbito · 开发者每日驾驶舱</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#"><span class="brand-mark">o</span><span>orbito</span></a>
+        <nav aria-label="主导航">
+          <a class="nav-item active" href="#"><span>⌂</span> 今天</a>
+          <a class="nav-item" href="#tasks"><span>✓</span> 所有任务 <b>12</b></a>
+          <a class="nav-item" href="#calendar"><span>□</span> 日历</a>
+          <a class="nav-item" href="#learn"><span>◒</span> 学习</a>
+        </nav>
+        <div class="sidebar-section"><span>空间</span><button aria-label="添加空间">+</button></div>
+        <nav class="space-nav">
+          <a href="#"><i class="dot violet-dot"></i> ev-assistant <em>4</em></a>
+          <a href="#"><i class="dot blue-dot"></i> 个人成长</a>
+          <a href="#"><i class="dot amber-dot"></i> 生活事务 <em>2</em></a>
+        </nav>
+        <div class="sidebar-bottom"><button class="settings">⚙ 设置</button><div class="profile"><span class="avatar">Y</span><span><b>Yun</b><small>开发者</small></span><button>⌄</button></div></div>
+      </aside>
+
+      <main>
+        <header class="topbar"><div><p>星期日 · 8 月 3 日</p><h2>早上好，Yun <span>☼</span></h2></div><div class="top-actions"><button class="search">⌘ K <span>搜索或快速添加</span></button><button class="notification" aria-label="通知">♧<i></i></button><button class="add-button">＋ <span>新建任务</span></button></div></header>
+
+        <section class="dashboard-grid">
+          <section class="status-card glass-card" id="status-card" aria-live="polite"></section>
+          <section class="yesterday-card glass-card">
+            <div class="card-heading"><div><span>昨日回顾</span><h2>8 月 2 日</h2></div><button class="more">•••</button></div>
+            <div class="metric-row"><div class="metric"><div class="donut task-donut"><span>78<small>%</small></span></div><div><b>任务完成</b><p>7 / 9 已完成</p></div></div><div class="metric"><div class="donut study-donut"><span>60<small>%</small></span></div><div><b>学习进度</b><p>45 / 75 分钟</p></div></div></div>
+            <div class="reflection"><span>✦</span><p>昨晚学习差 30 分钟完成。今天已为你预留更轻的学习时段。</p></div>
+          </section>
+
+          <section class="tasks-panel" id="tasks"><div class="section-title"><div><p>今天的重点</p><h2>把注意力给最重要的三件事</h2></div><span class="progress-count" id="today-progress">0 / 4</span></div><div class="task-list" id="task-list" aria-live="polite"></div></section>
+
+          <aside class="right-rail">
+            <section class="ai-advice glass-card" id="ai-advice" aria-live="polite"></section>
+            <section class="schedule-card glass-card" id="calendar"><div class="card-heading"><div><span>今日时间线</span><h2>日历安排</h2></div><a href="#">查看全部 →</a></div><div class="timeline"><div class="timeline-item current"><time>09:30</time><span class="line"><i></i></span><div><b>深度工作 · Dashboard 数据层</b><p>90 分钟 · 专注块</p></div></div><div class="timeline-item"><time>11:30</time><span class="line"><i></i></span><div><b>产品同步会</b><p>30 分钟 · Google Meet</p></div></div><div class="timeline-item"><time>14:00</time><span class="line"><i></i></span><div><b>Review · API Gateway</b><p>35 分钟 · GitHub</p></div></div><div class="timeline-item"><time>18:30</time><span class="line"><i></i></span><div><b>力量训练</b><p>30 分钟 · 生活习惯</p></div></div></div></section>
+          </aside>
+
+          <section class="balance-panel"><div class="section-title"><div><p>生活平衡</p><h2>也别忘了照顾自己</h2></div><span class="live-score">当前状态 <b id="score-mini">0</b></span></div><div class="balance-grid"><article><span class="balance-icon water">≈</span><div><b>补水</b><p>今天还差 3 杯</p></div><button>记录</button></article><article><span class="balance-icon food">◐</span><div><b>午餐</b><p>12:15 · 记得离开工位</p></div><button>提醒我</button></article><article><span class="balance-icon move">↗</span><div><b>运动</b><p>18:30 · 力量训练</p></div><button>查看</button></article></div></section>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="src/dashboard.js"></script>
+  </body>
+</html>

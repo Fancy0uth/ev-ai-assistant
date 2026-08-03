@@ -1,0 +1,8 @@
+{
+  "name": "developer-daily-cockpit-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/dashboard.test.mjs"
+  }
+}
