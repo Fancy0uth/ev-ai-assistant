@@ -1,25 +1,24 @@
-# 开发者每日驾驶舱 v1：执行总览
+# 本地优先个人 AI Dashboard：执行总览
 
-## 已批准架构
+## 权威设计
 
-Web 核心数据云端同步；本地 Agent Bridge 保留 API Key 和累积记忆；GitHub 只读手动刷新；日历只导入 `.ics` 快照。详细约束见 [产品规格](../docs/superpowers/specs/2026-08-04-developer-daily-cockpit-product-v1-design.md) 与 ADR。
+- [产品 v2 规格](../docs/superpowers/specs/2026-08-07-local-first-personal-ai-dashboard-v2-design.md)
+- [首个纵向切片计划](../docs/superpowers/plans/2026-08-07-local-foundation-owner-task-dashboard.md)
+- ADR-005 至 ADR-008 记录本地 Core、Agent 路由、外部集成延期和 Docker 演进决策。
+
+旧 Supabase、`.ics` 和本地 Bridge 规格仅保留为历史，不再执行。
 
 ## 实施顺序
 
-1. Web 核心每日驾驶舱：认证、RLS、项目/任务、每日状态、应用内日程、失败态。
-2. 日历与 GitHub 只读集成：在核心 CRUD 稳定后实现。
-3. 本地 Agent Bridge 与长期记忆：在 Web 端上下文预览和版本冲突机制稳定后实现。
-4. CI、可观测性、部署与发布检查：在每个产品边界可端到端测试后完成。
+1. Milestone 0.1：本地账号、Web/Core 契约、SQLite、真实任务和 Today Dashboard。
+2. Milestone 0.2：Event、TimeBlock、Routine、Reminder、Scheduler 与昨日统计。
+3. Milestone 0.3：每日简报、DeepSeek Provider、生活记录草稿与审批。
+4. Milestone 0.4：本地项目、Future Work、Codex Brief/Investigate。
+5. Milestone 0.5：Codex 隔离 Implement/Verify、审计与恢复。
+6. Milestone 0.6：身体、训练、饮食、长期记忆循环和中央审批中心。
+7. Milestone 0.7：Tailscale 手机访问、备份恢复、7 天长期运行和安全验收。
+8. Milestone 1.0：Windows 稳定版；随后进入 Docker 自托管预览。
 
-## 当前可执行计划
+## 当前执行边界
 
-- [Web Core Daily Cockpit](../docs/superpowers/plans/2026-08-04-web-core-daily-cockpit.md)
-
-## 依赖与风险
-
-| 风险 | 控制方式 |
-|---|---|
-| 用户数据越权 | 数据库 RLS + 跨用户 SQL 测试 |
-| 静态 Demo 被意外破坏 | 生产应用在 `apps/web`，Demo 原样保留 |
-| Agent 复杂度拖慢核心价值 | Bridge 作为第二个独立交付，而非首轮依赖 |
-| 外部数据错误 | 后续 `.ics`、GitHub 都以 fixture 与部分失败状态为先 |
+只执行 Milestone 0.1。DeepSeek、Codex、Tailscale 和外部集成在该里程碑中保持未配置，界面不得伪造可用状态。

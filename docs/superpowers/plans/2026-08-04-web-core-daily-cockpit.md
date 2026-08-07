@@ -1,5 +1,7 @@
 # Web Core Daily Cockpit Implementation Plan
 
+> 历史计划：该 Supabase 计划已被 `2026-08-07-local-foundation-owner-task-dashboard.md` 取代，不再执行。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver a production-shaped Web core in which a signed-in user can safely manage projects, tasks and in-app schedule blocks, then see an explainable daily status dashboard.
