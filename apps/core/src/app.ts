@@ -6,6 +6,9 @@ import { createAuthRepository } from './modules/auth/repository';
 import { registerAuthRoutes } from './modules/auth/routes';
 import { createAuthService } from './modules/auth/service';
 import { registerHealthRoutes } from './modules/health/routes';
+import { createTaskRepository } from './modules/tasks/repository';
+import { registerTaskRoutes } from './modules/tasks/routes';
+import { createTaskService } from './modules/tasks/service';
 import { openDatabase } from './storage/database';
 
 export interface AppOptions {
@@ -32,11 +35,13 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     if (database.open) database.close();
   });
   const authService = await createAuthService(createAuthRepository(database));
+  const taskService = createTaskService(createTaskRepository(database));
   await registerHealthRoutes(app, database);
   await registerAuthRoutes(app, {
     authService,
     secureCookies: options.secureCookies ?? false,
   });
+  await registerTaskRoutes(app, { authService, taskService });
 
   return app;
 }
