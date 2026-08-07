@@ -605,7 +605,7 @@ Commit: `feat: add local owner web authentication`.
 - `TodayDashboard` loads `TodaySnapshot`, creates tasks, completes/defer tasks with versioned PATCH, and reloads authoritative state after mutation.
 - `AgentPanel` displays real provider capability states and the rules-based recommendation; it never sends a model request in this slice.
 
-- [ ] **Step 1: Write a failing component behavior test**
+- [x] **Step 1: Write a failing component behavior test**
 
 ```tsx
 it('creates a task and refreshes the Today status from the server', async () => {
@@ -622,15 +622,15 @@ Run: `npm run test --workspace @ev/web -- today-dashboard.test.tsx`.
 
 Expected: FAIL because the Dashboard does not exist.
 
-- [ ] **Step 2: Implement the responsive Dashboard hierarchy**
+- [x] **Step 2: Implement the responsive Dashboard hierarchy**
 
 Desktop uses a 220px navigation rail, flexible Today canvas and 320px Agent panel. Tablet collapses navigation labels; mobile becomes one column with a fixed bottom navigation and a collapsible Agent section. The first viewport must show date/status, current priorities and task composer before secondary summaries.
 
-- [ ] **Step 3: Implement truthful loading, empty, error and mutation states**
+- [x] **Step 3: Implement truthful loading, empty, error and mutation states**
 
 Use skeletons for initial loading, a constructive empty state, `role=alert` for failures and disabled/pending controls during writes. A failed mutation keeps the previous task visible and never displays success. A 401 response navigates to `/login`.
 
-- [ ] **Step 4: Configure the two-process E2E test**
+- [x] **Step 4: Configure the two-process E2E test**
 
 Playwright `webServer` starts Core with an isolated `EV_DATA_DIR` and Web with `EV_CORE_URL=http://127.0.0.1:4311`. The browser test must:
 
@@ -641,11 +641,11 @@ Playwright `webServer` starts Core with an isolated `EV_DATA_DIR` and Web with `
 5. complete it and verify the status explanation changes;
 6. log out and verify `/v1/tasks` is no longer accessible through the UI.
 
-- [ ] **Step 5: Document the runnable milestone**
+- [x] **Step 5: Document the runnable milestone**
 
 README includes prerequisites, `npm install`, development commands, local ports, `EV_DATA_DIR`, first-owner setup, test commands, architecture links and the explicit fact that DeepSeek/Codex/Tailscale are not enabled in milestone 0.1.
 
-- [ ] **Step 6: Run the release checkpoint**
+- [x] **Step 6: Run the release checkpoint**
 
 Run in order:
 
@@ -660,23 +660,23 @@ git diff --check
 
 Then use a real browser at 1440px and 390px to verify rendering, keyboard focus, network responses and zero console errors.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Commit: `feat: deliver local owner task dashboard`.
 
 ## Milestone 0.1 Acceptance Gate
 
-- [ ] A fresh data directory allows exactly one Owner setup.
-- [ ] Valid login survives reload; logout revokes the session.
-- [ ] Password and raw session token never appear in SQLite queries returned to clients, logs or Git.
-- [ ] An authenticated owner can create, list, complete and defer tasks.
-- [ ] Stale task updates return 409 and preserve the newer row.
-- [ ] Today score and reasons are deterministic and clearly labeled `规则引擎`.
-- [ ] DeepSeek and Codex are visibly `未配置`, with no fake AI response.
-- [ ] Restarting Core with the same data directory preserves account and tasks.
-- [ ] Web cannot choose a different Core host through the proxy path.
-- [ ] Unit, integration, component, build and E2E commands all pass.
-- [ ] 390px mobile and 1440px desktop views have no horizontal overflow or inaccessible controls.
+- [x] A fresh data directory allows exactly one Owner setup.
+- [x] Valid login survives reload; logout revokes the session.
+- [x] Password and raw session token never appear in SQLite queries returned to clients, logs or Git.
+- [x] An authenticated owner can create, list, complete and defer tasks.
+- [x] Stale task updates return 409 and preserve the newer row.
+- [x] Today score and reasons are deterministic and clearly labeled `规则引擎`.
+- [x] DeepSeek and Codex are visibly `未配置`, with no fake AI response.
+- [x] Restarting Core with the same data directory preserves account and tasks.
+- [x] Web cannot choose a different Core host through the proxy path.
+- [x] Unit, integration, component, build and E2E commands all pass.
+- [x] 390px mobile and 1440px desktop views have no horizontal overflow or inaccessible controls.
 
 ## Official Sources Used
 

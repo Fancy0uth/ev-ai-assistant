@@ -14,7 +14,9 @@ export class CoreClientError extends Error {
 
 export async function requestCore(path: string, init: RequestInit): Promise<unknown> {
   const headers = new Headers(init.headers);
-  if (!headers.has('content-type')) headers.set('content-type', 'application/json');
+  if (init.body != null && !headers.has('content-type')) {
+    headers.set('content-type', 'application/json');
+  }
   let response: Response;
   try {
     response = await fetch(`/api/core/${path}`, {

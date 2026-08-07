@@ -19,6 +19,8 @@
 7. Milestone 0.7：Tailscale 手机访问、备份恢复、7 天长期运行和安全验收。
 8. Milestone 1.0：Windows 稳定版；随后进入 Docker 自托管预览。
 
-## 当前执行边界
+## 当前状态与边界
 
-只执行 Milestone 0.1。DeepSeek、Codex、Tailscale 和外部集成在该里程碑中保持未配置，界面不得伪造可用状态。
+Milestone 0.1 已完成并通过验收。DeepSeek、Codex、Tailscale 和外部集成仍保持未配置，界面不会伪造可用状态。
+
+下一阶段是 Milestone 0.2；开始实现前先形成日程、时间块、习惯、提醒和 Scheduler 的详细规格与测试计划。

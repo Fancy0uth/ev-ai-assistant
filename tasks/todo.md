@@ -9,7 +9,9 @@
 - [x] Task 5：实现版本化、Owner 隔离的任务 API。
 - [x] Task 6：实现规则可解释的 Today 聚合。
 - [x] Task 7：实现 Next.js BFF 和账号界面。
-- [ ] Task 8：实现真实 Today Dashboard、E2E 和运行文档。
+- [x] Task 8：实现真实 Today Dashboard、E2E 和运行文档。
+
+Milestone 0.1 验收门已全部通过；证据记录在对应实施计划、自动化测试和 README 中。
 
 ## 后续里程碑
 
