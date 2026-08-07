@@ -5,6 +5,7 @@ export interface CoreConfig {
   host: '127.0.0.1';
   port: number;
   dataDir: string;
+  secureCookies: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CoreConfig {
@@ -27,5 +28,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CoreConfig {
     host,
     port,
     dataDir: resolve(env.EV_DATA_DIR ?? platformDataDir),
+    secureCookies: env.EV_SECURE_COOKIES === 'true' || env.NODE_ENV === 'production',
   };
 }

@@ -6,6 +6,7 @@ const config = loadConfig();
 const app = await buildApp({
   databasePath: join(config.dataDir, 'app.sqlite'),
   logger: true,
+  secureCookies: config.secureCookies,
 });
 let isShuttingDown = false;
 
