@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - `docs/superpowers/specs/2026-08-07-local-first-personal-ai-dashboard-v2-design.md` 是唯一产品权威规格。
-- Web 监听 `127.0.0.1:3000`；Core 监听 `127.0.0.1:4310`；浏览器只请求 Web 的 `/api/core/*`。
+- Web 监听 `127.0.0.1:3000`；Core 监听 `127.0.0.1:4311`；浏览器只请求 Web 的 `/api/core/*`。
 - 持久数据默认位于 `EV_DATA_DIR`；开发默认目录为仓库外的用户数据目录，测试必须使用独立临时目录。
 - Core 是 SQLite 唯一写入者，启用 WAL、foreign keys、busy timeout 和版本化迁移。
 - 所有 HTTP 输入和输出通过 `packages/contracts` 的 Zod schema 验证。
@@ -253,7 +253,7 @@ export async function buildApp(options: AppOptions = {}) {
 
 - [ ] **Step 3: Bind the process entry point only to loopback**
 
-`server.ts` validates `EV_CORE_HOST`, `EV_CORE_PORT` and `EV_DATA_DIR`, rejects non-loopback hosts in this release, and calls `app.listen({ host: '127.0.0.1', port: 4310 })` by default.
+`server.ts` validates `EV_CORE_HOST`, `EV_CORE_PORT` and `EV_DATA_DIR`, rejects non-loopback hosts in this release, and calls `app.listen({ host: '127.0.0.1', port: 4311 })` by default.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -632,7 +632,7 @@ Use skeletons for initial loading, a constructive empty state, `role=alert` for 
 
 - [ ] **Step 4: Configure the two-process E2E test**
 
-Playwright `webServer` starts Core with an isolated `EV_DATA_DIR` and Web with `EV_CORE_URL=http://127.0.0.1:4310`. The browser test must:
+Playwright `webServer` starts Core with an isolated `EV_DATA_DIR` and Web with `EV_CORE_URL=http://127.0.0.1:4311`. The browser test must:
 
 1. open `/setup` and create the owner;
 2. land on `/today`;

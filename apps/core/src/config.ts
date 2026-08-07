@@ -14,7 +14,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CoreConfig {
     throw new Error('EV_CORE_HOST must be 127.0.0.1');
   }
 
-  const port = Number(env.EV_CORE_PORT ?? '4310');
+  const port = Number(env.EV_CORE_PORT ?? '4311');
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error('EV_CORE_PORT must be an integer between 1 and 65535');
   }

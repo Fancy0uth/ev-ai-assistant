@@ -48,6 +48,10 @@ describe('Core health routes', () => {
 });
 
 describe('Core runtime configuration', () => {
+  it('defaults to the owner-machine Core port selected for this deployment', () => {
+    expect(loadConfig({ LOCALAPPDATA: 'C:\\temp' }).port).toBe(4311);
+  });
+
   it('rejects a non-loopback bind address', () => {
     expect(() => loadConfig({ EV_CORE_HOST: '0.0.0.0' })).toThrow(
       'EV_CORE_HOST must be 127.0.0.1',

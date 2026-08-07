@@ -114,7 +114,7 @@ iPhone / Desktop Browser
 Next.js Web + same-origin BFF (127.0.0.1:3000)
           |
           v
-Local Agent Core / Fastify (127.0.0.1:4310)
+Local Agent Core / Fastify (127.0.0.1:4311)
   |       |          |             |
   |       |          |             +-- Scheduler / Notifications
   |       |          +-- Agent Orchestrator / Approvals / Audit
