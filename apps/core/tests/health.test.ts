@@ -1,4 +1,4 @@
-import { healthResponseSchema } from '@ev/contracts';
+import { healthResponseSchema, readinessResponseSchema } from '@ev/contracts';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
@@ -28,6 +28,19 @@ describe('Core health routes', () => {
         code: 'NOT_FOUND',
         message: '请求的资源不存在',
       },
+    });
+
+    await app.close();
+  });
+
+  it('reports ready only after SQLite can answer a query', async () => {
+    const app = await buildApp({ logger: false });
+    const response = await app.inject({ method: 'GET', url: '/v1/health/ready' });
+
+    expect(response.statusCode).toBe(200);
+    expect(readinessResponseSchema.parse(response.json())).toEqual({
+      status: 'ready',
+      checks: { database: 'up' },
     });
 
     await app.close();

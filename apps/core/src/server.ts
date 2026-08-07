@@ -1,8 +1,12 @@
+import { join } from 'node:path';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 
 const config = loadConfig();
-const app = await buildApp({ logger: true });
+const app = await buildApp({
+  databasePath: join(config.dataDir, 'app.sqlite'),
+  logger: true,
+});
 let isShuttingDown = false;
 
 async function shutdown(signal: string): Promise<void> {
