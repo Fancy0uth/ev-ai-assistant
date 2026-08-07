@@ -1,3 +1,17 @@
 .worktrees/
 .superpowers/
 node_modules/
+.next/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+data/
+backups/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

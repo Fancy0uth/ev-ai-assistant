@@ -2,7 +2,7 @@
 
 ## Milestone 0.1：Owner Task Dashboard
 
-- [ ] Task 1：建立 npm workspaces、共享契约和测试工具。
+- [x] Task 1：建立 npm workspaces、共享契约和测试工具。
 - [ ] Task 2：建立只监听 loopback 的 Core 健康链路。
 - [ ] Task 3：建立 SQLite 生命周期和原子迁移。
 - [ ] Task 4：实现单 Owner 初始化、登录、会话和退出。

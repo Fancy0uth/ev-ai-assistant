@@ -6,7 +6,7 @@
 
 **Architecture:** 建立 npm workspaces monorepo。`apps/web` 是 Next.js 16 Web 与 same-origin BFF，`apps/core` 是仅监听 loopback 的 Fastify 5 Core，`packages/contracts` 保存 Zod 4 HTTP 契约，`packages/domain` 保存不依赖框架的 Today 状态规则。Core 是 SQLite 的唯一写入者；浏览器不直接访问 Core 或数据库。
 
-**Tech Stack:** Node.js 24.18.0, npm 11.16.0, TypeScript 7.0.2, Next.js 16.3.0, React 19.2.8, Fastify 5.11.2, Zod 4.4.3, better-sqlite3 13.0.3, Vitest 4.1.10, Playwright 1.62.1, ESLint 10.8.0.
+**Tech Stack:** Node.js 24.18.0, npm 11.16.0, TypeScript 6.0.3, Next.js 16.3.0, React 19.2.8, Fastify 5.11.2, Zod 4.4.3, better-sqlite3 13.0.3, Vitest 4.1.10, Playwright 1.62.1, ESLint 9.39.5. TypeScript 与 ESLint 版本按 Next.js 16.3 的当前 peer dependency 上限选择，不追求不兼容的 npm latest。
 
 ## Global Constraints
 

@@ -1,0 +1,20 @@
+{
+  "name": "@ev/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ev/contracts": "0.1.0",
+    "@ev/domain": "0.1.0",
+    "@fastify/cookie": "11.1.2",
+    "@fastify/rate-limit": "11.2.0",
+    "better-sqlite3": "13.0.3",
+    "fastify": "5.11.2"
+  }
+}
