@@ -9,6 +9,7 @@ import { registerHealthRoutes } from './modules/health/routes';
 import { createTaskRepository } from './modules/tasks/repository';
 import { registerTaskRoutes } from './modules/tasks/routes';
 import { createTaskService } from './modules/tasks/service';
+import { registerTodayRoutes } from './modules/today/routes';
 import { openDatabase } from './storage/database';
 
 export interface AppOptions {
@@ -42,6 +43,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     secureCookies: options.secureCookies ?? false,
   });
   await registerTaskRoutes(app, { authService, taskService });
+  await registerTodayRoutes(app, { authService, taskService });
 
   return app;
 }

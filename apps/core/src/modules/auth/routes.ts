@@ -3,10 +3,9 @@ import {
   logoutResponseSchema,
   sessionResponseSchema,
   setupStatusResponseSchema,
-  type Credentials,
 } from '@ev/contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { ApiError } from '../../http/api-error';
+import { parseRequestInput } from '../../http/validation';
 import { createAuthGuard } from './guard';
 import type { AuthService } from './service';
 
@@ -16,16 +15,6 @@ const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 interface AuthRouteOptions {
   authService: AuthService;
   secureCookies: boolean;
-}
-
-function parseCredentials(input: unknown): Credentials {
-  const result = credentialsSchema.safeParse(input);
-  if (!result.success) {
-    throw new ApiError(422, 'VALIDATION_ERROR', '账号信息不符合要求', {
-      issues: result.error.issues.map(({ code, message, path }) => ({ code, message, path })),
-    });
-  }
-  return result.data;
 }
 
 export async function registerAuthRoutes(
@@ -58,7 +47,12 @@ export async function registerAuthRoutes(
   });
 
   app.post('/v1/auth/setup', { config: { rateLimit } }, async (request, reply) => {
-    const result = await authService.setup(parseCredentials(request.body));
+    const credentials = parseRequestInput(
+      credentialsSchema,
+      request.body,
+      '账号信息不符合要求',
+    );
+    const result = await authService.setup(credentials);
     setSessionCookie(reply, result.token, result.expiresAt);
     return reply.status(201).send(
       sessionResponseSchema.parse({
@@ -68,7 +62,12 @@ export async function registerAuthRoutes(
   });
 
   app.post('/v1/auth/login', { config: { rateLimit } }, async (request, reply) => {
-    const result = await authService.login(parseCredentials(request.body));
+    const credentials = parseRequestInput(
+      credentialsSchema,
+      request.body,
+      '账号信息不符合要求',
+    );
+    const result = await authService.login(credentials);
     setSessionCookie(reply, result.token, result.expiresAt);
     return sessionResponseSchema.parse({ data: { owner: result.owner } });
   });

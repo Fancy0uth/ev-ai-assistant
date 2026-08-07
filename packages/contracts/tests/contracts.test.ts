@@ -4,6 +4,7 @@ import {
   credentialsSchema,
   healthResponseSchema,
   taskListQuerySchema,
+  todaySnapshotSchema,
   updateTaskSchema,
 } from '../src/index';
 
@@ -48,5 +49,27 @@ describe('task contracts', () => {
     expect(updateTaskSchema.safeParse({ status: 'DONE' }).success).toBe(false);
     expect(updateTaskSchema.safeParse({ version: 1 }).success).toBe(false);
     expect(updateTaskSchema.safeParse({ version: 1, status: 'DONE' }).success).toBe(true);
+  });
+});
+
+describe('today snapshot contract', () => {
+  it('rejects a snapshot that pretends an unconfigured Agent is ready', () => {
+    expect(
+      todaySnapshotSchema.safeParse({
+        data: {
+          date: '2026-08-07',
+          status: {
+            score: 78,
+            level: 'STEADY',
+            source: 'RULES_V1',
+            reasons: ['今天没有待处理任务'],
+            priorities: [],
+          },
+          tasks: [],
+          yesterday: null,
+          agents: { deepSeek: 'READY', codex: 'NOT_CONFIGURED' },
+        },
+      }).success,
+    ).toBe(false);
   });
 });

@@ -7,7 +7,7 @@
 - [x] Task 3：建立 SQLite 生命周期和原子迁移。
 - [x] Task 4：实现单 Owner 初始化、登录、会话和退出。
 - [x] Task 5：实现版本化、Owner 隔离的任务 API。
-- [ ] Task 6：实现规则可解释的 Today 聚合。
+- [x] Task 6：实现规则可解释的 Today 聚合。
 - [ ] Task 7：实现 Next.js BFF 和账号界面。
 - [ ] Task 8：实现真实 Today Dashboard、E2E 和运行文档。
 
