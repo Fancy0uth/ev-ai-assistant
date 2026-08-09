@@ -3,7 +3,10 @@ import type {
   AgentMessageListQuery,
   AgentSessionListQuery,
   CreateAgentSessionInput,
+  Task,
+  TaskVersionConflictDetails,
 } from '../src/index';
+import * as contracts from '../src/index';
 import {
   agentCapabilityResponseSchema,
   agentMessageListQuerySchema,
@@ -12,6 +15,7 @@ import {
   agentSessionListQuerySchema,
   agentSessionListResponseSchema,
   agentSessionResponseSchema,
+  apiErrorSchema,
   createAgentSessionSchema,
   createTaskSchema,
   credentialsSchema,
@@ -63,6 +67,82 @@ describe('task contracts', () => {
     expect(updateTaskSchema.safeParse({ status: 'DONE' }).success).toBe(false);
     expect(updateTaskSchema.safeParse({ version: 1 }).success).toBe(false);
     expect(updateTaskSchema.safeParse({ version: 1, status: 'DONE' }).success).toBe(true);
+  });
+
+  it('preserves exact target-date queries while accepting the new unambiguous filters', () => {
+    expect(taskListQuerySchema.parse({ targetDate: '2026-08-10' })).toMatchObject({
+      targetDate: '2026-08-10',
+    });
+    expect(
+      taskListQuerySchema.parse({
+        area: 'WORK',
+        status: 'IN_PROGRESS',
+        targetDate: '2026-08-10',
+      }),
+    ).toMatchObject({ area: 'WORK', status: 'IN_PROGRESS', targetDate: '2026-08-10' });
+    expect(
+      taskListQuerySchema.parse({
+        area: 'STUDY',
+        status: 'OPEN',
+        dateScope: 'FUTURE',
+        referenceDate: '2026-08-10',
+      }),
+    ).toMatchObject({
+      area: 'STUDY',
+      status: 'OPEN',
+      dateScope: 'FUTURE',
+      referenceDate: '2026-08-10',
+    });
+    expect(taskListQuerySchema.parse({ dateScope: 'UNDATED' })).toMatchObject({
+      dateScope: 'UNDATED',
+    });
+  });
+
+  it('rejects invalid task date-filter combinations and unknown fields', () => {
+    const invalidQueries = [
+      { targetDate: '2026-08-10', dateScope: 'FUTURE', referenceDate: '2026-08-10' },
+      { dateScope: 'FUTURE' },
+      { dateScope: 'UNDATED', referenceDate: '2026-08-10' },
+      { referenceDate: '2026-08-10' },
+      { dateScope: 'UNDATED', extra: 'unexpected' },
+    ];
+
+    for (const query of invalidQueries) {
+      expect(taskListQuerySchema.safeParse(query).success).toBe(false);
+    }
+  });
+
+  it('exports strict, typed details for task version conflicts', () => {
+    const currentTask: Task = {
+      id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c',
+      title: '完成 Core 任务闭环',
+      area: 'WORK',
+      priority: 'HIGH',
+      status: 'IN_PROGRESS',
+      targetDate: '2026-08-10',
+      completedAt: null,
+      version: 3,
+      createdAt: '2026-08-10T09:00:00.000Z',
+      updatedAt: '2026-08-10T10:00:00.000Z',
+    };
+    const response = apiErrorSchema.parse({
+      error: {
+        code: 'VERSION_CONFLICT',
+        message: 'Task version is stale',
+        details: { currentTask },
+      },
+    });
+    const conflictDetailsSchema = contracts.taskVersionConflictDetailsSchema;
+
+    expect(conflictDetailsSchema).toBeDefined();
+    if (!conflictDetailsSchema) return;
+
+    const details: TaskVersionConflictDetails = conflictDetailsSchema.parse(response.error.details);
+    expect(details.currentTask).toEqual(currentTask);
+    expect(
+      conflictDetailsSchema.safeParse({ currentTask, replacementTask: currentTask }).success,
+    ).toBe(false);
+    expect(conflictDetailsSchema.safeParse({}).success).toBe(false);
   });
 });
 

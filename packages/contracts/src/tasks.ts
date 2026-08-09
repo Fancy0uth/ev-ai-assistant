@@ -9,6 +9,7 @@ export const taskStatusSchema = z.enum([
   'DEFERRED',
   'CANCELLED',
 ]);
+export const taskDateScopeSchema = z.enum(['FUTURE', 'UNDATED']);
 
 export const taskTitleSchema = z.string().trim().min(1).max(200);
 export const localDateSchema = z.iso.date();
@@ -60,9 +61,38 @@ export const taskListQuerySchema = z
       .int()
       .transform((value) => Math.min(100, Math.max(1, value)))
       .default(50),
+    area: taskAreaSchema.optional(),
+    status: taskStatusSchema.optional(),
     targetDate: localDateSchema.optional(),
+    dateScope: taskDateScopeSchema.optional(),
+    referenceDate: localDateSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (input.targetDate !== undefined && input.dateScope !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dateScope'],
+        message: 'targetDate 与 dateScope 不能同时提供',
+      });
+    }
+
+    if (input.dateScope === 'FUTURE' && input.referenceDate === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['referenceDate'],
+        message: 'dateScope=FUTURE 时必须提供 referenceDate',
+      });
+    }
+
+    if (input.dateScope !== 'FUTURE' && input.referenceDate !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['referenceDate'],
+        message: 'referenceDate 仅可与 dateScope=FUTURE 一起提供',
+      });
+    }
+  });
 
 export const taskPathParamsSchema = z.object({ id: z.uuid() }).strict();
 
@@ -86,10 +116,16 @@ export const taskListResponseSchema = z
   })
   .strict();
 
+export const taskVersionConflictDetailsSchema = z
+  .object({ currentTask: taskSchema })
+  .strict();
+
 export type TaskArea = z.infer<typeof taskAreaSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
+export type TaskDateScope = z.infer<typeof taskDateScopeSchema>;
 export type Task = z.infer<typeof taskSchema>;
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type TaskListQuery = z.infer<typeof taskListQuerySchema>;
+export type TaskVersionConflictDetails = z.infer<typeof taskVersionConflictDetailsSchema>;
