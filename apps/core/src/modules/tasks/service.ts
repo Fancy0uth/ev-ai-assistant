@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { taskVersionConflictDetailsSchema } from '@ev/contracts';
 import type { CreateTaskInput, Task, TaskListQuery, UpdateTaskInput } from '@ev/contracts';
 import { ApiError } from '../../http/api-error';
 import type { TaskRepository } from './repository';
@@ -24,8 +25,11 @@ export interface TaskService {
   update(ownerId: string, id: string, input: UpdateTaskInput): Task;
 }
 
-function versionConflict(): ApiError {
-  return new ApiError(409, 'VERSION_CONFLICT', '数据已变化，请确认最新内容后重试');
+function versionConflict(currentTask?: Task): ApiError {
+  const details = currentTask
+    ? taskVersionConflictDetailsSchema.parse({ currentTask })
+    : undefined;
+  return new ApiError(409, 'VERSION_CONFLICT', '数据已变化，请确认最新内容后重试', details);
 }
 
 export function createTaskService(
@@ -74,7 +78,7 @@ export function createTaskService(
       if (!existing) {
         throw new ApiError(404, 'TASK_NOT_FOUND', '任务不存在');
       }
-      if (existing.version !== input.version) throw versionConflict();
+      if (existing.version !== input.version) throw versionConflict(existing);
 
       const status = input.status ?? existing.status;
       let completedAt = existing.completedAt;
@@ -91,7 +95,7 @@ export function createTaskService(
         updatedAt: now().toISOString(),
         expectedVersion: input.version,
       });
-      if (!updated) throw versionConflict();
+      if (!updated) throw versionConflict(repository.findById(ownerId, id));
       return updated;
     },
   };

@@ -3,12 +3,14 @@ import { apiErrorSchema } from '@ev/contracts';
 export class CoreClientError extends Error {
   readonly code: string;
   readonly status: number;
+  readonly details?: unknown;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
     this.name = 'CoreClientError';
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -39,6 +41,7 @@ export async function requestCore(path: string, init: RequestInit): Promise<unkn
         response.status,
         parsedError.data.error.code,
         parsedError.data.error.message,
+        parsedError.data.error.details,
       );
     }
     throw new CoreClientError(response.status, 'UNEXPECTED_RESPONSE', '请求未能完成，请稍后重试');

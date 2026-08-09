@@ -1,11 +1,19 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { taskListResponseSchema, taskResponseSchema } from '@ev/contracts';
+import {
+  taskListResponseSchema,
+  taskResponseSchema,
+  taskVersionConflictDetailsSchema,
+} from '@ev/contracts';
+import type { Task } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
+import { ApiError } from '../src/http/api-error';
 import { createTaskRepository } from '../src/modules/tasks/repository';
+import type { TaskRepository } from '../src/modules/tasks/repository';
+import { createTaskService } from '../src/modules/tasks/service';
 import { openDatabase } from '../src/storage/database';
 
 const credentials = {
@@ -221,12 +229,76 @@ describe('versioned local task API', () => {
       payload: { version: 1, status: 'DONE' },
     });
     expect(stale.statusCode).toBe(409);
-    expect(stale.json()).toEqual({
-      error: {
-        code: 'VERSION_CONFLICT',
-        message: '数据已变化，请确认最新内容后重试',
-      },
+    expect(stale.json().error).toMatchObject({
+      code: 'VERSION_CONFLICT',
+      message: '数据已变化，请确认最新内容后重试',
     });
-    expect(JSON.stringify(created.json())).not.toMatch(/password|session|token/i);
+    expect(taskVersionConflictDetailsSchema.parse(stale.json().error.details).currentTask).toMatchObject({
+      id: task.id,
+      status: 'IN_PROGRESS',
+      version: 2,
+    });
+    expect(JSON.stringify(stale.json())).not.toMatch(/ownerId|cookie|password|session|token/i);
+  });
+});
+
+describe('task version conflict races', () => {
+  it('returns the latest same-owner task after update loses a race', () => {
+    const ownerId = '00000000-0000-4000-8000-000000000001';
+    const id = '00000000-0000-4000-8000-000000000002';
+    const initialTask: Task = {
+      id,
+      title: '更新项目计划',
+      area: 'WORK',
+      priority: 'MEDIUM',
+      status: 'OPEN',
+      targetDate: null,
+      completedAt: null,
+      version: 1,
+      createdAt: '2026-08-10T09:00:00.000Z',
+      updatedAt: '2026-08-10T09:00:00.000Z',
+    };
+    const latestTask: Task = {
+      ...initialTask,
+      title: '另一客户端已更新的计划',
+      status: 'IN_PROGRESS',
+      version: 2,
+      updatedAt: '2026-08-10T10:00:00.000Z',
+    };
+    const findByIdCalls: Array<[string, string]> = [];
+    const repository: TaskRepository = {
+      create: () => initialTask,
+      findById(foundOwnerId, foundId) {
+        findByIdCalls.push([foundOwnerId, foundId]);
+        return findByIdCalls.length === 1 ? initialTask : latestTask;
+      },
+      list: () => ({ items: [], total: 0 }),
+      listForDate: () => [],
+      update: () => undefined,
+    };
+    const service = createTaskService(repository, {
+      now: () => new Date('2026-08-10T10:01:00.000Z'),
+    });
+
+    let thrown: unknown;
+    try {
+      service.update(ownerId, id, { version: 1, status: 'DONE' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ApiError);
+    if (!(thrown instanceof ApiError)) throw thrown;
+    expect(thrown).toMatchObject({
+      statusCode: 409,
+      code: 'VERSION_CONFLICT',
+      message: '数据已变化，请确认最新内容后重试',
+    });
+    expect(taskVersionConflictDetailsSchema.parse(thrown.details)).toEqual({ currentTask: latestTask });
+    expect(findByIdCalls).toEqual([
+      [ownerId, id],
+      [ownerId, id],
+    ]);
+    expect(JSON.stringify(thrown.details)).not.toMatch(/ownerId|cookie|password|session|token/i);
   });
 });
