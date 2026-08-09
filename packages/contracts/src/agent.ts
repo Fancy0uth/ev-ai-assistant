@@ -39,6 +39,12 @@ export const agentSessionSchema = z
   })
   .strict();
 
+export const agentSessionPathParamsSchema = z
+  .object({
+    id: z.uuid(),
+  })
+  .strict();
+
 export const agentMessageRoleSchema = z.enum(['USER', 'ASSISTANT']);
 export const agentMessageContentSchema = z
   .string()

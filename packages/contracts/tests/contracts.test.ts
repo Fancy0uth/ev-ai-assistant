@@ -14,6 +14,7 @@ import {
   agentSendMessageResponseSchema,
   agentSessionListQuerySchema,
   agentSessionListResponseSchema,
+  agentSessionPathParamsSchema,
   agentSessionResponseSchema,
   apiErrorSchema,
   createAgentSessionSchema,
@@ -193,6 +194,19 @@ describe('agent contracts', () => {
     content: '先完成课程预习，再安排项目时间。',
     createdAt: '2026-08-10T09:01:01.000Z',
   };
+
+  it('accepts only a strict UUID session path parameter', () => {
+    expect(
+      agentSessionPathParamsSchema.parse({ id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c' }),
+    ).toEqual({ id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c' });
+    expect(agentSessionPathParamsSchema.safeParse({ id: 'not-a-session-id' }).success).toBe(false);
+    expect(
+      agentSessionPathParamsSchema.safeParse({
+        id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c',
+        extra: 'unexpected',
+      }).success,
+    ).toBe(false);
+  });
 
   it('accepts the provider-neutral capability response without exposing an owner', () => {
     const capability = {

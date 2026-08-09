@@ -2,6 +2,9 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ApiError, registerErrorHandling } from './http/api-error';
+import { createAgentRepository } from './modules/agent/repository';
+import { registerAgentRoutes } from './modules/agent/routes';
+import { createAgentService } from './modules/agent/service';
 import { createAuthRepository } from './modules/auth/repository';
 import { registerAuthRoutes } from './modules/auth/routes';
 import { createAuthService } from './modules/auth/service';
@@ -11,8 +14,10 @@ import { registerTaskRoutes } from './modules/tasks/routes';
 import { createTaskService } from './modules/tasks/service';
 import { registerTodayRoutes } from './modules/today/routes';
 import { openDatabase } from './storage/database';
+import type { AgentProvider } from './modules/agent/provider';
 
 export interface AppOptions {
+  agentProvider?: AgentProvider;
   databasePath?: string;
   logger?: boolean;
   secureCookies?: boolean;
@@ -36,11 +41,20 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     if (database.open) database.close();
   });
   const authService = await createAuthService(createAuthRepository(database));
+  const agentService = createAgentService(
+    createAgentRepository(database),
+    options.agentProvider ? { provider: options.agentProvider } : {},
+  );
   const taskService = createTaskService(createTaskRepository(database));
   await registerHealthRoutes(app, database);
   await registerAuthRoutes(app, {
     authService,
     secureCookies: options.secureCookies ?? false,
+  });
+  await registerAgentRoutes(app, {
+    authService,
+    agentService,
+    ...(options.agentProvider ? { agentProvider: options.agentProvider } : {}),
   });
   await registerTaskRoutes(app, { authService, taskService });
   await registerTodayRoutes(app, { authService, taskService });
