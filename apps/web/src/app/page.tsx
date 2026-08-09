@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation';
+import { AuthShell } from '@/components/auth/auth-shell';
 
 export default function HomePage() {
-  redirect('/setup');
+  return <AuthShell entry="root" />;
 }

@@ -1,10 +1,18 @@
-import { AuthForm } from './auth-form';
+import type { ReactNode } from 'react';
+import { AuthBootstrap, type AuthEntry } from './auth-bootstrap';
 
 interface AuthShellProps {
-  mode: 'setup' | 'login';
+  mode?: 'setup' | 'login';
+  entry?: AuthEntry;
 }
 
-export function AuthShell({ mode }: AuthShellProps) {
+function workspaceLabel(entry: AuthEntry): string {
+  if (entry === 'setup') return '创建账号';
+  if (entry === 'login') return '登录';
+  return '认证启动状态';
+}
+
+function AuthPageFrame({ entry, children }: { entry: AuthEntry; children: ReactNode }) {
   return (
     <main className="auth-page">
       <section className="auth-context" aria-labelledby="product-name">
@@ -50,10 +58,24 @@ export function AuthShell({ mode }: AuthShellProps) {
         </dl>
       </section>
 
-      <section className="auth-workspace" aria-label={mode === 'setup' ? '创建账号' : '登录'}>
-        <AuthForm mode={mode} />
+      <section className="auth-workspace" aria-label={workspaceLabel(entry)}>
+        {children}
         <p className="local-note">LOCAL-FIRST · SINGLE OWNER · NO CLOUD SYNC</p>
       </section>
     </main>
+  );
+}
+
+export function AuthShell({ mode, entry }: AuthShellProps) {
+  const authEntry = entry ?? mode;
+  if (!authEntry) {
+    throw new Error('AuthShell requires an auth entry');
+  }
+
+  return (
+    <AuthBootstrap
+      entry={authEntry}
+      render={(content) => <AuthPageFrame entry={authEntry}>{content}</AuthPageFrame>}
+    />
   );
 }
