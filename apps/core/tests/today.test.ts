@@ -90,8 +90,13 @@ describe('Today snapshot API', () => {
     const date = '2026-08-07';
     const otherDate = '2026-08-08';
     const timestamp = '2026-08-07T00:00:00.000Z';
+    const inProgressHighTaskId = '00000000-0000-4000-8000-000000000001';
+    const firstMediumTaskId = '00000000-0000-4000-8000-000000000002';
+    const inProgressLowTaskId = '00000000-0000-4000-8000-000000000003';
+    const lastMediumTaskId = '00000000-0000-4000-8000-000000000100';
     const priorityTaskId = '00000000-0000-4000-8000-000000000101';
     const otherDateTaskId = '00000000-0000-4000-8000-000000000102';
+    const otherOwnerId = '00000000-0000-4000-8000-000000000999';
     testDirectory = mkdtempSync(join(tmpdir(), 'ev-core-today-'));
     const databasePath = join(testDirectory, 'app.sqlite');
 
@@ -116,7 +121,7 @@ describe('Today snapshot API', () => {
           ownerId: owner.id,
           title: `进行中的中优先级任务 ${index}`,
           area: 'WORK',
-          priority: 'MEDIUM',
+          priority: index === 1 ? 'HIGH' : index === 3 ? 'LOW' : 'MEDIUM',
           status: 'IN_PROGRESS',
           targetDate: date,
           completedAt: null,
@@ -152,13 +157,7 @@ describe('Today snapshot API', () => {
         updatedAt: timestamp,
       });
 
-      expect(
-        repository.list('00000000-0000-4000-8000-000000000999', {
-          page: 1,
-          pageSize: 100,
-          targetDate: date,
-        }).items,
-      ).toEqual([]);
+      expect(repository.listForDate(otherOwnerId, date)).toEqual([]);
     } finally {
       database.close();
     }
@@ -173,23 +172,28 @@ describe('Today snapshot API', () => {
     expect(response.statusCode).toBe(200);
     const snapshot = todaySnapshotSchema.parse(response.json()).data;
     expect(snapshot.tasks).toHaveLength(101);
-    expect(snapshot.tasks.map(({ id }) => id)).toContain(priorityTaskId);
-    expect(snapshot.tasks.map(({ id }) => id)).not.toContain(otherDateTaskId);
+    const taskIds = snapshot.tasks.map(({ id }) => id);
+    expect(taskIds.slice(0, 2)).toEqual([inProgressHighTaskId, firstMediumTaskId]);
+    expect(taskIds.slice(98)).toEqual([
+      lastMediumTaskId,
+      inProgressLowTaskId,
+      priorityTaskId,
+    ]);
+    expect(taskIds).not.toContain(otherDateTaskId);
     expect(snapshot.status).toMatchObject({
-      score: 67,
+      score: 60,
       level: 'TIGHT',
       source: 'RULES_V1',
     });
     expect(snapshot.status.reasons).toEqual([
-      '仍有 1 个高优先级任务',
+      '仍有 2 个高优先级任务',
       '待处理任务共 101 个，注意控制负载',
     ]);
-    expect(snapshot.status.priorities[0]).toMatchObject({
-      id: priorityTaskId,
-      title: '第 101 个高优先级任务',
-      priority: 'HIGH',
-      status: 'OPEN',
-    });
+    expect(snapshot.status.priorities.map(({ id }) => id)).toEqual([
+      inProgressHighTaskId,
+      priorityTaskId,
+      firstMediumTaskId,
+    ]);
   });
 
   it('rejects unauthenticated and invalid-date requests', async () => {
