@@ -1,7 +1,7 @@
 'use client';
 
 import { Bot, CalendarDays, ListTodo, LogOut } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 interface AppShellProps {
   children: ReactNode;
@@ -10,11 +10,33 @@ interface AppShellProps {
   onLogout: () => void;
 }
 
+type DashboardSection = 'today' | 'tasks' | 'agent';
+
+function navigationClass(baseClass: string, section: DashboardSection, active: DashboardSection) {
+  return section === active ? `${baseClass} ${baseClass}--active` : baseClass;
+}
+
 export function AppShell({ children, agent, isLoggingOut, onLogout }: AppShellProps) {
+  const [activeSection, setActiveSection] = useState<DashboardSection>('today');
+
+  function selectSection(section: DashboardSection, targetId: string): void {
+    setActiveSection(section);
+
+    const target = document.getElementById(targetId);
+    if (target instanceof HTMLDetailsElement) {
+      target.open = true;
+    }
+  }
+
   return (
     <div className="dashboard-shell">
       <aside className="nav-rail">
-        <a className="nav-brand" href="#today-overview" aria-label="EV Dashboard 今日首页">
+        <a
+          className="nav-brand"
+          href="#today-overview"
+          aria-label="EV Dashboard 今日首页"
+          onClick={() => selectSection('today', 'today-overview')}
+        >
           <span className="nav-brand__mark" aria-hidden="true">
             EV
           </span>
@@ -25,15 +47,30 @@ export function AppShell({ children, agent, isLoggingOut, onLogout }: AppShellPr
         </a>
 
         <nav className="primary-nav" aria-label="主导航">
-          <a className="primary-nav__item primary-nav__item--active" href="#today-overview">
+          <a
+            className={navigationClass('primary-nav__item', 'today', activeSection)}
+            href="#today-overview"
+            aria-current={activeSection === 'today' ? 'location' : undefined}
+            onClick={() => selectSection('today', 'today-overview')}
+          >
             <CalendarDays aria-hidden="true" size={18} strokeWidth={1.8} />
             <span>今天</span>
           </a>
-          <a className="primary-nav__item" href="#today-tasks">
+          <a
+            className={navigationClass('primary-nav__item', 'tasks', activeSection)}
+            href="#today-tasks"
+            aria-current={activeSection === 'tasks' ? 'location' : undefined}
+            onClick={() => selectSection('tasks', 'today-tasks')}
+          >
             <ListTodo aria-hidden="true" size={18} strokeWidth={1.8} />
             <span>任务</span>
           </a>
-          <a className="primary-nav__item" href="#agent-status">
+          <a
+            className={navigationClass('primary-nav__item', 'agent', activeSection)}
+            href="#agent-status"
+            aria-current={activeSection === 'agent' ? 'location' : undefined}
+            onClick={() => selectSection('agent', 'agent-status')}
+          >
             <Bot aria-hidden="true" size={18} strokeWidth={1.8} />
             <span>Agent</span>
           </a>
@@ -60,15 +97,30 @@ export function AppShell({ children, agent, isLoggingOut, onLogout }: AppShellPr
       </aside>
 
       <nav className="mobile-nav" aria-label="移动端主导航">
-        <a className="mobile-nav__item mobile-nav__item--active" href="#today-overview">
+        <a
+          className={navigationClass('mobile-nav__item', 'today', activeSection)}
+          href="#today-overview"
+          aria-current={activeSection === 'today' ? 'location' : undefined}
+          onClick={() => selectSection('today', 'today-overview')}
+        >
           <CalendarDays aria-hidden="true" size={19} />
           <span>今天</span>
         </a>
-        <a className="mobile-nav__item" href="#today-tasks">
+        <a
+          className={navigationClass('mobile-nav__item', 'tasks', activeSection)}
+          href="#today-tasks"
+          aria-current={activeSection === 'tasks' ? 'location' : undefined}
+          onClick={() => selectSection('tasks', 'today-tasks')}
+        >
           <ListTodo aria-hidden="true" size={19} />
           <span>任务</span>
         </a>
-        <a className="mobile-nav__item" href="#agent-mobile">
+        <a
+          className={navigationClass('mobile-nav__item', 'agent', activeSection)}
+          href="#agent-mobile"
+          aria-current={activeSection === 'agent' ? 'location' : undefined}
+          onClick={() => selectSection('agent', 'agent-mobile')}
+        >
           <Bot aria-hidden="true" size={19} />
           <span>Agent</span>
         </a>
