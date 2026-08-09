@@ -60,7 +60,7 @@ export const taskListQuerySchema = z
       .number()
       .int()
       .transform((value) => Math.min(100, Math.max(1, value)))
-      .default(50),
+      .default(20),
     area: taskAreaSchema.optional(),
     status: taskStatusSchema.optional(),
     targetDate: localDateSchema.optional(),

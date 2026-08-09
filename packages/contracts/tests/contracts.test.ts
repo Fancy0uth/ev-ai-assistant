@@ -63,6 +63,10 @@ describe('task contracts', () => {
     expect(taskListQuerySchema.parse({ pageSize: '0' }).pageSize).toBe(1);
   });
 
+  it('defaults an omitted task list page size to twenty', () => {
+    expect(taskListQuerySchema.parse({}).pageSize).toBe(20);
+  });
+
   it('requires a version and at least one changed field for updates', () => {
     expect(updateTaskSchema.safeParse({ status: 'DONE' }).success).toBe(false);
     expect(updateTaskSchema.safeParse({ version: 1 }).success).toBe(false);
