@@ -17,7 +17,7 @@
 - [x] Task 1：冻结 provider-neutral Agent 公共契约。
 - [x] Task 2：扩展 Task 查询与 409 最新实体契约。
 - [x] Task 3：新增 migration 002 与 001→002 保留数据测试。
-- [ ] Task 4：实现 Owner 隔离 Agent Repository 与 Service。
+- [x] Task 4：实现 Owner 隔离 Agent Repository 与 Service。
 - [ ] Task 5：实现四组 Agent API 与可注入 Provider Port。
 - [ ] Task 6：修复 Today 对第 101 条以后任务的统计截断。
 - [ ] Task 7：Core 返回并 Web 保留 Task 409 服务端最新版本。
