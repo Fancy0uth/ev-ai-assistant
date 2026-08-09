@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAgentRepository } from '../src/modules/agent/repository';
 import {
   createAgentService,
@@ -91,6 +91,48 @@ describe('AgentService', () => {
     expect(firstPage.items.every((message) => !Object.hasOwn(message, 'ownerId'))).toBe(true);
   });
 
+  it('orders each pair causally despite reverse-sorted ids and keeps session time monotonic', async () => {
+    const ids = [
+      '00000000-0000-4000-8000-000000000010',
+      '00000000-0000-4000-8000-000000000099',
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000098',
+      '00000000-0000-4000-8000-000000000002',
+    ];
+    let idIndex = 0;
+    const service = createService(new FakeAgentProvider(['First reply', 'Second reply']), {
+      createId: () => {
+        const id = ids[idIndex++];
+        if (!id) throw new Error('Unexpected id request');
+        return id;
+      },
+    });
+    const session = service.createSession(ownerId, { title: 'Causal ordering' });
+
+    const first = await service.sendMessage(ownerId, session.id, { content: 'First question' });
+    currentTime = new Date('2026-08-09T00:00:00.000Z');
+    const second = await service.sendMessage(ownerId, session.id, { content: 'Second question' });
+    const messages = service.listMessages(ownerId, session.id, { page: 1, pageSize: 20 });
+
+    expect(Date.parse(first.userMessage.createdAt)).toBeGreaterThan(Date.parse(session.updatedAt));
+    expect(Date.parse(first.assistantMessage.createdAt)).toBeGreaterThan(
+      Date.parse(first.userMessage.createdAt),
+    );
+    expect(Date.parse(second.userMessage.createdAt)).toBeGreaterThan(
+      Date.parse(first.assistantMessage.createdAt),
+    );
+    expect(Date.parse(second.assistantMessage.createdAt)).toBeGreaterThan(
+      Date.parse(second.userMessage.createdAt),
+    );
+    expect(messages.items.map((message) => message.role)).toEqual([
+      'USER',
+      'ASSISTANT',
+      'USER',
+      'ASSISTANT',
+    ]);
+    expect(sessionUpdatedAt(session.id)).toBe(second.assistantMessage.createdAt);
+  });
+
   it('treats another owner session and messages as not found', async () => {
     const service = createService(new FakeAgentProvider(['Never returned']));
     const session = service.createSession(ownerId, { title: 'Private session' });
@@ -114,10 +156,13 @@ describe('AgentService', () => {
     expect(messageCount(session.id)).toBe(0);
   });
 
-  it('does not write a user message when the provider throws', async () => {
+  it('does not write a user message when the provider throws and releases later sends', async () => {
+    let attempts = 0;
     const service = createService({
       async generate() {
-        throw new Error('Provider network failure');
+        attempts += 1;
+        if (attempts === 1) throw new Error('Provider network failure');
+        return 'Recovered provider reply';
       },
     });
     const session = service.createSession(ownerId, { title: 'Throwing provider' });
@@ -126,6 +171,13 @@ describe('AgentService', () => {
       service.sendMessage(ownerId, session.id, { content: 'Trigger provider failure' }),
     ).rejects.toMatchObject({ statusCode: 503, code: 'AGENT_PROVIDER_UNAVAILABLE' });
     expect(messageCount(session.id)).toBe(0);
+    await expect(
+      service.sendMessage(ownerId, session.id, { content: 'Recover after provider failure' }),
+    ).resolves.toMatchObject({
+      userMessage: { content: 'Recover after provider failure' },
+      assistantMessage: { content: 'Recovered provider reply' },
+    });
+    expect(messageCount(session.id)).toBe(2);
   });
 
   it.each(['   ', 'x'.repeat(8001)])(
@@ -156,7 +208,7 @@ describe('AgentService', () => {
     expect(secondCall).toBeDefined();
     if (!secondCall) throw new Error('Provider did not receive the second message');
     expect(secondCall).toEqual({
-      session,
+      session: { ...session, updatedAt: first.assistantMessage.createdAt },
       history: [first.userMessage, first.assistantMessage],
       candidateUserMessage: second.userMessage,
     });
@@ -169,11 +221,70 @@ describe('AgentService', () => {
     expect(second.assistantMessage).not.toHaveProperty('ownerId');
   });
 
-  function createService(provider?: AgentProvider): AgentService {
+  it('serializes concurrent sends until the first pair persists and re-reads coherent history', async () => {
+    const firstReply = createDeferred<string>();
+    const calls: AgentProviderRequest[] = [];
+    const provider: AgentProvider = {
+      async generate(input) {
+        calls.push(input);
+        if (calls.length === 1) return firstReply.promise;
+        return 'Second reply';
+      },
+    };
+    const service = createService(provider);
+    const session = service.createSession(ownerId, { title: 'Concurrent sends' });
+
+    const firstPromise = service.sendMessage(ownerId, session.id, { content: 'First question' });
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    const secondPromise = service.sendMessage(ownerId, session.id, { content: 'Second question' });
+    expect(calls).toHaveLength(1);
+
+    firstReply.resolve('First reply');
+    const first = await firstPromise;
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    const second = await secondPromise;
+    const secondCall = calls[1];
+    expect(secondCall).toBeDefined();
+    if (!secondCall) throw new Error('Provider did not receive the second send');
+
+    expect(secondCall.history).toEqual([first.userMessage, first.assistantMessage]);
+    expect(Date.parse(second.userMessage.createdAt)).toBeGreaterThan(
+      Date.parse(first.assistantMessage.createdAt),
+    );
+    expect(sessionUpdatedAt(session.id)).toBe(second.assistantMessage.createdAt);
+  });
+
+  it('rolls back both message inserts and the session update when the assistant insert fails', async () => {
+    const duplicateId = '00000000-0000-4000-8000-000000000077';
+    const ids = ['00000000-0000-4000-8000-000000000010', duplicateId, duplicateId];
+    let idIndex = 0;
+    const service = createService(new FakeAgentProvider(['Reply that cannot persist']), {
+      createId: () => {
+        const id = ids[idIndex++];
+        if (!id) throw new Error('Unexpected id request');
+        return id;
+      },
+    });
+    const session = service.createSession(ownerId, { title: 'Rollback proof' });
+    const initialUpdatedAt = sessionUpdatedAt(session.id);
+
+    await expect(
+      service.sendMessage(ownerId, session.id, { content: 'Cause duplicate assistant id' }),
+    ).rejects.toThrow();
+    expect(messageCount(session.id)).toBe(0);
+    expect(sessionUpdatedAt(session.id)).toBe(initialUpdatedAt);
+  });
+
+  function createService(
+    provider?: AgentProvider,
+    overrides: { createId?: () => string } = {},
+  ): AgentService {
     return createAgentService(createAgentRepository(database), {
       ...(provider ? { provider } : {}),
       now: () => currentTime,
-      createId: () => `00000000-0000-4000-8000-${String(nextId++).padStart(12, '0')}`,
+      createId:
+        overrides.createId ??
+        (() => `00000000-0000-4000-8000-${String(nextId++).padStart(12, '0')}`),
     });
   }
 
@@ -189,5 +300,25 @@ describe('AgentService', () => {
         .prepare('select count(*) as count from agent_messages where session_id = ?')
         .get(sessionId) as { count: number }
     ).count;
+  }
+
+  function sessionUpdatedAt(sessionId: string): string {
+    return (
+      database
+        .prepare('select updated_at from agent_sessions where id = ?')
+        .get(sessionId) as { updated_at: string }
+    ).updated_at;
+  }
+
+  function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+  } {
+    let resolve: ((value: T) => void) | undefined;
+    const promise = new Promise<T>((promiseResolve) => {
+      resolve = promiseResolve;
+    });
+    if (!resolve) throw new Error('Deferred promise did not initialize');
+    return { promise, resolve };
   }
 });

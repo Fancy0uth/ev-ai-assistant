@@ -74,12 +74,48 @@ function toListResult<T>(page: { items: T[]; total: number }, query: AgentListQu
   };
 }
 
+function messageTimestamps(now: Date, previousUpdatedAt: string): {
+  userCreatedAt: string;
+  assistantCreatedAt: string;
+} {
+  const userMilliseconds = Math.max(now.getTime(), new Date(previousUpdatedAt).getTime() + 1);
+  const userCreatedAt = new Date(userMilliseconds);
+  const assistantCreatedAt = new Date(userMilliseconds + 1);
+  return {
+    userCreatedAt: userCreatedAt.toISOString(),
+    assistantCreatedAt: assistantCreatedAt.toISOString(),
+  };
+}
+
 export function createAgentService(
   repository: AgentRepository,
   options: AgentServiceOptions = {},
 ): AgentService {
   const now = options.now ?? (() => new Date());
   const createId = options.createId ?? randomUUID;
+  const sendLocks = new Map<string, Promise<void>>();
+
+  async function serializeSend<T>(
+    ownerId: string,
+    sessionId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const key = `${ownerId}:${sessionId}`;
+    const previous = sendLocks.get(key) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    sendLocks.set(key, current);
+    await previous;
+
+    try {
+      return await operation();
+    } finally {
+      release?.();
+      if (sendLocks.get(key) === current) sendLocks.delete(key);
+    }
+  }
 
   return {
     createSession(ownerId, input) {
@@ -103,55 +139,57 @@ export function createAgentService(
     },
 
     async sendMessage(ownerId, sessionId, input) {
-      const session = repository.findSession(ownerId, sessionId);
-      if (!session) throw sessionNotFound();
+      return serializeSend(ownerId, sessionId, async () => {
+        const session = repository.findSession(ownerId, sessionId);
+        if (!session) throw sessionNotFound();
 
-      const timestamp = now().toISOString();
-      const candidateUserMessage: AgentMessage & { role: 'USER' } = {
-        id: createId(),
-        sessionId,
-        role: 'USER',
-        content: input.content,
-        createdAt: timestamp,
-      };
-      if (!options.provider) {
-        throw new ApiError(
-          503,
-          'AGENT_PROVIDER_NOT_CONFIGURED',
-          'Agent Provider 尚未配置',
-        );
-      }
-      const history = repository.listMessageHistory(ownerId, sessionId);
+        const timestamps = messageTimestamps(now(), session.updatedAt);
+        const candidateUserMessage: AgentMessage & { role: 'USER' } = {
+          id: createId(),
+          sessionId,
+          role: 'USER',
+          content: input.content,
+          createdAt: timestamps.userCreatedAt,
+        };
+        if (!options.provider) {
+          throw new ApiError(
+            503,
+            'AGENT_PROVIDER_NOT_CONFIGURED',
+            'Agent Provider 尚未配置',
+          );
+        }
+        const history = repository.listMessageHistory(ownerId, sessionId);
 
-      let assistantContent: string;
-      try {
-        assistantContent = await options.provider.generate({
-          session,
-          history,
-          candidateUserMessage,
-        });
-      } catch {
-        throw providerUnavailable();
-      }
-      if (!validProviderContent(assistantContent)) throw providerUnavailable();
+        let assistantContent: string;
+        try {
+          assistantContent = await options.provider.generate({
+            session,
+            history,
+            candidateUserMessage,
+          });
+        } catch {
+          throw providerUnavailable();
+        }
+        if (!validProviderContent(assistantContent)) throw providerUnavailable();
 
-      const persisted = repository.appendMessagePair(
-        ownerId,
-        sessionId,
-        {
-          userMessage: candidateUserMessage,
-          assistantMessage: {
-            id: createId(),
-            sessionId,
-            role: 'ASSISTANT',
-            content: assistantContent,
-            createdAt: timestamp,
+        const persisted = repository.appendMessagePair(
+          ownerId,
+          sessionId,
+          {
+            userMessage: candidateUserMessage,
+            assistantMessage: {
+              id: createId(),
+              sessionId,
+              role: 'ASSISTANT',
+              content: assistantContent,
+              createdAt: timestamps.assistantCreatedAt,
+            },
           },
-        },
-        timestamp,
-      );
-      if (!persisted) throw sessionNotFound();
-      return persisted;
+          timestamps.assistantCreatedAt,
+        );
+        if (!persisted) throw sessionNotFound();
+        return persisted;
+      });
     },
   };
 }
