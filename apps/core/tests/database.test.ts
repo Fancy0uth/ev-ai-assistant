@@ -86,6 +86,74 @@ describe('SQLite lifecycle', () => {
     database.close();
   });
 
+  it('rejects agent session titles longer than the raw 80-character limit', () => {
+    const database = openDatabase(join(testDirectory, 'app.sqlite'));
+    try {
+      database
+        .prepare(
+          'insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)',
+        )
+        .run('owner-raw-title-limit', 'raw-title-owner', 'hash', '2026-08-10T00:00:00.000Z');
+
+      expect(() =>
+        database
+          .prepare(
+            `insert into agent_sessions (id, owner_id, title, created_at, updated_at)
+             values (?, ?, ?, ?, ?)`,
+          )
+          .run(
+            'agent-session-raw-title-limit',
+            'owner-raw-title-limit',
+            `${'A'.repeat(80)} `,
+            '2026-08-10T00:00:00.000Z',
+            '2026-08-10T00:00:00.000Z',
+          ),
+      ).toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rejects agent message content longer than the raw 8000-character limit', () => {
+    const database = openDatabase(join(testDirectory, 'app.sqlite'));
+    try {
+      database
+        .prepare(
+          'insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)',
+        )
+        .run('owner-raw-content-limit', 'raw-content-owner', 'hash', '2026-08-10T00:00:00.000Z');
+      database
+        .prepare(
+          `insert into agent_sessions (id, owner_id, title, created_at, updated_at)
+           values (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'agent-session-raw-content-limit',
+          'owner-raw-content-limit',
+          'Valid session',
+          '2026-08-10T00:00:00.000Z',
+          '2026-08-10T00:00:00.000Z',
+        );
+
+      expect(() =>
+        database
+          .prepare(
+            `insert into agent_messages (id, session_id, role, content, created_at)
+             values (?, ?, ?, ?, ?)`,
+          )
+          .run(
+            'agent-message-raw-content-limit',
+            'agent-session-raw-content-limit',
+            'USER',
+            `${'A'.repeat(8000)} `,
+            '2026-08-10T00:00:00.000Z',
+          ),
+      ).toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
   it('upgrades a frozen migration 001 database without changing old rows', () => {
     const databasePath = join(testDirectory, 'app.sqlite');
     const owner = {

@@ -58,7 +58,10 @@ const migrations: readonly Migration[] = [
       create table agent_sessions (
         id text not null primary key,
         owner_id text not null references owners(id) on delete cascade,
-        title text not null check (length(trim(title)) between 1 and 80),
+        title text not null check (
+          length(title) between 1 and 80
+          and length(trim(title)) > 0
+        ),
         created_at text not null,
         updated_at text not null
       );
@@ -69,7 +72,10 @@ const migrations: readonly Migration[] = [
         id text not null primary key,
         session_id text not null references agent_sessions(id) on delete cascade,
         role text not null check (role in ('USER', 'ASSISTANT')),
-        content text not null check (length(trim(content)) between 1 and 8000),
+        content text not null check (
+          length(content) between 1 and 8000
+          and length(trim(content)) > 0
+        ),
         created_at text not null
       );
 
