@@ -2,7 +2,8 @@ interface RouteContext {
   params: Promise<{ path: string[] }>;
 }
 
-const FORWARDED_REQUEST_HEADERS = ['content-type', 'cookie'] as const;
+const ALLOWED_CORE_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const FORWARDED_REQUEST_HEADERS = ['content-type'] as const;
 const FORWARDED_RESPONSE_HEADERS = ['content-type', 'set-cookie'] as const;
 
 function coreBaseUrl(): string {
@@ -14,11 +15,25 @@ function coreBaseUrl(): string {
     url.password ||
     url.pathname !== '/' ||
     url.search ||
-    url.hash
+    url.hash ||
+    !ALLOWED_CORE_HOSTNAMES.has(url.hostname)
   ) {
     throw new Error('EV_CORE_URL must contain only an HTTP(S) origin');
   }
   return url.origin;
+}
+
+function sessionCookie(rawCookie: string | null): string | null {
+  if (!rawCookie) return null;
+
+  for (const part of rawCookie.split(';')) {
+    const cookie = part.trim();
+    const separator = cookie.indexOf('=');
+    if (separator <= 0 || cookie.slice(0, separator).trim() !== 'ev_session') continue;
+    return `ev_session=${cookie.slice(separator + 1)}`;
+  }
+
+  return null;
 }
 
 function safePath(segments: string[]): string | null {
@@ -63,6 +78,8 @@ async function proxyToCore(request: Request, context: RouteContext): Promise<Res
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
+  const cookie = sessionCookie(request.headers.get('cookie'));
+  if (cookie) headers.set('cookie', cookie);
   const init: RequestInit = {
     method: request.method,
     headers,
