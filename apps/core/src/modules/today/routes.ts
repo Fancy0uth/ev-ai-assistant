@@ -24,19 +24,15 @@ export async function registerTodayRoutes(
       request.query,
       'Today 查询日期不符合要求',
     );
-    const taskPage = taskService.list(authenticatedOwnerId(request), {
-      page: 1,
-      pageSize: 100,
-      targetDate: date,
-    });
+    const tasks = taskService.listForDate(authenticatedOwnerId(request), date);
     const yesterday = null;
-    const status = calculateDailyStatus({ tasks: taskPage.items, yesterday });
+    const status = calculateDailyStatus({ tasks, yesterday });
 
     return todaySnapshotSchema.parse({
       data: {
         date,
         status,
-        tasks: taskPage.items,
+        tasks,
         yesterday,
         agents: {
           deepSeek: 'NOT_CONFIGURED',

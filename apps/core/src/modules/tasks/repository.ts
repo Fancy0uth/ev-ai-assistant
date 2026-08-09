@@ -38,6 +38,7 @@ export interface TaskRepository {
   create(task: NewTask): Task;
   findById(ownerId: string, id: string): Task | undefined;
   list(ownerId: string, query: TaskListQuery): TaskPage;
+  listForDate(ownerId: string, targetDate: string): Task[];
   update(ownerId: string, id: string, update: TaskUpdate): Task | undefined;
 }
 
@@ -150,6 +151,32 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
         .prepare(`select count(*) as total from tasks where ${where}`)
         .get(ownerId, targetDate, targetDate) as { total: number };
       return { items: rows.map(toTask), total: total.total };
+    },
+
+    listForDate(ownerId, targetDate) {
+      const rows = database
+        .prepare(
+          `select ${taskColumns}
+           from tasks
+           where owner_id = ? and target_date = ?
+           order by
+             case status
+               when 'IN_PROGRESS' then 0
+               when 'OPEN' then 1
+               when 'DEFERRED' then 2
+               when 'DONE' then 3
+               else 4
+             end,
+             case priority
+               when 'HIGH' then 0
+               when 'MEDIUM' then 1
+               else 2
+             end,
+             created_at asc,
+             id asc`,
+        )
+        .all(ownerId, targetDate) as TaskRow[];
+      return rows.map(toTask);
     },
 
     update(ownerId, id, update) {

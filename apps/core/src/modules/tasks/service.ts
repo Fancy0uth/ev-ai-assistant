@@ -20,6 +20,7 @@ interface TaskServiceOptions {
 export interface TaskService {
   create(ownerId: string, input: CreateTaskInput): Task;
   list(ownerId: string, query: TaskListQuery): TaskListResult;
+  listForDate(ownerId: string, targetDate: string): Task[];
   update(ownerId: string, id: string, input: UpdateTaskInput): Task;
 }
 
@@ -62,6 +63,10 @@ export function createTaskService(
           totalPages: Math.ceil(page.total / query.pageSize),
         },
       };
+    },
+
+    listForDate(ownerId, targetDate) {
+      return repository.listForDate(ownerId, targetDate);
     },
 
     update(ownerId, id, input) {
