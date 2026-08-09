@@ -3,11 +3,16 @@ interface RouteContext {
 }
 
 const ALLOWED_CORE_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const CORE_ORIGIN_PATTERN =
+  /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/?$/;
 const FORWARDED_REQUEST_HEADERS = ['content-type'] as const;
 const FORWARDED_RESPONSE_HEADERS = ['content-type', 'set-cookie'] as const;
 
 function coreBaseUrl(): string {
   const value = process.env.EV_CORE_URL ?? 'http://127.0.0.1:4311';
+  if (CORE_ORIGIN_PATTERN.exec(value)?.[0] !== value) {
+    throw new Error('EV_CORE_URL must contain only an HTTP(S) origin');
+  }
   const url = new URL(value);
   if (
     !['http:', 'https:'].includes(url.protocol) ||

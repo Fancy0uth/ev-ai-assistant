@@ -61,10 +61,12 @@ describe('Core BFF proxy', () => {
   });
 
   it.each([
-    ['IPv4 loopback', 'http://127.0.0.1:4311'],
-    ['localhost', 'https://localhost:4312'],
-    ['IPv6 loopback', 'http://[::1]:4313'],
-  ])('allows the exact %s Core hostname with its port intact', async (_label, coreUrl) => {
+    ['IPv4 loopback', 'http://127.0.0.1:4311', 'http://127.0.0.1:4311'],
+    ['localhost', 'https://localhost:4312', 'https://localhost:4312'],
+    ['IPv6 loopback', 'http://[::1]:4313', 'http://[::1]:4313'],
+    ['IPv4 loopback without a port', 'http://127.0.0.1', 'http://127.0.0.1'],
+    ['localhost with a single trailing slash', 'https://localhost/', 'https://localhost'],
+  ])('allows exact %s Core hostname forms and preserves configured ports', async (_label, coreUrl, origin) => {
     vi.stubEnv('EV_CORE_URL', coreUrl);
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -76,7 +78,7 @@ describe('Core BFF proxy', () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
-      `${coreUrl}/v1/system/health?full=1`,
+      `${origin}/v1/system/health?full=1`,
       expect.any(Object),
     );
   });
@@ -86,7 +88,29 @@ describe('Core BFF proxy', () => {
     ['localhost suffix', 'http://localhost.evil.test:4311'],
     ['IPv4 suffix', 'http://127.0.0.1.evil.test:4311'],
     ['localhost prefix', 'http://evil-localhost:4311'],
+    ['out-of-range port', 'http://localhost:65536'],
   ])('rejects a Core URL with an %s before fetching', async (_label, coreUrl) => {
+    vi.stubEnv('EV_CORE_URL', coreUrl);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(
+      new Request('http://web.local/api/core/auth/login', { method: 'POST' }),
+      { params: Promise.resolve({ path: ['auth', 'login'] }) },
+    );
+
+    expect(response.status).toBe(500);
+    expect((await response.json()).error.code).toBe('CORE_CONFIGURATION_ERROR');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['empty userinfo', 'http://@localhost:4311'],
+    ['dot-segment path', 'http://localhost:4311/a/..'],
+    ['encoded dot path', 'http://localhost:4311/%2e'],
+    ['bare query delimiter', 'http://localhost:4311?'],
+    ['bare hash delimiter', 'http://localhost:4311#'],
+  ])('rejects a Core URL with a normalized %s before fetching', async (_label, coreUrl) => {
     vi.stubEnv('EV_CORE_URL', coreUrl);
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
