@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type {
+  AgentMessageListQuery,
+  AgentSessionListQuery,
+  CreateAgentSessionInput,
+} from '../src/index';
 import {
   agentCapabilityResponseSchema,
   agentMessageListQuerySchema,
@@ -106,20 +111,23 @@ describe('agent contracts', () => {
   };
 
   it('accepts the provider-neutral capability response without exposing an owner', () => {
+    const capability = {
+      key: 'CONVERSATION',
+      label: '  对话  ',
+      availability: 'NOT_CONFIGURED',
+      description: '  连接 API 后可以进行对话。  ',
+    };
+
     expect(
       agentCapabilityResponseSchema.safeParse({
         data: {
-          items: [
-            {
-              key: 'CONVERSATION',
-              label: '对话',
-              availability: 'NOT_CONFIGURED',
-              description: '连接 API 后可以进行对话。',
-            },
-          ],
+          items: [capability],
         },
       }).success,
     ).toBe(true);
+    expect(agentCapabilityResponseSchema.parse({ data: { items: [capability] } }).data.items).toEqual([
+      capability,
+    ]);
     expect(
       agentCapabilityResponseSchema.safeParse({
         data: { items: [], ownerId: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c' },
@@ -137,6 +145,14 @@ describe('agent contracts', () => {
     expect(agentMessageListQuerySchema.safeParse({ pageSize: '20', extra: 'nope' }).success).toBe(
       false,
     );
+  });
+
+  it('accepts ergonomic request input types before parsing defaults and query strings', () => {
+    const createSessionInput: CreateAgentSessionInput = {};
+    const sessionListInput: AgentSessionListQuery = { page: '2', pageSize: '100' };
+    const messageListInput: AgentMessageListQuery = {};
+
+    expect([createSessionInput, sessionListInput, messageListInput]).toHaveLength(3);
   });
 
   it('accepts strict session list and create response resources', () => {
@@ -186,6 +202,34 @@ describe('agent contracts', () => {
     expect(
       sendAgentMessageSchema.safeParse({ content: '请安排健身任务', provider: 'vendor-name' }).success,
     ).toBe(false);
+  });
+
+  it('rejects raw oversized request values before normalizing message content and session titles', () => {
+    expect(sendAgentMessageSchema.safeParse({ content: ` ${'x'.repeat(8000)}` }).success).toBe(
+      false,
+    );
+    expect(createAgentSessionSchema.safeParse({ title: ` ${'x'.repeat(80)}` }).success).toBe(false);
+    expect(sendAgentMessageSchema.parse({ content: '  安排健身任务  ' })).toEqual({
+      content: '安排健身任务',
+    });
+    expect(createAgentSessionSchema.parse({ title: '  研究计划  ' })).toEqual({ title: '研究计划' });
+  });
+
+  it('preserves whitespace when parsing persisted session and message resources', () => {
+    const persistedTitle = '  研究计划  ';
+    const persistedMessageContent = '  梳理今天的学习任务  ';
+
+    expect(
+      agentSessionResponseSchema.parse({ data: { ...session, title: persistedTitle } }).data.title,
+    ).toBe(persistedTitle);
+    expect(
+      agentMessageListResponseSchema.parse({
+        data: {
+          items: [{ ...userMessage, content: persistedMessageContent }],
+          pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+        },
+      }).data.items,
+    ).toEqual([{ ...userMessage, content: persistedMessageContent }]);
   });
 
   it('requires both persisted user and assistant messages after a successful send', () => {

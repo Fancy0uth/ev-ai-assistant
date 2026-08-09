@@ -10,13 +10,25 @@ export const agentCapabilityAvailabilitySchema = z.enum([
 export const agentCapabilitySchema = z
   .object({
     key: agentCapabilityKeySchema,
-    label: z.string().trim().min(1).max(80),
+    label: z
+      .string()
+      .min(1)
+      .max(80)
+      .refine((value) => value.trim().length > 0, '标签不能为空'),
     availability: agentCapabilityAvailabilitySchema,
-    description: z.string().trim().min(1).max(8000),
+    description: z
+      .string()
+      .min(1)
+      .max(8000)
+      .refine((value) => value.trim().length > 0, '描述不能为空'),
   })
   .strict();
 
-export const agentSessionTitleSchema = z.string().trim().min(1).max(80);
+export const agentSessionTitleSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .refine((value) => value.trim().length > 0, '标题不能为空');
 
 export const agentSessionSchema = z
   .object({
@@ -28,7 +40,11 @@ export const agentSessionSchema = z
   .strict();
 
 export const agentMessageRoleSchema = z.enum(['USER', 'ASSISTANT']);
-export const agentMessageContentSchema = z.string().trim().min(1).max(8000);
+export const agentMessageContentSchema = z
+  .string()
+  .min(1)
+  .max(8000)
+  .refine((value) => value.trim().length > 0, '内容不能为空');
 
 export const agentMessageSchema = z
   .object({
@@ -57,15 +73,18 @@ const agentListQueryShape = {
 export const agentSessionListQuerySchema = z.object(agentListQueryShape).strict();
 export const agentMessageListQuerySchema = z.object(agentListQueryShape).strict();
 
+const normalizedAgentSessionTitleSchema = agentSessionTitleSchema.transform((value) => value.trim());
+const normalizedAgentMessageContentSchema = agentMessageContentSchema.transform((value) => value.trim());
+
 export const createAgentSessionSchema = z
   .object({
-    title: agentSessionTitleSchema.default('新会话'),
+    title: normalizedAgentSessionTitleSchema.default('新会话'),
   })
   .strict();
 
 export const sendAgentMessageSchema = z
   .object({
-    content: agentMessageContentSchema,
+    content: normalizedAgentMessageContentSchema,
   })
   .strict();
 
@@ -130,7 +149,7 @@ export type AgentSession = z.infer<typeof agentSessionSchema>;
 export type AgentMessageRole = z.infer<typeof agentMessageRoleSchema>;
 export type AgentMessage = z.infer<typeof agentMessageSchema>;
 export type AgentPagination = z.infer<typeof agentPaginationSchema>;
-export type AgentSessionListQuery = z.infer<typeof agentSessionListQuerySchema>;
-export type AgentMessageListQuery = z.infer<typeof agentMessageListQuerySchema>;
-export type CreateAgentSessionInput = z.infer<typeof createAgentSessionSchema>;
-export type SendAgentMessageInput = z.infer<typeof sendAgentMessageSchema>;
+export type AgentSessionListQuery = z.input<typeof agentSessionListQuerySchema>;
+export type AgentMessageListQuery = z.input<typeof agentMessageListQuerySchema>;
+export type CreateAgentSessionInput = z.input<typeof createAgentSessionSchema>;
+export type SendAgentMessageInput = z.input<typeof sendAgentMessageSchema>;
