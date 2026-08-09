@@ -30,7 +30,7 @@ export async function registerAgentRoutes(
   const { authService, agentService, agentProvider } = options;
   const authGuard = createAuthGuard(authService);
 
-  app.get('/v1/agent/capabilities', { preHandler: authGuard }, async (request) => {
+  app.get('/v1/agent/capabilities', { onRequest: authGuard, exposeHeadRoute: false }, async (request) => {
     authenticatedOwnerId(request);
     return agentCapabilityResponseSchema.parse({
       data: {
@@ -46,7 +46,7 @@ export async function registerAgentRoutes(
     });
   });
 
-  app.get('/v1/agent/sessions', { preHandler: authGuard }, async (request) => {
+  app.get('/v1/agent/sessions', { onRequest: authGuard, exposeHeadRoute: false }, async (request) => {
     const ownerId = authenticatedOwnerId(request);
     const query = parseRequestInput(
       agentSessionListQuerySchema,
@@ -58,7 +58,7 @@ export async function registerAgentRoutes(
     });
   });
 
-  app.post('/v1/agent/sessions', { preHandler: authGuard }, async (request, reply) => {
+  app.post('/v1/agent/sessions', { onRequest: authGuard }, async (request, reply) => {
     const ownerId = authenticatedOwnerId(request);
     const input = parseRequestInput(
       createAgentSessionSchema,
@@ -69,7 +69,7 @@ export async function registerAgentRoutes(
     return reply.status(201).send(agentSessionResponseSchema.parse({ data: session }));
   });
 
-  app.get('/v1/agent/sessions/:id/messages', { preHandler: authGuard }, async (request) => {
+  app.get('/v1/agent/sessions/:id/messages', { onRequest: authGuard, exposeHeadRoute: false }, async (request) => {
     const ownerId = authenticatedOwnerId(request);
     const { id } = parseRequestInput(
       agentSessionPathParamsSchema,
@@ -86,7 +86,7 @@ export async function registerAgentRoutes(
     });
   });
 
-  app.post('/v1/agent/sessions/:id/messages', { preHandler: authGuard }, async (request, reply) => {
+  app.post('/v1/agent/sessions/:id/messages', { onRequest: authGuard }, async (request, reply) => {
     const ownerId = authenticatedOwnerId(request);
     const { id } = parseRequestInput(
       agentSessionPathParamsSchema,

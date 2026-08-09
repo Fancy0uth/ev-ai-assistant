@@ -111,6 +111,50 @@ describe('authenticated agent conversation API', () => {
     }
   });
 
+  it('does not expose Agent GET resources through authenticated HEAD requests', async () => {
+    const token = await createAuthenticatedApp();
+    const created = await app!.inject({
+      method: 'POST',
+      url: '/v1/agent/sessions',
+      cookies: { ev_session: token },
+      payload: { title: 'HEAD protection' },
+    });
+    const session = agentSessionResponseSchema.parse(created.json()).data;
+    const urls = [
+      '/v1/agent/capabilities',
+      '/v1/agent/sessions',
+      `/v1/agent/sessions/${session.id}/messages`,
+    ];
+
+    for (const url of urls) {
+      const response = await app!.inject({
+        method: 'HEAD',
+        url,
+        cookies: { ev_session: token },
+      });
+      expect(response.statusCode).toBe(404);
+    }
+  });
+
+  it('authenticates malformed Agent POSTs before JSON parsing', async () => {
+    app = await buildApp({ databasePath, logger: false });
+    const requests = [
+      { url: '/v1/agent/sessions' },
+      { url: `/v1/agent/sessions/${missingSessionId}/messages` },
+    ];
+
+    for (const request of requests) {
+      const response = await app.inject({
+        method: 'POST',
+        url: request.url,
+        headers: { 'content-type': 'application/json' },
+        payload: '{"content":',
+      });
+      expect(response.statusCode).toBe(401);
+      expect(apiErrorSchema.parse(response.json()).error.code).toBe('AUTHENTICATION_REQUIRED');
+    }
+  });
+
   it('reports provider-neutral conversation capability without invoking an injected provider', async () => {
     const provider = new FakeAgentProvider('This reply must not be generated');
     const token = await createAuthenticatedApp(provider);
