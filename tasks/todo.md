@@ -9,12 +9,12 @@
 
 ## 规格门
 
-- [ ] 主 Agent 复核并冻结 v0.2.0 改进设计、接口与实施边界。
-- [ ] 在结构性编码前运行 Sentrux `session_start`。
+- [x] 主 Agent 复核并冻结 v0.2.0 改进设计、接口与实施边界。
+- [x] 在结构性编码前运行 Sentrux `session_start`。
 
 ## 契约、迁移与 Core Agent
 
-- [ ] Task 1：冻结 provider-neutral Agent 公共契约。
+- [x] Task 1：冻结 provider-neutral Agent 公共契约。
 - [ ] Task 2：扩展 Task 查询与 409 最新实体契约。
 - [ ] Task 3：新增 migration 002 与 001→002 保留数据测试。
 - [ ] Task 4：实现 Owner 隔离 Agent Repository 与 Service。
