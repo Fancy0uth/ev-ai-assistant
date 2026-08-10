@@ -27,8 +27,8 @@
 - [x] Task 8：BFF 仅允许 loopback 并只转发 `ev_session`。
 - [x] Task 9：实现根路由、setup/login/session 启动解析和单 Owner 表单门禁。
 - [x] Task 10：建立 `/today`、`/tasks`、`/agent` 共享认证 Shell 与可访问导航。
-- [ ] Task 11：实现 Tasks 分页、领域/状态/日期筛选与列表状态。
-- [ ] Task 11A：Core 在分页前执行领域、状态与日期筛选（审查新增 P1）。
+- [x] Task 11：实现 Tasks 分页、领域/状态/日期筛选与列表状态。
+- [x] Task 11A：Core 在分页前执行领域、状态与日期筛选（审查新增 P1）。
 - [ ] Task 12：实现 Tasks 创建、编辑、完成、延期、取消和 409 恢复。
 - [ ] Task 13：修复 Today 201+刷新失败重复创建、长标题与移动表单字号。
 - [ ] Task 14：实现 `/agent` 会话/消息/上下文/输入 UI 和未配置禁用状态。
