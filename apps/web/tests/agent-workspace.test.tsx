@@ -476,6 +476,53 @@ describe('AgentWorkspace', () => {
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=1&pageSize=20')).toHaveLength(2);
   });
 
+  it('keeps a pending created session visible until a trusted first page includes it', async () => {
+    const createdSession = { ...sessionOne, id: '00000000-0000-4000-8000-000000000013', title: '待确认创建会话' };
+    let sessionReads = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/core/agent/capabilities') return Promise.resolve(jsonResponse(capabilityResponse('READY')));
+      if (String(input) === '/api/core/agent/sessions?page=1&pageSize=20') {
+        sessionReads += 1;
+        if (sessionReads < 3) return Promise.resolve(jsonResponse(sessionsResponse([sessionOne], 1, 20, 20, 1)));
+        return Promise.resolve(jsonResponse(sessionsResponse([createdSession, sessionOne], 1, 20, 21, 2)));
+      }
+      if (String(input) === '/api/core/agent/sessions?page=2&pageSize=20') {
+        return Promise.resolve(jsonResponse(sessionsResponse([sessionTwo], 2, 20, 21, 2)));
+      }
+      if (String(input) === '/api/core/agent/sessions' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: createdSession }, 201));
+      }
+      if (String(input) === `/api/core/agent/sessions/${createdSession.id}/messages?page=1&pageSize=100`) {
+        return Promise.resolve(jsonResponse(messageResponse(createdSession.id)));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<AgentWorkspace />);
+    await screen.findByRole('button', { name: sessionOne.title });
+    await user.click(screen.getByRole('button', { name: '新建会话' }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=1&pageSize=20')).toHaveLength(2);
+    });
+    expect(await screen.findByRole('button', { name: createdSession.title })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByRole('button', { name: createdSession.title })).toHaveLength(1);
+    expect(screen.getByText('第 1 / 2 页')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一页会话' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: '下一页会话' }));
+    expect(await screen.findByRole('button', { name: sessionTwo.title })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '上一页会话' }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=1&pageSize=20')).toHaveLength(3);
+    });
+    expect(screen.getAllByRole('button', { name: createdSession.title })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: createdSession.title })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('keeps the last trusted sessions page usable when the requested page fails', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       if (String(input) === '/api/core/agent/capabilities') return Promise.resolve(jsonResponse(capabilityResponse('READY')));
@@ -500,6 +547,12 @@ describe('AgentWorkspace', () => {
     expect(screen.getByRole('button', { name: '下一页会话' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '重新加载会话' })).toBeEnabled();
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=2&pageSize=20')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: '下一页会话' }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=2&pageSize=20')).toHaveLength(2);
+    });
   });
 
   it('issues at most one send POST for duplicate submit events', async () => {

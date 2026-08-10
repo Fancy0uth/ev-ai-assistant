@@ -23,6 +23,33 @@ interface LoadedMessages {
   page: MessagePage;
 }
 
+function sessionPageWithPendingCreatedSession(
+  page: SessionPage | null,
+  pendingCreatedSession: AgentSession | null,
+): SessionPage | null {
+  if (
+    !pendingCreatedSession ||
+    (page && page.pagination.page !== 1) ||
+    page?.items.some((session) => session.id === pendingCreatedSession.id)
+  ) {
+    return page;
+  }
+
+  const pageSize = page?.pagination.pageSize ?? 20;
+  const total = (page?.pagination.total ?? 0) + 1;
+  return {
+    items: [pendingCreatedSession, ...(page?.items ?? [])]
+      .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index)
+      .slice(0, pageSize),
+    pagination: {
+      page: 1,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+  };
+}
+
 class UntrustedMessagePageError extends Error {
   constructor() {
     super('本地 Core 返回的消息不属于当前会话，请重新加载后重试。');
@@ -93,6 +120,7 @@ export function AgentWorkspace() {
   const [sessionPageNumber, setSessionPageNumber] = useState(1);
   const [sessionReloadKey, setSessionReloadKey] = useState(0);
   const [sessions, setSessions] = useState<SessionPage | null>(null);
+  const [pendingCreatedSession, setPendingCreatedSession] = useState<AgentSession | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<AgentSession | null>(null);
@@ -159,15 +187,21 @@ export function AgentWorkspace() {
     sessionRequestController.current?.abort();
     sessionRequestController.current = controller;
     const requestId = ++sessionRequestId.current;
-    const keepsCurrentPage = sessionsRef.current?.pagination.page === sessionPageNumber;
+    const requestedPage = sessionPageNumber;
+    const keepsCurrentPage = sessionsRef.current?.pagination.page === requestedPage;
     setSessionsLoading(!keepsCurrentPage);
     setSessionsError(null);
 
-    void requestCore(sessionPageQuery(sessionPageNumber), { method: 'GET', signal: controller.signal })
+    void requestCore(sessionPageQuery(requestedPage), { method: 'GET', signal: controller.signal })
       .then((payload) => agentSessionListResponseSchema.parse(payload).data)
       .then((page) => {
         if (controller.signal.aborted || requestId !== sessionRequestId.current) return;
         setSessions(page);
+        if (requestedPage === 1 && page.pagination.page === 1) {
+          setPendingCreatedSession((current) =>
+            current && page.items.some((session) => session.id === current.id) ? null : current,
+          );
+        }
         setSessionsLoading(false);
       })
       .catch((error: unknown) => {
@@ -288,6 +322,18 @@ export function AgentWorkspace() {
     setCapabilityReloadKey((current) => current + 1);
   }, []);
 
+  const retrySessions = useCallback(() => {
+    setSessionReloadKey((current) => current + 1);
+  }, []);
+
+  const requestSessionPage = useCallback((page: number) => {
+    if (page === sessionPageNumber) {
+      setSessionReloadKey((current) => current + 1);
+      return;
+    }
+    setSessionPageNumber(page);
+  }, [sessionPageNumber]);
+
   const createSession = useCallback(async () => {
     if (createInFlight.current) return;
     createInFlight.current = true;
@@ -304,24 +350,8 @@ export function AgentWorkspace() {
         kind: isConversationReady(capability) ? 'input' : 'session',
         sessionId: createdSession.id,
       };
-      setSessions((current) => {
-        const pageSize = current?.pagination.pageSize ?? 20;
-        const total = (current?.pagination.total ?? 0) + 1;
-        return {
-          items: [createdSession, ...(current?.items.filter((item) => item.id !== createdSession.id) ?? [])].slice(
-            0,
-            pageSize,
-          ),
-          pagination: {
-            page: 1,
-            pageSize,
-            total,
-            totalPages: Math.ceil(total / pageSize),
-          },
-        };
-      });
-      setSessionPageNumber(1);
-      setSessionReloadKey((current) => current + 1);
+      setPendingCreatedSession(createdSession);
+      requestSessionPage(1);
       selectSession(createdSession);
     } catch (error) {
       if (isCanonicalAuthenticationError(error)) {
@@ -333,7 +363,7 @@ export function AgentWorkspace() {
       createInFlight.current = false;
       setIsCreating(false);
     }
-  }, [capability, replace, selectSession]);
+  }, [capability, replace, requestSessionPage, selectSession]);
 
   const sendMessage = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -418,7 +448,8 @@ export function AgentWorkspace() {
     [capability, draft, messages, missingSessionId, replace, selectedSession],
   );
 
-  const displayedSessionPage = sessions;
+  const displayedSessionPage = sessionPageWithPendingCreatedSession(sessions, pendingCreatedSession);
+  const displayedSessionItems = displayedSessionPage?.items ?? [];
   const currentMessages =
     messages && messages.sessionId === selectedSession?.id ? messages.page.items : null;
   const canWrite =
@@ -453,15 +484,15 @@ export function AgentWorkspace() {
         {sessionsError ? (
           <div className="agent-inline-error" role="alert">
             <p>{sessionsError}</p>
-            <button type="button" onClick={() => setSessionReloadKey((current) => current + 1)}>重新加载会话</button>
+            <button type="button" onClick={retrySessions}>重新加载会话</button>
           </div>
         ) : null}
 
         {sessionsLoading && !displayedSessionPage ? (
           <p className="agent-loading" role="status">正在加载会话…</p>
-        ) : displayedSessionPage?.items.length ? (
+        ) : displayedSessionItems.length ? (
           <ul className="agent-session-list" aria-label="会话列表">
-            {displayedSessionPage.items.map((session) => (
+            {displayedSessionItems.map((session) => (
               <li key={session.id}>
                 <button
                   ref={(element) => {
@@ -488,7 +519,7 @@ export function AgentWorkspace() {
             type="button"
             disabled={!displayedSessionPage || displayedSessionPage.pagination.page <= 1 || sessionsLoading}
             onClick={() =>
-              setSessionPageNumber(Math.max(1, (displayedSessionPage?.pagination.page ?? 1) - 1))
+              requestSessionPage(Math.max(1, (displayedSessionPage?.pagination.page ?? 1) - 1))
             }
           >
             上一页会话
@@ -504,7 +535,7 @@ export function AgentWorkspace() {
               displayedSessionPage.pagination.page >= displayedSessionPage.pagination.totalPages ||
               sessionsLoading
             }
-            onClick={() => setSessionPageNumber((displayedSessionPage?.pagination.page ?? 0) + 1)}
+            onClick={() => requestSessionPage((displayedSessionPage?.pagination.page ?? 0) + 1)}
           >
             下一页会话
           </button>
