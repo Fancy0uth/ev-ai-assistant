@@ -1098,3 +1098,203 @@
     animation: none;
   }
 }
+
+.tasks-workspace {
+  max-width: 70rem;
+}
+
+.tasks-workspace__header h1 {
+  margin: var(--space-2) 0 0;
+  color: var(--ink-950);
+  font-size: clamp(1.85rem, 3.2vw, 3.25rem);
+  letter-spacing: -0.05em;
+  line-height: 1.04;
+}
+
+.tasks-workspace__header > div > p:last-child {
+  max-width: 38rem;
+  margin: var(--space-3) 0 0;
+  color: #59635f;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.tasks-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-6) 0 0;
+  padding: var(--space-4);
+  background: var(--paper-50);
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-md);
+}
+
+.tasks-filters legend {
+  padding: 0 var(--space-1);
+  color: var(--ink-700);
+  font-size: 0.6875rem;
+  font-weight: 750;
+}
+
+.tasks-filters label {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--ink-700);
+  font-size: 0.625rem;
+  font-weight: 750;
+}
+
+.tasks-filters select {
+  width: 100%;
+  min-height: 2.625rem;
+  padding: 0 var(--space-3);
+  color: var(--ink-950);
+  background: #ffffff;
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+}
+
+.tasks-filters select:focus {
+  border-color: var(--cyan-600);
+  box-shadow: 0 0 0 0.1875rem var(--cyan-100);
+  outline: none;
+}
+
+.tasks-result-summary {
+  margin: var(--space-5) 0 var(--space-2);
+  color: #737d79;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.625rem;
+}
+
+.tasks-readonly-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  background: var(--paper-50);
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-md);
+  list-style: none;
+  overflow: hidden;
+}
+
+.tasks-readonly-row {
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--paper-200);
+}
+
+.tasks-readonly-row:first-child {
+  border-top: 0;
+}
+
+.tasks-readonly-row h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink-900);
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-readonly-row dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0 0;
+}
+
+.tasks-readonly-row dl div {
+  display: flex;
+  gap: var(--space-1);
+  color: #6f7975;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.625rem;
+}
+
+.tasks-readonly-row dt::after {
+  content: '：';
+}
+
+.tasks-readonly-row dd {
+  margin: 0;
+  color: var(--ink-800);
+}
+
+.tasks-empty {
+  margin-top: var(--space-5);
+}
+
+.tasks-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.tasks-pagination span {
+  color: #737d79;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.625rem;
+}
+
+.tasks-pagination button,
+.tasks-failure button {
+  min-height: 2.5rem;
+  padding: 0 var(--space-4);
+  color: var(--ink-800);
+  background: var(--paper-50);
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 750;
+}
+
+.tasks-pagination button:hover:not(:disabled),
+.tasks-failure button:hover:not(:disabled) {
+  color: var(--cyan-600);
+  border-color: var(--cyan-600);
+}
+
+.tasks-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tasks-loading {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 70rem;
+  animation: skeleton-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.tasks-loading span {
+  display: block;
+  height: 5rem;
+  background: #dcd8cf;
+  border-radius: var(--radius-md);
+}
+
+@media (max-width: 42rem) {
+  .tasks-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .tasks-filters select,
+  .tasks-pagination button {
+    min-height: 2.75rem;
+  }
+
+  .tasks-readonly-row {
+    padding: var(--space-4);
+  }
+
+  .tasks-pagination {
+    justify-content: space-between;
+  }
+}
