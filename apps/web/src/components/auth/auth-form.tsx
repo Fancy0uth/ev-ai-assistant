@@ -1,6 +1,6 @@
 'use client';
 
-import { credentialsSchema } from '@ev/contracts';
+import { credentialsSchema, sessionResponseSchema } from '@ev/contracts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
@@ -44,10 +44,14 @@ export function AuthForm({ mode }: AuthFormProps) {
 
     setIsPending(true);
     try {
-      await requestCore(`auth/${mode}`, {
+      const response = await requestCore(`auth/${mode}`, {
         method: 'POST',
         body: JSON.stringify({ username: username.trim(), password }),
       });
+      if (!sessionResponseSchema.safeParse(response).success) {
+        setError('本地 Core 返回了无法识别的响应，请稍后重试');
+        return;
+      }
       router.replace('/today');
     } catch (requestError) {
       if (

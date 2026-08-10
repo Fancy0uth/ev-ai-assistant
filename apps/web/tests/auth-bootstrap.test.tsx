@@ -151,6 +151,22 @@ describe('AuthBootstrap', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a malformed 401 session response on the current entry with retry', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { needsSetup: false } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { owner: { username: 'owner' } } }, 401));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AuthBootstrap entry="login" />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求未能完成，请稍后重试');
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('用户名')).not.toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it.each(['setup', 'login'] as const)(
     'sends an authenticated %s entry to today',
     async (entry) => {
@@ -367,5 +383,24 @@ describe('AuthBootstrap', () => {
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/today'));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the login form available when a successful response is malformed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ data: { owner: { username: 'owner' } } })),
+    );
+    const user = userEvent.setup();
+    render(<AuthForm mode="login" />);
+
+    await user.type(screen.getByLabelText('用户名'), 'owner');
+    await user.type(screen.getByLabelText('密码'), 'correct horse battery staple');
+    await user.click(screen.getByRole('button', { name: '登录' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '本地 Core 返回了无法识别的响应，请稍后重试',
+    );
+    expect(screen.getByLabelText('用户名')).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
   });
 });

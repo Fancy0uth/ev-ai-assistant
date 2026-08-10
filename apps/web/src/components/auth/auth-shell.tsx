@@ -1,3 +1,5 @@
+'use client';
+
 import type { ReactNode } from 'react';
 import { AuthBootstrap, type AuthEntry } from './auth-bootstrap';
 

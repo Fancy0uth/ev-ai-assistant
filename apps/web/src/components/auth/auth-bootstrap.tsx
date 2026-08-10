@@ -58,7 +58,11 @@ export function AuthBootstrap({ entry, render }: AuthBootstrapProps) {
           setError('本地 Core 返回了无法识别的响应，请稍后重试');
         }
       } catch (error) {
-        if (error instanceof CoreClientError && error.status === 401) {
+        if (
+          error instanceof CoreClientError &&
+          error.status === 401 &&
+          error.code === 'AUTHENTICATION_REQUIRED'
+        ) {
           if (entry === 'login') {
             setFormMode('login');
           } else {
