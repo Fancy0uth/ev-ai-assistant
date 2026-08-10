@@ -86,8 +86,8 @@ describe('TodayDashboard', () => {
     await user.click(screen.getByRole('button', { name: '添加到今天' }));
 
     expect(await screen.findAllByText(task.title)).toHaveLength(2);
-    expect(screen.getAllByText('规则引擎')).toHaveLength(3);
-    expect(screen.getAllByText('Milestone 0.6')).toHaveLength(2);
+    expect(screen.getAllByText('规则引擎')).toHaveLength(1);
+    expect(screen.queryByText('Milestone 0.6')).not.toBeInTheDocument();
     const renderedIds = Array.from(document.querySelectorAll('[id]'), ({ id }) => id);
     expect(new Set(renderedIds).size).toBe(renderedIds.length);
     expect(fetchMock).toHaveBeenCalledTimes(3);

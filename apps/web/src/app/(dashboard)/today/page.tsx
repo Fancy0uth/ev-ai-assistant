@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { TodayDashboard } from '@/components/today/today-dashboard';
-import '../dashboard.css';
 
 export const metadata: Metadata = { title: '今天' };
 export const dynamic = 'force-dynamic';

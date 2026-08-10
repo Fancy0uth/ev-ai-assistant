@@ -6,18 +6,20 @@ import { useRouter } from 'next/navigation';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 import { AuthForm } from './auth-form';
 
-export type AuthEntry = 'root' | 'setup' | 'login';
+export type AuthEntry = 'root' | 'setup' | 'login' | 'dashboard';
 
 interface AuthBootstrapProps {
   entry: AuthEntry;
+  children?: ReactNode;
   render?: (content: ReactNode) => ReactNode;
 }
 
-export function AuthBootstrap({ entry, render }: AuthBootstrapProps) {
+export function AuthBootstrap({ children, entry, render }: AuthBootstrapProps) {
   const router = useRouter();
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<'setup' | 'login' | null>(null);
+  const [dashboardReady, setDashboardReady] = useState(false);
   const startedAttempt = useRef<number | null>(null);
 
   useEffect(() => {
@@ -53,7 +55,11 @@ export function AuthBootstrap({ entry, render }: AuthBootstrapProps) {
       try {
         const session = await requestCore('auth/session', { method: 'GET' });
         if (sessionResponseSchema.safeParse(session).success) {
-          router.replace('/today');
+          if (entry === 'dashboard') {
+            setDashboardReady(true);
+          } else {
+            router.replace('/today');
+          }
         } else {
           setError('本地 Core 返回了无法识别的响应，请稍后重试');
         }
@@ -83,7 +89,12 @@ export function AuthBootstrap({ entry, render }: AuthBootstrapProps) {
 
   function retry(): void {
     setError(null);
+    setDashboardReady(false);
     setAttempt((current) => current + 1);
+  }
+
+  if (entry === 'dashboard' && dashboardReady) {
+    return <>{children}</>;
   }
 
   if (error) {

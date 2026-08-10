@@ -10,8 +10,6 @@ import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
-import { AppShell } from '../shell/app-shell';
-import { AgentPanel } from './agent-panel';
 import { StatusOverview } from './status-overview';
 import { TaskComposer, type TaskDraft } from './task-composer';
 import { TaskList } from './task-list';
@@ -116,57 +114,26 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
     }
   }
 
-  async function logout(): Promise<void> {
-    setMutationKey('logout');
-    setError(null);
-    try {
-      await requestCore('auth/logout', { method: 'POST' });
-      replace('/login');
-    } catch (failure) {
-      handleFailure(failure);
-    } finally {
-      setMutationKey(null);
-    }
-  }
-
   if (isLoading || (!snapshot && !error)) {
-    return (
-      <AppShell
-        agent={<DashboardSkeleton variant="agent" />}
-        isLoggingOut={false}
-        onLogout={() => void logout()}
-      >
-        <DashboardSkeleton variant="canvas" />
-      </AppShell>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (!snapshot) {
     return (
-      <AppShell
-        agent={<DashboardSkeleton variant="agent" />}
-        isLoggingOut={mutationKey === 'logout'}
-        onLogout={() => void logout()}
-      >
-        <section className="dashboard-fatal" role="alert">
-          <p className="section-kicker">LOCAL CORE ERROR</p>
-          <h1>今天的数据暂时没有读到</h1>
-          <p>{error}</p>
-          <button type="button" onClick={() => void refresh()}>
-            <RefreshCw aria-hidden="true" size={16} /> 重新连接
-          </button>
-        </section>
-      </AppShell>
+      <section className="dashboard-fatal" role="alert">
+        <p className="section-kicker">LOCAL CORE ERROR</p>
+        <h1>今天的数据暂时没有读到</h1>
+        <p>{error}</p>
+        <button type="button" onClick={() => void refresh()}>
+          <RefreshCw aria-hidden="true" size={16} /> 重新连接
+        </button>
+      </section>
     );
   }
 
   return (
-    <AppShell
-      agent={<AgentPanel snapshot={snapshot} variant="desktop" />}
-      isLoggingOut={mutationKey === 'logout'}
-      onLogout={() => void logout()}
-    >
-      <header className="today-header" id="today-overview">
+    <>
+      <header className="today-header">
         <div>
           <p className="section-kicker">DAILY COMMAND CENTER / {snapshot.date}</p>
           <h1>今天，从最重要的事开始。</h1>
@@ -188,26 +155,16 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
 
       <StatusOverview snapshot={snapshot} />
       <TaskComposer isPending={mutationKey === 'create'} onCreate={createTask} />
-      <AgentPanel snapshot={snapshot} variant="mobile" />
       <TaskList
         tasks={snapshot.tasks}
         updatingTaskId={mutationKey}
         onStatusChange={updateTaskStatus}
       />
-    </AppShell>
+    </>
   );
 }
 
-function DashboardSkeleton({ variant }: { variant: 'canvas' | 'agent' }) {
-  if (variant === 'agent') {
-    return (
-      <div className="agent-skeleton" aria-label="正在加载 Agent 状态" aria-busy="true">
-        <span />
-        <span />
-        <span />
-      </div>
-    );
-  }
+function DashboardSkeleton() {
   return (
     <div className="canvas-skeleton" aria-label="正在加载今天的 Dashboard" aria-busy="true">
       <span className="canvas-skeleton__title" />
