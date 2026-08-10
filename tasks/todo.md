@@ -51,10 +51,10 @@
 
 ## 最终门禁与交付
 
-- [ ] 通过 `npm test`、typecheck、lint、build、E2E 和 `git diff --check`。
-- [ ] 通过 001→002、Owner 隔离、Task 409、Agent 503/no-fake-response 专项测试。
-- [ ] 运行依赖审计、Code Intel lite 与 Sentrux `session_end`，不更新 baseline 掩盖回归。
-- [ ] Sol 最终审查逐项分类，所有有效 P0/P1 清零。
-- [ ] 主 Agent 完成 `docs/releases/2026-08-10-v0.2.0-acceptance.md`。
+- [x] 通过 `npm test`、typecheck、lint、build、E2E 和 `git diff --check`。
+- [x] 通过 001→002、Owner 隔离、Task 409、Agent 503/no-fake-response 专项测试。
+- [x] 运行依赖审计、Code Intel lite 与 Sentrux `session_end`，未更新 baseline；Sentrux 的 -85 已记录为 P2-05。
+- [x] Terra 最终审查逐项分类，所有有效 P0/P1 清零。
+- [x] 主 Agent 完成 `docs/releases/2026-08-10-v0.2.0-acceptance.md`。
 - [ ] 推送 `codex/v0.2.0` 并创建目标为 `main` 的 ready-for-review PR；不合并、不打 v0.2.0 标签。
-- [ ] 使用全新独立预览数据目录启动 3000/4311，并确认 `/setup` 可打开且无预设账号。
+- [x] 使用全新独立预览数据目录启动 3000/4311，并确认 `/setup` 可打开且无预设账号。
