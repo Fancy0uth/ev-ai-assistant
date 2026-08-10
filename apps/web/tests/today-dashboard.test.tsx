@@ -118,6 +118,31 @@ describe('TodayDashboard', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('acknowledges a schema-valid create before its background Today projection settles', async () => {
+    const unresolvedProjection = new Promise<Response>(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(emptySnapshot))
+      .mockResolvedValueOnce(jsonResponse({ data: task }, 201))
+      .mockReturnValueOnce(unresolvedProjection);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+    await screen.findByText('今天还没有任务');
+
+    await user.type(screen.getByLabelText('新任务'), task.title);
+    await user.click(screen.getByRole('button', { name: '添加到今天' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByLabelText('新任务')).toHaveValue('');
+    expect(screen.getByRole('button', { name: '添加到今天' })).toBeEnabled();
+    const refreshStatus = screen.getByText('正在刷新今天的数据', { selector: '.core-connection' });
+    expect(refreshStatus).toHaveAttribute('aria-busy', 'true');
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/tasks')).toHaveLength(1);
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/core/today?date=2026-08-07');
+  });
+
   it('keeps a schema-valid saved task separate from a failed Today projection refresh', async () => {
     const fetchMock = vi
       .fn()
@@ -297,11 +322,21 @@ describe('TodayDashboard', () => {
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
     const taskContentRule = dashboardCss.match(/\.task-row__content\s*\{[\s\S]*?\n\}/)?.[0];
     const taskTitleRule = dashboardCss.match(/\.task-row__titleline p\s*\{[\s\S]*?\n\}/)?.[0];
+    const mobileDashboardCss = dashboardCss.slice(dashboardCss.indexOf('@media (max-width: 42rem) {'));
+    const mobileTitlelineRule = mobileDashboardCss.match(/\.task-row__titleline\s*\{[\s\S]*?\n\s*\}/)?.[0];
+    const mobileTaskTitleRule = mobileDashboardCss.match(/\.task-row__titleline p\s*\{[\s\S]*?\n\s*\}/)?.[0];
     const priorityItemRule = dashboardCss.match(/\.priority-list li\s*\{[\s\S]*?\n\}/)?.[0];
     const priorityTitleRule = dashboardCss.match(/\.priority-list p\s*\{[\s\S]*?\n\}/)?.[0];
 
     expect(taskContentRule).toContain('min-width: 0;');
     expect(taskTitleRule).toContain('overflow: hidden;');
+    expect(mobileTitlelineRule).toContain('align-items: stretch;');
+    expect(mobileTitlelineRule).toContain('min-width: 0;');
+    expect(mobileTitlelineRule).toContain('width: 100%;');
+    expect(mobileTitlelineRule).toContain('max-width: 100%;');
+    expect(mobileTaskTitleRule).toContain('min-width: 0;');
+    expect(mobileTaskTitleRule).toContain('width: 100%;');
+    expect(mobileTaskTitleRule).toContain('max-width: 100%;');
     expect(priorityItemRule).toContain('grid-template-columns: auto minmax(0, 1fr) auto;');
     expect(priorityItemRule).toContain('min-width: 0;');
     expect(priorityTitleRule).toContain('min-width: 0;');

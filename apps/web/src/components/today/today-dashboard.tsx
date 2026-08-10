@@ -39,6 +39,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
   const { replace } = useRouter();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [mutationKey, setMutationKey] = useState<string | null>(null);
@@ -63,6 +64,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
   }, [initialDate]);
 
   const refresh = useCallback(async (failureMode: RefreshFailureMode = 'standard'): Promise<boolean> => {
+    setIsRefreshing(true);
     try {
       const nextSnapshot = await loadSnapshot();
       setSnapshot(nextSnapshot);
@@ -76,6 +78,8 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
       }
       handleFailure(failure);
       return false;
+    } finally {
+      setIsRefreshing(false);
     }
   }, [handleFailure, loadSnapshot]);
 
@@ -109,7 +113,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
         body: JSON.stringify({ ...draft, targetDate: initialDate }),
       });
       taskResponseSchema.parse(payload);
-      await refresh('after-create');
+      void refresh('after-create');
       return 'saved';
     } catch (failure) {
       handleFailure(failure);
@@ -161,8 +165,8 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
           <h1>今天，从最重要的事开始。</h1>
           <p>任务、状态与 Agent 能力全部来自这台电脑上的真实数据。</p>
         </div>
-        <div className="core-connection" role="status">
-          <span aria-hidden="true" /> Core 已连接
+        <div className="core-connection" role="status" aria-busy={isRefreshing}>
+          <span aria-hidden="true" /> {isRefreshing ? '正在刷新今天的数据' : 'Core 已连接'}
         </div>
       </header>
 
