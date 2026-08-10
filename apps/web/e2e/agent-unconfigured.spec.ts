@@ -1,6 +1,14 @@
 import { expect, test } from '@playwright/test';
 
 test('an unconfigured provider disables the Agent composer and rejects a real message with 503', async ({ page }) => {
+  const browserProblems: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'warning' || message.type() === 'error') {
+      browserProblems.push(`[console:${message.type()}] ${message.text()}`);
+    }
+  });
+  page.on('pageerror', (error) => browserProblems.push(`[pageerror] ${error.message}`));
+
   const owner = {
     username: 'task16-e2e-owner',
     password: 'task16-e2e-password',
@@ -37,4 +45,5 @@ test('an unconfigured provider disables the Agent composer and rejects a real me
   expect(await sendMessage.json()).toMatchObject({
     error: { code: 'AGENT_PROVIDER_NOT_CONFIGURED' },
   });
+  expect(browserProblems).toEqual([]);
 });

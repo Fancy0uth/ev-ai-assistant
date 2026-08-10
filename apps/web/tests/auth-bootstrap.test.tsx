@@ -24,6 +24,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
 function validSessionResponse(): Response {
   return jsonResponse({
     data: {
+      authenticated: true,
       owner: {
         id: '7e9c1f92-3647-40e9-9e42-054702dd1762',
         username: 'owner',
@@ -74,16 +75,11 @@ describe('AuthBootstrap', () => {
     expect(replace).toHaveBeenCalledTimes(1);
   });
 
-  it('checks the session after setup status before sending an initialized root entry to login', async () => {
+  it('treats an explicit unauthenticated session as a normal root redirect to login', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ data: { needsSetup: false } }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { error: { code: 'AUTHENTICATION_REQUIRED', message: '请先登录本地账号' } },
-          401,
-        ),
-      );
+      .mockResolvedValueOnce(jsonResponse({ data: { authenticated: false } }));
     vi.stubGlobal('fetch', fetchMock);
 
     render(<AuthBootstrap entry="root" />);
@@ -130,16 +126,11 @@ describe('AuthBootstrap', () => {
     expect(screen.queryByRole('button', { name: '登录' })).not.toBeInTheDocument();
   });
 
-  it('sends an initialized setup entry without a session to login', async () => {
+  it('sends an initialized setup entry with an explicit unauthenticated session to login', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ data: { needsSetup: false } }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { error: { code: 'AUTHENTICATION_REQUIRED', message: '请先登录本地账号' } },
-          401,
-        ),
-      );
+      .mockResolvedValueOnce(jsonResponse({ data: { authenticated: false } }));
     vi.stubGlobal('fetch', fetchMock);
 
     render(<AuthBootstrap entry="setup" />);
@@ -148,16 +139,11 @@ describe('AuthBootstrap', () => {
     expect(screen.queryByRole('button', { name: '创建本地账号' })).not.toBeInTheDocument();
   });
 
-  it('renders the login form after an initialized login entry receives a 401 session response', async () => {
+  it('renders the login form after an initialized login entry receives an explicit unauthenticated session', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ data: { needsSetup: false } }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { error: { code: 'AUTHENTICATION_REQUIRED', message: '请先登录本地账号' } },
-          401,
-        ),
-      );
+      .mockResolvedValueOnce(jsonResponse({ data: { authenticated: false } }));
     vi.stubGlobal('fetch', fetchMock);
 
     render(<AuthBootstrap entry="login" />);
@@ -275,12 +261,7 @@ describe('AuthBootstrap', () => {
       .mockResolvedValueOnce(jsonResponse({ data: { needsSetup: false } }))
       .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockResolvedValueOnce(jsonResponse({ data: { needsSetup: false } }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { error: { code: 'AUTHENTICATION_REQUIRED', message: '请先登录本地账号' } },
-          401,
-        ),
-      );
+      .mockResolvedValueOnce(jsonResponse({ data: { authenticated: false } }));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
 

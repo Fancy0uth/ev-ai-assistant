@@ -57,11 +57,11 @@ test('four isolated contexts for one owner cover dashboard links, direct routes,
     });
     contextIds.add(context);
     const page = await context.newPage();
+    const browserProblems = collectBrowserProblems(page);
 
     try {
       await authenticate(page, owner);
       usernames.add(owner.username);
-      const browserProblems = collectBrowserProblems(page);
 
       const navigation = page.getByRole('navigation', {
         name: viewport.hasTouch ? '移动端主导航' : '主导航',
@@ -88,6 +88,32 @@ test('four isolated contexts for one owner cover dashboard links, direct routes,
       await page.getByLabel('新建任务标题').fill(taskTitle);
       await page.getByRole('button', { name: '创建任务' }).click();
       await expect(page.getByText(taskTitle, { exact: true })).toBeVisible();
+      if (viewport.hasTouch) {
+        const touchMetrics = await page.evaluate(() => {
+          const controlMetrics = (selector: string) => {
+            const control = document.querySelector<HTMLElement>(selector);
+            return {
+              height: control?.getBoundingClientRect().height ?? 0,
+              fontSize: control ? Number.parseFloat(getComputedStyle(control).fontSize) : 0,
+            };
+          };
+
+          return {
+            hasHorizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            titleInput: controlMetrics('#task-create-title'),
+            areaSelect: controlMetrics('#task-create-area'),
+            createButton: controlMetrics('.task-creator > button[type="submit"]'),
+          };
+        });
+
+        expect(touchMetrics.hasHorizontalOverflow).toBe(false);
+        expect(touchMetrics.titleInput.height).toBeGreaterThanOrEqual(44);
+        expect(touchMetrics.areaSelect.height).toBeGreaterThanOrEqual(44);
+        expect(touchMetrics.createButton.height).toBeGreaterThanOrEqual(44);
+        expect(touchMetrics.titleInput.fontSize).toBeGreaterThanOrEqual(16);
+        expect(touchMetrics.areaSelect.fontSize).toBeGreaterThanOrEqual(16);
+        expect(touchMetrics.createButton.fontSize).toBeGreaterThanOrEqual(16);
+      }
       await page.reload();
       await expect(page.getByRole('heading', { name: '任务工作台' })).toBeVisible();
       await expect(page.getByText(taskTitle, { exact: true })).toBeVisible();
@@ -113,14 +139,10 @@ test('four isolated contexts for one owner cover dashboard links, direct routes,
       await expect(page).toHaveURL(/\/agent$/);
       await expect(agentLink).toHaveAttribute('aria-current', 'page');
 
-      if (viewport.hasTouch) {
-        expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
-      }
-
-      await attachBrowserProblems(testInfo, viewport.name, browserProblems);
-      expect(browserProblems).toEqual([]);
     } finally {
+      await attachBrowserProblems(testInfo, viewport.name, browserProblems);
       await context.close();
+      expect(browserProblems).toEqual([]);
     }
   }
 

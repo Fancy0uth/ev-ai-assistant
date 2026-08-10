@@ -54,33 +54,30 @@ export function AuthBootstrap({ children, entry, render }: AuthBootstrapProps) {
 
       try {
         const session = await requestCore('auth/session', { method: 'GET' });
-        if (sessionResponseSchema.safeParse(session).success) {
-          if (entry === 'dashboard') {
-            setDashboardReady(true);
-          } else {
-            router.replace('/today');
-          }
-        } else {
+        const parsedSession = sessionResponseSchema.safeParse(session);
+        if (!parsedSession.success) {
           setError('本地 Core 返回了无法识别的响应，请稍后重试');
+          return;
         }
-      } catch (error) {
-        if (
-          error instanceof CoreClientError &&
-          error.status === 401 &&
-          error.code === 'AUTHENTICATION_REQUIRED'
-        ) {
+        if (!parsedSession.data.data.authenticated) {
           if (entry === 'login') {
             setFormMode('login');
           } else {
             router.replace('/login');
           }
-        } else {
-          setError(
-            error instanceof CoreClientError
-              ? error.message
-              : '本地 Core 暂时不可用，请确认服务已启动',
-          );
+          return;
         }
+        if (entry === 'dashboard') {
+          setDashboardReady(true);
+        } else {
+          router.replace('/today');
+        }
+      } catch (error) {
+        setError(
+          error instanceof CoreClientError
+            ? error.message
+            : '本地 Core 暂时不可用，请确认服务已启动',
+        );
       }
     }
 

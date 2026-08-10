@@ -22,6 +22,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
 function validSessionResponse(): Response {
   return jsonResponse({
     data: {
+      authenticated: true,
       owner: {
         id: '7e9c1f92-3647-40e9-9e42-054702dd1762',
         username: 'owner',
@@ -165,10 +166,7 @@ describe('dashboard authentication entry', () => {
       'canonical unauthenticated session',
       [
         jsonResponse({ data: { needsSetup: false } }),
-        jsonResponse(
-          { error: { code: 'AUTHENTICATION_REQUIRED', message: '请先登录本地账号' } },
-          401,
-        ),
+        jsonResponse({ data: { authenticated: false } }),
       ],
       '/login',
     ],
