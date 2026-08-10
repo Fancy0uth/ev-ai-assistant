@@ -6,7 +6,6 @@ import {
 } from '@ev/contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { parseRequestInput } from '../../http/validation';
-import { createAuthGuard } from './guard';
 import type { AuthService } from './service';
 
 const SESSION_COOKIE = 'ev_session';
@@ -22,7 +21,6 @@ export async function registerAuthRoutes(
   options: AuthRouteOptions,
 ): Promise<void> {
   const { authService, secureCookies } = options;
-  const authGuard = createAuthGuard(authService);
   const rateLimit = { max: 5, timeWindow: '1 minute' };
 
   function setSessionCookie(
@@ -56,7 +54,7 @@ export async function registerAuthRoutes(
     setSessionCookie(reply, result.token, result.expiresAt);
     return reply.status(201).send(
       sessionResponseSchema.parse({
-        data: { owner: result.owner },
+        data: { authenticated: true, owner: result.owner },
       }),
     );
   });
@@ -69,11 +67,14 @@ export async function registerAuthRoutes(
     );
     const result = await authService.login(credentials);
     setSessionCookie(reply, result.token, result.expiresAt);
-    return sessionResponseSchema.parse({ data: { owner: result.owner } });
+    return sessionResponseSchema.parse({ data: { authenticated: true, owner: result.owner } });
   });
 
-  app.get('/v1/auth/session', { preHandler: authGuard }, async (request) => {
-    return sessionResponseSchema.parse({ data: { owner: request.owner } });
+  app.get('/v1/auth/session', async (request) => {
+    const owner = authService.optionalSessionOwner(request.cookies[SESSION_COOKIE]);
+    return sessionResponseSchema.parse({
+      data: owner ? { authenticated: true, owner } : { authenticated: false },
+    });
   });
 
   app.post('/v1/auth/logout', async (request, reply) => {

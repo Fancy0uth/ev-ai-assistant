@@ -26,9 +26,19 @@ export const setupStatusResponseSchema = z.object({
 });
 
 export const sessionResponseSchema = z.object({
-  data: z.object({
-    owner: ownerSchema,
-  }),
+  data: z.discriminatedUnion('authenticated', [
+    z
+      .object({
+        authenticated: z.literal(true),
+        owner: ownerSchema,
+      })
+      .strict(),
+    z
+      .object({
+        authenticated: z.literal(false),
+      })
+      .strict(),
+  ]),
 });
 
 export const logoutResponseSchema = z.object({

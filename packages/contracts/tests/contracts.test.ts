@@ -22,6 +22,7 @@ import {
   credentialsSchema,
   healthResponseSchema,
   sendAgentMessageSchema,
+  sessionResponseSchema,
   taskListQuerySchema,
   todaySnapshotSchema,
   updateTaskSchema,
@@ -47,6 +48,26 @@ describe('credentialsSchema', () => {
         password: 'correct horse battery staple',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('sessionResponseSchema', () => {
+  const owner = {
+    id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c',
+    username: '本地主人',
+  };
+
+  it('accepts explicit authenticated and unauthenticated session probes', () => {
+    expect(
+      sessionResponseSchema.safeParse({ data: { authenticated: true, owner } }).success,
+    ).toBe(true);
+    expect(sessionResponseSchema.safeParse({ data: { authenticated: false } }).success).toBe(true);
+  });
+
+  it('rejects an owner on an unauthenticated session probe', () => {
+    expect(
+      sessionResponseSchema.safeParse({ data: { authenticated: false, owner } }).success,
+    ).toBe(false);
   });
 });
 

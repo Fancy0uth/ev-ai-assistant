@@ -48,6 +48,9 @@ describe('local owner authentication', () => {
       payload: validCredentials,
     });
     expect(setup.statusCode).toBe(201);
+    expect(setup.json()).toMatchObject({
+      data: { authenticated: true, owner: { username: '本地主人' } },
+    });
     expect(String(setup.headers['set-cookie'])).toContain('HttpOnly');
     expect(String(setup.headers['set-cookie'])).toContain('SameSite=Strict');
     expect(String(setup.headers['set-cookie'])).toContain('Secure');
@@ -59,7 +62,11 @@ describe('local owner authentication', () => {
       cookies: { ev_session: token },
     });
     expect(session.statusCode).toBe(200);
-    expect(sessionResponseSchema.parse(session.json()).data.owner.username).toBe('本地主人');
+    expect(session.json().data.authenticated).toBe(true);
+    expect(sessionResponseSchema.parse(session.json()).data).toMatchObject({
+      authenticated: true,
+      owner: { username: '本地主人' },
+    });
 
     const secondSetup = await app.inject({
       method: 'POST',
@@ -69,6 +76,37 @@ describe('local owner authentication', () => {
     expect(secondSetup.statusCode).toBe(409);
     expect(secondSetup.json().error.code).toBe('SETUP_ALREADY_COMPLETED');
 
+  });
+
+  it('returns an unauthenticated session probe without a cookie', async () => {
+    app = await buildApp({ logger: false });
+
+    const session = await app.inject({ method: 'GET', url: '/v1/auth/session' });
+
+    expect(session.statusCode).toBe(200);
+    expect(session.json()).toEqual({ data: { authenticated: false } });
+    expect(sessionResponseSchema.parse(session.json()).data.authenticated).toBe(false);
+  });
+
+  it('returns an authenticated session probe for a valid session cookie', async () => {
+    app = await buildApp({ logger: false });
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/setup',
+      payload: validCredentials,
+    });
+    const token = readSessionToken(setup.headers['set-cookie']);
+
+    const session = await app.inject({
+      method: 'GET',
+      url: '/v1/auth/session',
+      cookies: { ev_session: token },
+    });
+
+    expect(session.statusCode).toBe(200);
+    expect(session.json()).toMatchObject({
+      data: { authenticated: true, owner: { username: '本地主人' } },
+    });
   });
 
   it('rejects invalid setup input without creating the owner', async () => {
@@ -121,7 +159,23 @@ describe('local owner authentication', () => {
 
   });
 
-  it('revokes the current session on logout', async () => {
+  it('returns an authenticated response from a successful login', async () => {
+    app = await buildApp({ logger: false });
+    await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: validCredentials });
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: validCredentials,
+    });
+
+    expect(login.statusCode).toBe(200);
+    expect(login.json()).toMatchObject({
+      data: { authenticated: true, owner: { username: '本地主人' } },
+    });
+  });
+
+  it('returns an unauthenticated session probe after logout', async () => {
     app = await buildApp({ logger: false });
     const setup = await app.inject({
       method: 'POST',
@@ -143,9 +197,21 @@ describe('local owner authentication', () => {
       url: '/v1/auth/session',
       cookies: { ev_session: token },
     });
-    expect(session.statusCode).toBe(401);
-    expect(session.json().error.code).toBe('AUTHENTICATION_REQUIRED');
+    expect(session.statusCode).toBe(200);
+    expect(session.json()).toEqual({ data: { authenticated: false } });
 
+  });
+
+  it('keeps task and agent capability endpoints protected from anonymous requests', async () => {
+    app = await buildApp({ logger: false });
+
+    const [tasks, capabilities] = await Promise.all([
+      app.inject({ method: 'GET', url: '/v1/tasks' }),
+      app.inject({ method: 'GET', url: '/v1/agent/capabilities' }),
+    ]);
+
+    expect(tasks.statusCode).toBe(401);
+    expect(capabilities.statusCode).toBe(401);
   });
 
   it('stores neither the raw password nor the raw session token', async () => {
