@@ -41,6 +41,7 @@
 
 - [x] Task 15：把 Playwright 迁移到独立端口与独立 `EV_DATA_DIR`。
 - [ ] Task 16：完成 1440×900、1024×768、390×844、320×800 真实浏览器矩阵。
+- [ ] Task 16R：补齐 Terra 复审确认的三项 E2E 测试门缺口。
 - [ ] Task 17：原子统一全部 workspace 与内部依赖的 `0.2.0` 版本。
 - [ ] Task 18：同步运行时健康信息、README 和 `CHANGELOG.md`。
 
