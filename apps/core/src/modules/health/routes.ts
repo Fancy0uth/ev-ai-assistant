@@ -10,7 +10,7 @@ export async function registerHealthRoutes(
     return healthResponseSchema.parse({
       status: 'ok',
       service: 'ev-core',
-      version: '0.1.0',
+      version: '0.2.0',
     });
   });
 
