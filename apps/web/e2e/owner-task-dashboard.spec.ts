@@ -4,14 +4,19 @@ import { randomUUID } from 'node:crypto';
 test('owner setup, persistent task lifecycle and logout form one real local loop', async ({
   page,
 }) => {
-  const browserErrors: string[] = [];
+  const consoleWarnings: string[] = [];
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
   const ownerPassword = 'task16-e2e-password';
   const ownerUsername = 'task16-e2e-owner';
   const onConsole = (message: { type(): string; text(): string }) => {
-    if (message.type() === 'error') browserErrors.push(message.text());
+    if (message.type() === 'warning') consoleWarnings.push(message.text());
+    if (message.type() === 'error') consoleErrors.push(message.text());
   };
-  const onPageError = (error: Error) => browserErrors.push(error.message);
+  const onPageError = (error: Error) => pageErrors.push(error.message);
 
+  page.on('console', onConsole);
+  page.on('pageerror', onPageError);
   await page.goto('/');
   const setupHeading = page.getByRole('heading', { name: '建立本地身份' });
   const loginHeading = page.getByRole('heading', { name: '返回你的控制台' });
@@ -35,8 +40,6 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
   await expect(
     page.getByRole('heading', { name: '今天，从最重要的事开始。' }),
   ).toBeVisible();
-  page.on('console', onConsole);
-  page.on('pageerror', onPageError);
   const taskTitlePrefix = `task${randomUUID().replaceAll('-', '')}`;
   const taskTitle = `${taskTitlePrefix}${'x'.repeat(200 - taskTitlePrefix.length)}`;
   expect(taskTitle).toHaveLength(200);
@@ -132,9 +135,6 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
   await expect(taskWorkspace.getByText('已延期', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: `取消任务：${lifecycleTitle}` }).click();
   await expect(taskWorkspace.getByText('已取消', { exact: true })).toBeVisible();
-  expect(browserErrors).toEqual([]);
-  page.off('console', onConsole);
-  page.off('pageerror', onPageError);
 
   await page.locator('.nav-rail').getByRole('button', { name: '退出' }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -142,4 +142,9 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
 
   const unauthorizedResponse = await page.context().request.get('/api/core/tasks');
   expect(unauthorizedResponse.status()).toBe(401);
+  expect(consoleWarnings).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+  page.off('console', onConsole);
+  page.off('pageerror', onPageError);
 });
