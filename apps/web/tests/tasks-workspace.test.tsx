@@ -95,6 +95,7 @@ describe('TasksWorkspace', () => {
     expect(mobileControlRule).toContain('.task-defer-control button');
     expect(mobileControlRule).toContain('.task-edit-button');
     expect(mobileControlRule).toContain('.task-actions > button');
+    expect(mobileControlRule).toContain('.tasks-failure button');
     expect(mobileEditorActionRule).toBeDefined();
     expect(mobileEditorActionRule).toContain('min-height: 2.75rem;');
     expect(mobileEditorActionRule).toContain('font-size: 1rem;');

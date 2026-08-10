@@ -1470,6 +1470,7 @@
   .task-defer-control button,
   .task-edit-button,
   .task-actions > button,
+  .tasks-failure button,
   .tasks-pagination button {
     min-height: 2.75rem;
     font-size: 1rem;
