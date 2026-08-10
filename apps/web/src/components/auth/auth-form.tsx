@@ -57,6 +57,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       if (
         isSetup &&
         requestError instanceof CoreClientError &&
+        requestError.status === 409 &&
         requestError.code === 'SETUP_ALREADY_COMPLETED'
       ) {
         setSetupCompletedMessage(requestError.message);

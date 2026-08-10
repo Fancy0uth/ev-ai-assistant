@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import HomePage from '@/app/page';
 import { AuthBootstrap } from '@/components/auth/auth-bootstrap';
@@ -56,6 +57,21 @@ describe('AuthBootstrap', () => {
       '/api/core/auth/setup-status',
       expect.objectContaining({ method: 'GET' }),
     );
+  });
+
+  it('makes one setup-status request and navigation under StrictMode effect replay', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { needsSetup: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <StrictMode>
+        <AuthBootstrap entry="root" />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/setup'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledTimes(1);
   });
 
   it('checks the session after setup status before sending an initialized root entry to login', async () => {
@@ -342,6 +358,34 @@ describe('AuthBootstrap', () => {
     expect(screen.getByRole('link', { name: '前往登录' })).toHaveAttribute('href', '/login');
     expect(replace).not.toHaveBeenCalled();
   });
+
+  it.each([500, 429])(
+    'keeps the setup form available for a SETUP_ALREADY_COMPLETED error with status %s',
+    async (status) => {
+      const serverMessage = `初始化状态错误 ${status}`;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          jsonResponse(
+            { error: { code: 'SETUP_ALREADY_COMPLETED', message: serverMessage } },
+            status,
+          ),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<AuthForm mode="setup" />);
+
+      await user.type(screen.getByLabelText('用户名'), 'owner');
+      await user.type(screen.getByLabelText('密码'), 'correct horse battery staple');
+      await user.click(screen.getByRole('button', { name: '创建本地账号' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(serverMessage);
+      expect(screen.getByLabelText('用户名')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '创建本地账号' })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: '前往登录' })).not.toBeInTheDocument();
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['INVALID_CREDENTIALS', 401, '用户名或密码错误'],
