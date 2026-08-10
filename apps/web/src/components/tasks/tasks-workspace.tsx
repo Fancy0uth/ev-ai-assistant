@@ -1,9 +1,18 @@
 'use client';
 
-import { taskListResponseSchema, type Task, type TaskArea, type TaskStatus } from '@ev/contracts';
+import {
+  taskListResponseSchema,
+  taskResponseSchema,
+  taskVersionConflictDetailsSchema,
+  type Task,
+  type TaskArea,
+  type TaskStatus,
+} from '@ev/contracts';
 import { type ReadonlyURLSearchParams, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { TaskActions } from './task-actions';
+import { TaskCreator, TaskEditor, type TaskFormValues } from './task-editor';
 import { TaskFilters, type TaskDateFilter } from './task-filters';
 
 const areas = ['WORK', 'STUDY', 'LIFE'] as const;
@@ -99,37 +108,129 @@ function errorMessage(error: unknown): string {
   return '任务数据格式无法识别，请稍后重试';
 }
 
+function isCanonicalAuthenticationError(error: unknown): boolean {
+  return (
+    error instanceof CoreClientError &&
+    error.status === 401 &&
+    error.code === 'AUTHENTICATION_REQUIRED'
+  );
+}
+
 export function TasksWorkspace() {
   const { push, replace } = useRouter();
   const searchParams = useSearchParams();
   const filters = useMemo(() => readUrlState(searchParams), [searchParams]);
   const requestKey = `${filters.page}|${filters.area ?? ''}|${filters.status ?? ''}|${filters.date ?? ''}`;
   const requestId = useRef(0);
-  const [retryKey, setRetryKey] = useState(0);
+  const mutationInFlight = useRef(false);
+  const editTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const shouldReturnEditorFocus = useRef(false);
+  const viewRef = useRef<ViewState | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isMutating, setIsMutating] = useState(false);
   const [view, setView] = useState<ViewState | null>(null);
-  const activeRequestKey = `${requestKey}|${retryKey}`;
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [mutationStatus, setMutationStatus] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  viewRef.current = view;
 
   useEffect(() => {
     const controller = new AbortController();
     const currentRequestId = ++requestId.current;
+    const keepCurrentPage =
+      viewRef.current?.kind === 'ready' && viewRef.current.requestKey === requestKey;
+    setIsLoading(!keepCurrentPage);
+    setPageError(null);
 
     void requestCore(`tasks?${coreQuery(filters)}`, { method: 'GET', signal: controller.signal })
       .then((payload) => taskListResponseSchema.parse(payload).data)
       .then((page) => {
         if (controller.signal.aborted || currentRequestId !== requestId.current) return;
-        setView({ requestKey: activeRequestKey, kind: 'ready', page });
+        setView({ requestKey, kind: 'ready', page });
+        setIsLoading(false);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || currentRequestId !== requestId.current) return;
-        if (error instanceof CoreClientError && error.status === 401 && error.code === 'AUTHENTICATION_REQUIRED') {
+        if (isCanonicalAuthenticationError(error)) {
           replace('/login');
           return;
         }
-        setView({ requestKey: activeRequestKey, kind: 'error', message: errorMessage(error) });
+        const currentView = viewRef.current;
+        if (currentView?.kind === 'ready' && currentView.requestKey === requestKey) {
+          setPageError(`刷新失败：${errorMessage(error)}`);
+        } else {
+          setView({ requestKey, kind: 'error', message: errorMessage(error) });
+        }
+        setIsLoading(false);
       });
 
     return () => controller.abort();
-  }, [activeRequestKey, filters, replace]);
+  }, [filters, reloadKey, replace, requestKey]);
+
+  const reload = useCallback(() => {
+    setReloadKey((key) => key + 1);
+  }, []);
+
+  const replaceLocalTask = useCallback((nextTask: Task) => {
+    setView((currentView) => {
+      if (!currentView || currentView.kind !== 'ready') return currentView;
+      return {
+        ...currentView,
+        page: {
+          ...currentView.page,
+          items: currentView.page.items.map((task) => (task.id === nextTask.id ? nextTask : task)),
+        },
+      };
+    });
+  }, []);
+
+  const mutate = useCallback(
+    async (
+      method: 'POST' | 'PATCH',
+      path: string,
+      body: object,
+      successMessage: string,
+    ): Promise<boolean> => {
+      if (mutationInFlight.current) return false;
+      mutationInFlight.current = true;
+      setIsMutating(true);
+      setMutationStatus(null);
+      setMutationError(null);
+
+      try {
+        const payload = await requestCore(path, { method, body: JSON.stringify(body) });
+        const updatedTask = taskResponseSchema.parse(payload).data;
+        replaceLocalTask(updatedTask);
+        setMutationStatus(successMessage);
+        reload();
+        return true;
+      } catch (error) {
+        if (isCanonicalAuthenticationError(error)) {
+          replace('/login');
+          return false;
+        }
+        if (error instanceof CoreClientError && error.status === 409 && error.code === 'VERSION_CONFLICT') {
+          const details = taskVersionConflictDetailsSchema.safeParse(error.details);
+          if (details.success) {
+            replaceLocalTask(details.data.currentTask);
+            setConflictMessage('任务已在其他位置更新，现已显示服务器上的最新版本。请确认内容后再操作。');
+          } else {
+            setMutationError('任务发生版本冲突，但服务器最新数据格式无法识别。请重新加载后重试。');
+          }
+          return false;
+        }
+        setMutationError(errorMessage(error));
+        return false;
+      } finally {
+        mutationInFlight.current = false;
+        setIsMutating(false);
+      }
+    },
+    [reload, replace, replaceLocalTask],
+  );
 
   const navigate = useCallback(
     (next: TasksUrlState) => {
@@ -145,7 +246,56 @@ export function TasksWorkspace() {
     [filters, navigate],
   );
 
-  if (!view || view.requestKey !== activeRequestKey) {
+  const createTask = useCallback(
+    (values: TaskFormValues) => mutate('POST', 'tasks', values, '任务已创建，正在刷新列表。'),
+    [mutate],
+  );
+
+  const updateTask = useCallback(
+    (task: Task, values: TaskFormValues) =>
+      mutate('PATCH', `tasks/${task.id}`, { version: task.version, ...values }, '任务已更新，正在刷新列表。'),
+    [mutate],
+  );
+
+  const completeTask = useCallback(
+    (task: Task) => mutate('PATCH', `tasks/${task.id}`, { version: task.version, status: 'DONE' }, '任务已完成，正在刷新列表。'),
+    [mutate],
+  );
+
+  const deferTask = useCallback(
+    (task: Task, targetDate: string | null) =>
+      mutate(
+        'PATCH',
+        `tasks/${task.id}`,
+        { version: task.version, status: 'DEFERRED', targetDate },
+        '任务已延期，正在刷新列表。',
+      ),
+    [mutate],
+  );
+
+  const cancelTask = useCallback(
+    (task: Task) =>
+      mutate('PATCH', `tasks/${task.id}`, { version: task.version, status: 'CANCELLED' }, '任务已取消，正在刷新列表。'),
+    [mutate],
+  );
+
+  const openEditor = useCallback((task: Task, trigger: HTMLButtonElement) => {
+    editTriggerRef.current = trigger;
+    setEditingTaskId(task.id);
+  }, []);
+
+  const closeEditor = useCallback(() => {
+    shouldReturnEditorFocus.current = true;
+    setEditingTaskId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!shouldReturnEditorFocus.current || editingTaskId !== null) return;
+    editTriggerRef.current?.focus();
+    shouldReturnEditorFocus.current = false;
+  }, [editingTaskId]);
+
+  if (!view || view.requestKey !== requestKey || isLoading) {
     return <TasksLoading />;
   }
 
@@ -155,7 +305,7 @@ export function TasksWorkspace() {
         <p className="section-kicker">TASKS UNAVAILABLE</p>
         <h1>任务暂时无法读取</h1>
         <p>{view.message}</p>
-        <button type="button" onClick={() => setRetryKey((key) => key + 1)}>
+        <button type="button" onClick={reload}>
           重新加载
         </button>
       </section>
@@ -173,7 +323,13 @@ export function TasksWorkspace() {
         </div>
       </header>
 
+      <TaskCreator isPending={isMutating} onCreate={createTask} />
       <TaskFilters area={filters.area} status={filters.status} date={filters.date} onChange={changeFilters} />
+
+      {mutationStatus ? <p className="tasks-mutation-status" role="status">{mutationStatus}</p> : null}
+      {mutationError ? <p className="tasks-mutation-error" role="alert">{mutationError}</p> : null}
+      {pageError ? <p className="tasks-mutation-error" role="alert">{pageError}</p> : null}
+      {conflictMessage ? <p className="tasks-conflict" role="alert">{conflictMessage}</p> : null}
 
       {items.length === 0 ? (
         <section className="task-empty tasks-empty" role="status">
@@ -190,7 +346,20 @@ export function TasksWorkspace() {
           </p>
           <ul className="tasks-readonly-list" aria-label="任务列表">
             {items.map((task) => (
-              <TaskRow key={task.id} task={task} />
+              <TaskRow
+                key={task.id}
+                task={task}
+                isPending={isMutating}
+                isEditing={editingTaskId === task.id}
+                onEdit={openEditor}
+                onComplete={completeTask}
+                onDefer={deferTask}
+                onCancel={cancelTask}
+              >
+                {editingTaskId === task.id ? (
+                  <TaskEditor task={task} isPending={isMutating} onSave={(values) => updateTask(task, values)} onCancel={closeEditor} />
+                ) : null}
+              </TaskRow>
             ))}
           </ul>
         </>
@@ -227,28 +396,67 @@ function TasksLoading() {
   );
 }
 
-function TaskRow({ task }: { task: Task }) {
+function TaskRow({
+  task,
+  isPending,
+  isEditing,
+  onEdit,
+  onComplete,
+  onDefer,
+  onCancel,
+  children,
+}: {
+  task: Task;
+  isPending: boolean;
+  isEditing: boolean;
+  onEdit: (task: Task, trigger: HTMLButtonElement) => void;
+  onComplete: (task: Task) => Promise<boolean>;
+  onDefer: (task: Task, targetDate: string | null) => Promise<boolean>;
+  onCancel: (task: Task) => Promise<boolean>;
+  children: ReactNode;
+}) {
   return (
     <li className="tasks-readonly-row">
-      <h2>{task.title}</h2>
-      <dl>
+      <div className="tasks-readonly-row__summary">
         <div>
-          <dt>领域</dt>
-          <dd>{areaLabels[task.area]}</dd>
+          <h2>{task.title}</h2>
+          <dl>
+            <div>
+              <dt>领域</dt>
+              <dd>{areaLabels[task.area]}</dd>
+            </div>
+            <div>
+              <dt>优先级</dt>
+              <dd>{priorityLabels[task.priority]}</dd>
+            </div>
+            <div>
+              <dt>状态</dt>
+              <dd>{statusLabels[task.status]}</dd>
+            </div>
+            <div>
+              <dt>目标日期</dt>
+              <dd>{task.targetDate ? `目标日期：${task.targetDate}` : '未安排'}</dd>
+            </div>
+          </dl>
         </div>
-        <div>
-          <dt>优先级</dt>
-          <dd>{priorityLabels[task.priority]}</dd>
-        </div>
-        <div>
-          <dt>状态</dt>
-          <dd>{statusLabels[task.status]}</dd>
-        </div>
-        <div>
-          <dt>目标日期</dt>
-          <dd>{task.targetDate ? `目标日期：${task.targetDate}` : '未安排'}</dd>
-        </div>
-      </dl>
+        <button
+          type="button"
+          className="task-edit-button"
+          disabled={isPending}
+          aria-label={`编辑任务：${task.title}`}
+          onClick={(event) => onEdit(task, event.currentTarget)}
+        >
+          编辑
+        </button>
+      </div>
+      {isEditing ? children : null}
+      <TaskActions
+        task={task}
+        isPending={isPending}
+        onComplete={onComplete}
+        onDefer={onDefer}
+        onCancel={onCancel}
+      />
     </li>
   );
 }

@@ -1,6 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Task } from '@ev/contracts';
 import { TasksWorkspace } from '@/components/tasks/tasks-workspace';
 
 const push = vi.fn();
@@ -12,7 +13,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParams,
 }));
 
-const task = {
+const task: Task = {
   id: '00000000-0000-4000-8000-000000000011',
   title: '核对跨时区的任务筛选',
   area: 'WORK',
@@ -26,7 +27,7 @@ const task = {
 };
 
 function taskResponse(
-  items = [task],
+  items: Task[] = [task],
   pagination = { page: 1, pageSize: 20, total: 1, totalPages: 1 },
 ): Response {
   return jsonResponse({ data: { items, pagination } });
@@ -41,6 +42,15 @@ function jsonResponse(payload: unknown, status = 200): Response {
 
 function requestUrl(fetchMock: ReturnType<typeof vi.fn>, call = 0): string {
   return String(fetchMock.mock.calls[call]?.[0]);
+}
+
+function requestBody(fetchMock: ReturnType<typeof vi.fn>, call: number): unknown {
+  const init = fetchMock.mock.calls[call]?.[1] as RequestInit | undefined;
+  return JSON.parse(String(init?.body));
+}
+
+function mutationResponse(responseTask = task): Response {
+  return jsonResponse({ data: responseTask });
 }
 
 function renderWorkspace(query = '') {
@@ -288,7 +298,332 @@ describe('TasksWorkspace', () => {
     expect(screen.queryByText('缺少任务字段')).not.toBeInTheDocument();
   });
 
-  it('renders task metadata read-only without mutation controls', async () => {
+  it('creates a nullable-date task once, resets the form, and reloads the current page once', async () => {
+    const createdTask: Task = {
+      ...task,
+      id: '00000000-0000-4000-8000-000000000013',
+      title: '整理本周项目进度',
+      priority: 'MEDIUM',
+      targetDate: null,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(createdTask))
+      .mockResolvedValueOnce(taskResponse([createdTask]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace('area=WORK');
+    await screen.findByText(task.title);
+
+    await user.type(screen.getByLabelText('新建任务标题'), createdTask.title);
+    await user.selectOptions(screen.getByLabelText('新建任务优先级'), 'MEDIUM');
+    await user.click(screen.getByRole('button', { name: '创建任务' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(requestUrl(fetchMock, 1)).toBe('/api/core/tasks');
+    expect(requestBody(fetchMock, 1)).toEqual({
+      title: createdTask.title,
+      area: 'WORK',
+      priority: 'MEDIUM',
+      targetDate: null,
+    });
+    expect(screen.getByLabelText('新建任务标题')).toHaveValue('');
+    expect(screen.getByRole('status')).toHaveTextContent('任务已创建');
+  });
+
+  it('keeps the creation form and current list when a successful mutation body fails task schema validation', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(jsonResponse({ data: { id: task.id, title: '缺少任务字段' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.type(screen.getByLabelText('新建任务标题'), '需要完整响应的任务');
+    await user.click(screen.getByRole('button', { name: '创建任务' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('任务数据格式无法识别');
+    expect(screen.getByLabelText('新建任务标题')).toHaveValue('需要完整响应的任务');
+    expect(screen.getByText(task.title)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('edits a task with its current version and returns focus to the edit control', async () => {
+    const editedTask: Task = {
+      ...task,
+      title: '更新后的跨时区筛选核对',
+      area: 'STUDY',
+      priority: 'LOW',
+      targetDate: '2026-08-18',
+      version: 2,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(editedTask))
+      .mockResolvedValueOnce(taskResponse([editedTask]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+
+    await user.click(screen.getByRole('button', { name: `编辑任务：${task.title}` }));
+    const titleField = await screen.findByLabelText('编辑任务标题');
+    expect(titleField).toHaveFocus();
+    await user.clear(titleField);
+    await user.type(titleField, editedTask.title);
+    await user.selectOptions(screen.getByLabelText('编辑任务领域'), editedTask.area);
+    await user.selectOptions(screen.getByLabelText('编辑任务优先级'), editedTask.priority);
+    fireEvent.change(screen.getByLabelText('编辑任务目标日期'), {
+      target: { value: editedTask.targetDate },
+    });
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(requestUrl(fetchMock, 1)).toBe(`/api/core/tasks/${task.id}`);
+    expect(requestBody(fetchMock, 1)).toEqual({
+      version: 1,
+      title: editedTask.title,
+      area: 'STUDY',
+      priority: 'LOW',
+      targetDate: '2026-08-18',
+    });
+    expect(screen.getByRole('button', { name: `编辑任务：${editedTask.title}` })).toHaveFocus();
+  });
+
+  it('completes a task with exactly the current version and one write request', async () => {
+    const completedTask: Task = {
+      ...task,
+      status: 'DONE',
+      version: 2,
+      completedAt: '2026-08-10T02:00:00.000Z',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(completedTask))
+      .mockResolvedValueOnce(taskResponse([completedTask]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('reveals the deferred date control, retains its value, and sends an explicitly changed date', async () => {
+    const deferredTask: Task = { ...task, status: 'DEFERRED', targetDate: '2026-08-20', version: 2 };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(deferredTask))
+      .mockResolvedValueOnce(taskResponse([deferredTask]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `延期任务：${task.title}` }));
+
+    const targetDateField = screen.getByLabelText('延期目标日期');
+    expect(targetDateField).toHaveValue('2026-08-10');
+    fireEvent.change(targetDateField, { target: { value: '2026-08-20' } });
+    await user.click(screen.getByRole('button', { name: '确认延期' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(requestBody(fetchMock, 1)).toEqual({
+      version: 1,
+      status: 'DEFERRED',
+      targetDate: '2026-08-20',
+    });
+  });
+
+  it('allows a deferred task date to be cleared explicitly', async () => {
+    const deferredTask: Task = { ...task, status: 'DEFERRED', targetDate: null, version: 2 };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(deferredTask))
+      .mockResolvedValueOnce(taskResponse([deferredTask]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `延期任务：${task.title}` }));
+    fireEvent.change(screen.getByLabelText('延期目标日期'), { target: { value: '' } });
+    await user.click(screen.getByRole('button', { name: '确认延期' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DEFERRED', targetDate: null });
+  });
+
+  it('cancels a task with its current version', async () => {
+    const cancelledTask: Task = { ...task, status: 'CANCELLED', version: 2 };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(cancelledTask))
+      .mockResolvedValueOnce(taskResponse([cancelledTask]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `取消任务：${task.title}` }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'CANCELLED' });
+  });
+
+  it('uses a validated conflict currentTask, persists the conflict alert, and never retries the patch', async () => {
+    const currentTask = {
+      ...task,
+      title: '服务器上的最新任务内容',
+      status: 'IN_PROGRESS',
+      version: 2,
+      updatedAt: '2026-08-10T03:00:00.000Z',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: 'VERSION_CONFLICT',
+              message: '数据已变化，请确认最新内容后重试',
+              details: { currentTask },
+            },
+          },
+          409,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('服务器上的最新版本');
+    expect(screen.getByText(currentTask.title)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
+  });
+
+  it('does not replace the trusted list when version-conflict details are malformed', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: 'VERSION_CONFLICT',
+              message: '数据已变化，请确认最新内容后重试',
+              details: { currentTask: { id: task.id, title: '不可信的残缺内容' } },
+            },
+          },
+          409,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('最新数据格式无法识别');
+    expect(screen.getByText(task.title)).toBeInTheDocument();
+    expect(screen.queryByText('不可信的残缺内容')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the task list for a non-authentication mutation failure', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: '本地 Core 暂时不可用，请确认服务已启动' } },
+          502,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('本地 Core 暂时不可用');
+    expect(screen.getByText(task.title)).toBeInTheDocument();
+  });
+
+  it('redirects a canonical mutation 401 to login without discarding the current list', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'AUTHENTICATION_REQUIRED', message: '请先登录本地账号' } },
+          401,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+    expect(screen.getByText(task.title)).toBeInTheDocument();
+  });
+
+  it('does not repeat a successful write when its one reload fails', async () => {
+    const createdTask: Task = {
+      ...task,
+      id: '00000000-0000-4000-8000-000000000014',
+      title: '保存后刷新失败的任务',
+      targetDate: null,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(createdTask))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: '本地 Core 暂时不可用，请确认服务已启动' } },
+          502,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.type(screen.getByLabelText('新建任务标题'), createdTask.title);
+    await user.click(screen.getByRole('button', { name: '创建任务' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === 'POST')).toHaveLength(1);
+    expect(screen.getByText(task.title)).toBeInTheDocument();
+  });
+
+  it('renders task metadata with the frozen mutation controls but no delete, bulk, drag, calendar, or reopen UI', async () => {
     const fetchMock = vi.fn().mockResolvedValue(taskResponse());
     vi.stubGlobal('fetch', fetchMock);
 
@@ -300,8 +635,11 @@ describe('TasksWorkspace', () => {
     expect(taskList.getByText('高优先级')).toBeInTheDocument();
     expect(taskList.getByText('进行中')).toBeInTheDocument();
     expect(taskList.getByText('目标日期：2026-08-10')).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /新建|创建|编辑|完成|延期|取消任务/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '创建任务' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `编辑任务：${task.title}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `完成任务：${task.title}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `延期任务：${task.title}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `取消任务：${task.title}` })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /删除|批量|拖拽|日历|重新打开|恢复/ })).not.toBeInTheDocument();
   });
 });
