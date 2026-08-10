@@ -25,7 +25,7 @@
 ## 安全、路由与页面
 
 - [x] Task 8：BFF 仅允许 loopback 并只转发 `ev_session`。
-- [ ] Task 9：实现根路由、setup/login/session 启动解析和单 Owner 表单门禁。
+- [x] Task 9：实现根路由、setup/login/session 启动解析和单 Owner 表单门禁。
 - [ ] Task 10：建立 `/today`、`/tasks`、`/agent` 共享认证 Shell 与可访问导航。
 - [ ] Task 11：实现 Tasks 分页、领域/状态/日期筛选与列表状态。
 - [ ] Task 12：实现 Tasks 创建、编辑、完成、延期、取消和 409 恢复。
