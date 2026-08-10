@@ -171,6 +171,45 @@ describe('TasksWorkspace', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('shows loading immediately for deferred query and retry requests', async () => {
+    let resolveQueryResponse: ((value: Response) => void) | undefined;
+    let resolveRetryResponse: ((value: Response) => void) | undefined;
+    const queryResponse = new Promise<Response>((resolve) => {
+      resolveQueryResponse = resolve;
+    });
+    const retryResponse = new Promise<Response>((resolve) => {
+      resolveRetryResponse = resolve;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockReturnValueOnce(queryResponse)
+      .mockReturnValueOnce(retryResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    const rendered = renderWorkspace('area=WORK');
+    expect(await screen.findByText(task.title)).toBeInTheDocument();
+
+    searchParams = new URLSearchParams('area=LIFE');
+    rendered.rerender(<TasksWorkspace />);
+    expect(screen.getByLabelText('正在加载任务')).toBeInTheDocument();
+
+    resolveQueryResponse?.(
+      jsonResponse(
+        { error: { code: 'CORE_UNAVAILABLE', message: '本地 Core 暂时不可用，请确认服务已启动' } },
+        502,
+      ),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('本地 Core 暂时不可用');
+
+    await user.click(screen.getByRole('button', { name: '重新加载' }));
+    expect(screen.getByLabelText('正在加载任务')).toBeInTheDocument();
+
+    resolveRetryResponse?.(taskResponse());
+    expect(await screen.findByText(task.title)).toBeInTheDocument();
+  });
+
   it('keeps empty results distinct from the loading state', async () => {
     const fetchMock = vi.fn().mockResolvedValue(taskResponse([]));
     vi.stubGlobal('fetch', fetchMock);

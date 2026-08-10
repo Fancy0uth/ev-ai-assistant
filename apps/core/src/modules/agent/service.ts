@@ -14,7 +14,7 @@ export interface AgentListResult<T> {
   };
 }
 
-export interface AgentSendMessageResult extends AgentMessagePair {}
+export type AgentSendMessageResult = AgentMessagePair;
 
 interface CreateAgentSessionInput {
   title: string;

@@ -12,7 +12,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
-import type { AgentProvider, AgentProviderRequest } from '../src/modules/agent/provider';
+import type { AgentProvider } from '../src/modules/agent/provider';
 import { openDatabase } from '../src/storage/database';
 
 const credentials = {
@@ -28,7 +28,7 @@ class FakeAgentProvider implements AgentProvider {
 
   constructor(private readonly reply: string) {}
 
-  async generate(_input: AgentProviderRequest): Promise<string> {
+  async generate(): Promise<string> {
     this.calls += 1;
     return this.reply;
   }

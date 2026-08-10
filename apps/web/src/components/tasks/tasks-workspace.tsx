@@ -36,9 +36,8 @@ interface TasksUrlState {
 type TaskPage = ReturnType<typeof taskListResponseSchema.parse>['data'];
 
 type ViewState =
-  | { kind: 'loading' }
-  | { kind: 'ready'; page: TaskPage }
-  | { kind: 'error'; message: string };
+  | { requestKey: string; kind: 'ready'; page: TaskPage }
+  | { requestKey: string; kind: 'error'; message: string };
 
 function allowedValue<T extends string>(value: string | null, allowed: readonly T[]): T | undefined {
   return value !== null && allowed.includes(value as T) ? (value as T) : undefined;
@@ -107,18 +106,18 @@ export function TasksWorkspace() {
   const requestKey = `${filters.page}|${filters.area ?? ''}|${filters.status ?? ''}|${filters.date ?? ''}`;
   const requestId = useRef(0);
   const [retryKey, setRetryKey] = useState(0);
-  const [view, setView] = useState<ViewState>({ kind: 'loading' });
+  const [view, setView] = useState<ViewState | null>(null);
+  const activeRequestKey = `${requestKey}|${retryKey}`;
 
   useEffect(() => {
     const controller = new AbortController();
     const currentRequestId = ++requestId.current;
-    setView({ kind: 'loading' });
 
     void requestCore(`tasks?${coreQuery(filters)}`, { method: 'GET', signal: controller.signal })
       .then((payload) => taskListResponseSchema.parse(payload).data)
       .then((page) => {
         if (controller.signal.aborted || currentRequestId !== requestId.current) return;
-        setView({ kind: 'ready', page });
+        setView({ requestKey: activeRequestKey, kind: 'ready', page });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || currentRequestId !== requestId.current) return;
@@ -126,11 +125,11 @@ export function TasksWorkspace() {
           replace('/login');
           return;
         }
-        setView({ kind: 'error', message: errorMessage(error) });
+        setView({ requestKey: activeRequestKey, kind: 'error', message: errorMessage(error) });
       });
 
     return () => controller.abort();
-  }, [filters, requestKey, replace, retryKey]);
+  }, [activeRequestKey, filters, replace]);
 
   const navigate = useCallback(
     (next: TasksUrlState) => {
@@ -146,7 +145,7 @@ export function TasksWorkspace() {
     [filters, navigate],
   );
 
-  if (view.kind === 'loading') {
+  if (!view || view.requestKey !== activeRequestKey) {
     return <TasksLoading />;
   }
 
