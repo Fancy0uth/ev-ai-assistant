@@ -19,6 +19,7 @@ export function TaskActions({
   const [isDeferring, setIsDeferring] = useState(false);
   const [targetDate, setTargetDate] = useState(task.targetDate ?? '');
   const targetDateRef = useRef<HTMLInputElement>(null);
+  const canChangeStatus = task.status !== 'DONE' && task.status !== 'CANCELLED';
 
   function openDeferredDate(): void {
     setTargetDate(task.targetDate ?? '');
@@ -29,6 +30,8 @@ export function TaskActions({
   async function defer(): Promise<void> {
     if (await onDefer(task, targetDate || null)) setIsDeferring(false);
   }
+
+  if (!canChangeStatus) return null;
 
   return (
     <div className="task-actions" aria-label={`任务操作：${task.title}`}>

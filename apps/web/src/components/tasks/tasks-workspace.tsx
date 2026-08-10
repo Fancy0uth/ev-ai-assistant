@@ -122,11 +122,14 @@ export function TasksWorkspace() {
   const filters = useMemo(() => readUrlState(searchParams), [searchParams]);
   const requestKey = `${filters.page}|${filters.area ?? ''}|${filters.status ?? ''}|${filters.date ?? ''}`;
   const requestId = useRef(0);
+  const latestReloadKey = useRef(0);
   const mutationInFlight = useRef(false);
   const editTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const shouldReturnEditorFocus = useRef(false);
+  const tasksTitleRef = useRef<HTMLHeadingElement | null>(null);
+  const savedFocusIntent = useRef<{ taskId: string; reloadKey: number } | null>(null);
   const viewRef = useRef<ViewState | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [settledReloadKey, setSettledReloadKey] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [view, setView] = useState<ViewState | null>(null);
@@ -135,7 +138,10 @@ export function TasksWorkspace() {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
-  viewRef.current = view;
+
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -151,6 +157,7 @@ export function TasksWorkspace() {
         if (controller.signal.aborted || currentRequestId !== requestId.current) return;
         setView({ requestKey, kind: 'ready', page });
         setIsLoading(false);
+        setSettledReloadKey(reloadKey);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || currentRequestId !== requestId.current) return;
@@ -165,13 +172,16 @@ export function TasksWorkspace() {
           setView({ requestKey, kind: 'error', message: errorMessage(error) });
         }
         setIsLoading(false);
+        setSettledReloadKey(reloadKey);
       });
 
     return () => controller.abort();
   }, [filters, reloadKey, replace, requestKey]);
 
   const reload = useCallback(() => {
-    setReloadKey((key) => key + 1);
+    const nextReloadKey = latestReloadKey.current + 1;
+    latestReloadKey.current = nextReloadKey;
+    setReloadKey(nextReloadKey);
   }, []);
 
   const replaceLocalTask = useCallback((nextTask: Task) => {
@@ -193,6 +203,7 @@ export function TasksWorkspace() {
       path: string,
       body: object,
       successMessage: string,
+      expectedTaskId?: string,
     ): Promise<boolean> => {
       if (mutationInFlight.current) return false;
       mutationInFlight.current = true;
@@ -202,8 +213,11 @@ export function TasksWorkspace() {
 
       try {
         const payload = await requestCore(path, { method, body: JSON.stringify(body) });
-        const updatedTask = taskResponseSchema.parse(payload).data;
-        replaceLocalTask(updatedTask);
+        const responseTask = taskResponseSchema.parse(payload).data;
+        if (expectedTaskId && responseTask.id !== expectedTaskId) {
+          setMutationError('任务响应与请求不一致，请重新加载后重试。');
+          return false;
+        }
         setMutationStatus(successMessage);
         reload();
         return true;
@@ -214,9 +228,11 @@ export function TasksWorkspace() {
         }
         if (error instanceof CoreClientError && error.status === 409 && error.code === 'VERSION_CONFLICT') {
           const details = taskVersionConflictDetailsSchema.safeParse(error.details);
-          if (details.success) {
+          if (details.success && expectedTaskId && details.data.currentTask.id === expectedTaskId) {
             replaceLocalTask(details.data.currentTask);
             setConflictMessage('任务已在其他位置更新，现已显示服务器上的最新版本。请确认内容后再操作。');
+          } else if (details.success) {
+            setMutationError('任务响应与请求不一致，请重新加载后重试。');
           } else {
             setMutationError('任务发生版本冲突，但服务器最新数据格式无法识别。请重新加载后重试。');
           }
@@ -253,12 +269,25 @@ export function TasksWorkspace() {
 
   const updateTask = useCallback(
     (task: Task, values: TaskFormValues) =>
-      mutate('PATCH', `tasks/${task.id}`, { version: task.version, ...values }, '任务已更新，正在刷新列表。'),
+      mutate(
+        'PATCH',
+        `tasks/${task.id}`,
+        { version: task.version, ...values },
+        '任务已更新，正在刷新列表。',
+        task.id,
+      ),
     [mutate],
   );
 
   const completeTask = useCallback(
-    (task: Task) => mutate('PATCH', `tasks/${task.id}`, { version: task.version, status: 'DONE' }, '任务已完成，正在刷新列表。'),
+    (task: Task) =>
+      mutate(
+        'PATCH',
+        `tasks/${task.id}`,
+        { version: task.version, status: 'DONE' },
+        '任务已完成，正在刷新列表。',
+        task.id,
+      ),
     [mutate],
   );
 
@@ -269,13 +298,20 @@ export function TasksWorkspace() {
         `tasks/${task.id}`,
         { version: task.version, status: 'DEFERRED', targetDate },
         '任务已延期，正在刷新列表。',
+        task.id,
       ),
     [mutate],
   );
 
   const cancelTask = useCallback(
     (task: Task) =>
-      mutate('PATCH', `tasks/${task.id}`, { version: task.version, status: 'CANCELLED' }, '任务已取消，正在刷新列表。'),
+      mutate(
+        'PATCH',
+        `tasks/${task.id}`,
+        { version: task.version, status: 'CANCELLED' },
+        '任务已取消，正在刷新列表。',
+        task.id,
+      ),
     [mutate],
   );
 
@@ -285,15 +321,27 @@ export function TasksWorkspace() {
   }, []);
 
   const closeEditor = useCallback(() => {
-    shouldReturnEditorFocus.current = true;
+    editTriggerRef.current?.focus();
+    setEditingTaskId(null);
+  }, []);
+
+  const closeEditorAfterSave = useCallback((taskId: string) => {
+    savedFocusIntent.current = { taskId, reloadKey: latestReloadKey.current };
     setEditingTaskId(null);
   }, []);
 
   useEffect(() => {
-    if (!shouldReturnEditorFocus.current || editingTaskId !== null) return;
-    editTriggerRef.current?.focus();
-    shouldReturnEditorFocus.current = false;
-  }, [editingTaskId]);
+    const intent = savedFocusIntent.current;
+    if (!intent || intent.reloadKey !== settledReloadKey) return;
+
+    const editTrigger = document.getElementById(`task-edit-${intent.taskId}`);
+    if (editTrigger instanceof HTMLButtonElement) {
+      editTrigger.focus();
+    } else {
+      tasksTitleRef.current?.focus();
+    }
+    savedFocusIntent.current = null;
+  }, [settledReloadKey, view]);
 
   if (!view || view.requestKey !== requestKey || isLoading) {
     return <TasksLoading />;
@@ -318,7 +366,7 @@ export function TasksWorkspace() {
       <header className="tasks-workspace__header">
         <div>
           <p className="section-kicker">TASKS / SERVER PAGINATION</p>
-          <h1 id="tasks-title">任务工作台</h1>
+          <h1 ref={tasksTitleRef} id="tasks-title" tabIndex={-1}>任务工作台</h1>
           <p>在这里查看各领域的任务安排。筛选和页码会保留在浏览器地址中。</p>
         </div>
       </header>
@@ -357,7 +405,14 @@ export function TasksWorkspace() {
                 onCancel={cancelTask}
               >
                 {editingTaskId === task.id ? (
-                  <TaskEditor task={task} isPending={isMutating} onSave={(values) => updateTask(task, values)} onCancel={closeEditor} />
+                  <TaskEditor
+                    key={`${task.id}:${task.version}`}
+                    task={task}
+                    isPending={isMutating}
+                    onSave={(values) => updateTask(task, values)}
+                    onCancel={closeEditor}
+                    onSaved={() => closeEditorAfterSave(task.id)}
+                  />
                 ) : null}
               </TaskRow>
             ))}
@@ -442,6 +497,7 @@ function TaskRow({
         <button
           type="button"
           className="task-edit-button"
+          id={`task-edit-${task.id}`}
           disabled={isPending}
           aria-label={`编辑任务：${task.title}`}
           onClick={(event) => onEdit(task, event.currentTarget)}

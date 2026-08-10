@@ -1192,12 +1192,10 @@
 }
 
 .tasks-readonly-row h2 {
-  overflow: hidden;
   margin: 0;
   color: var(--ink-900);
   font-size: 0.875rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .tasks-readonly-row dl {
@@ -1210,6 +1208,7 @@
 .tasks-readonly-row dl div {
   display: flex;
   gap: var(--space-1);
+  min-width: 0;
   color: #6f7975;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 0.625rem;
@@ -1222,6 +1221,7 @@
 .tasks-readonly-row dd {
   margin: 0;
   color: var(--ink-800);
+  overflow-wrap: anywhere;
 }
 
 .tasks-empty {
@@ -1422,6 +1422,15 @@
   gap: var(--space-3);
 }
 
+.tasks-readonly-row__summary > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tasks-readonly-row__summary .task-edit-button {
+  flex: 0 0 auto;
+}
+
 .task-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1434,10 +1443,12 @@
   flex: 1 1 18rem;
   align-items: end;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .task-defer-control label {
   flex: 1;
+  min-width: 0;
 }
 
 @media (max-width: 42rem) {
@@ -1470,6 +1481,15 @@
   .task-actions > button,
   .task-defer-control button {
     min-height: 2.75rem;
+  }
+
+  .task-creator > button,
+  .task-editor__actions button,
+  .task-defer-control button,
+  .task-editor__fields input,
+  .task-editor__fields select,
+  .task-defer-control input {
+    font-size: 1rem;
   }
 
   .tasks-pagination {

@@ -125,27 +125,28 @@ export function TaskEditor({
   isPending,
   onSave,
   onCancel,
+  onSaved,
 }: {
   task: Task;
   isPending: boolean;
   onSave: (values: TaskFormValues) => Promise<boolean>;
   onCancel: () => void;
+  onSaved: () => void;
 }) {
   const [values, setValues] = useState<TaskFormValues>(() => taskValues(task));
   const [validationError, setValidationError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setValues(taskValues(task));
     titleRef.current?.focus();
-  }, [task]);
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const error = validationMessage(values);
     setValidationError(error);
     if (error) return;
-    if (await onSave({ ...values, title: values.title.trim() })) onCancel();
+    if (await onSave({ ...values, title: values.title.trim() })) onSaved();
   }
 
   return (

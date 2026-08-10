@@ -396,6 +396,85 @@ describe('TasksWorkspace', () => {
     expect(screen.getByRole('button', { name: `编辑任务：${editedTask.title}` })).toHaveFocus();
   });
 
+  it('keeps an unsaved editor draft when another task mutation reloads the same task version', async () => {
+    const otherTask: Task = {
+      ...task,
+      id: '00000000-0000-4000-8000-000000000015',
+      title: '另一个需要完成的任务',
+    };
+    const completedOtherTask: Task = {
+      ...otherTask,
+      status: 'DONE',
+      version: 2,
+      completedAt: '2026-08-10T02:00:00.000Z',
+    };
+    const draftTitle = '尚未保存的编辑草稿';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse([task, otherTask]))
+      .mockResolvedValueOnce(mutationResponse(completedOtherTask))
+      .mockResolvedValueOnce(taskResponse([task, completedOtherTask]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `编辑任务：${task.title}` }));
+    const titleField = await screen.findByLabelText('编辑任务标题');
+    await user.clear(titleField);
+    await user.type(titleField, draftTitle);
+
+    await user.click(screen.getByRole('button', { name: `完成任务：${otherTask.title}` }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(titleField).toHaveValue(draftTitle);
+    expect(requestUrl(fetchMock, 1)).toBe(`/api/core/tasks/${otherTask.id}`);
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
+  });
+
+  it('returns focus to the edit trigger immediately when editing is cancelled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(taskResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    const editTrigger = screen.getByRole('button', { name: `编辑任务：${task.title}` });
+    await user.click(editTrigger);
+    await screen.findByLabelText('编辑任务标题');
+    await user.click(screen.getByRole('button', { name: '取消编辑' }));
+
+    expect(editTrigger).toHaveFocus();
+  });
+
+  it('moves focus to the stable Tasks heading when a saved task disappears from the filtered page', async () => {
+    const editedTask: Task = { ...task, area: 'STUDY', version: 2 };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(editedTask))
+      .mockResolvedValueOnce(taskResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace('area=WORK');
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `编辑任务：${task.title}` }));
+    await user.selectOptions(screen.getByLabelText('编辑任务领域'), 'STUDY');
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(requestUrl(fetchMock, 1)).toBe(`/api/core/tasks/${task.id}`);
+    expect(requestBody(fetchMock, 1)).toEqual({
+      version: 1,
+      title: task.title,
+      area: 'STUDY',
+      priority: task.priority,
+      targetDate: task.targetDate,
+    });
+    expect(screen.getByRole('heading', { name: '任务工作台' })).toHaveFocus();
+  });
+
   it('completes a task with exactly the current version and one write request', async () => {
     const completedTask: Task = {
       ...task,
@@ -418,6 +497,73 @@ describe('TasksWorkspace', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
     expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('keeps the last complete filtered page after a successful patch reload fails', async () => {
+    const completedTask: Task = {
+      ...task,
+      status: 'DONE',
+      version: 2,
+      completedAt: '2026-08-10T02:00:00.000Z',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse())
+      .mockResolvedValueOnce(mutationResponse(completedTask))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: '本地 Core 暂时不可用，请确认服务已启动' } },
+          502,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace('status=IN_PROGRESS');
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败');
+    expect(requestUrl(fetchMock, 0)).toBe('/api/core/tasks?page=1&pageSize=20&status=IN_PROGRESS');
+    expect(requestUrl(fetchMock, 1)).toBe(`/api/core/tasks/${task.id}`);
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
+    expect(requestUrl(fetchMock, 2)).toBe('/api/core/tasks?page=1&pageSize=20&status=IN_PROGRESS');
+    const taskList = within(screen.getByRole('list', { name: '任务列表' }));
+    expect(taskList.getByText('进行中')).toBeInTheDocument();
+    expect(taskList.queryByText('已完成')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('rejects a successful patch response for a different resource without replacing the trusted page', async () => {
+    const otherTask: Task = {
+      ...task,
+      id: '00000000-0000-4000-8000-000000000016',
+      title: '页面中的另一项任务',
+    };
+    const mismatchedTask: Task = {
+      ...otherTask,
+      title: '不可信的错误资源响应',
+      status: 'DONE',
+      version: 2,
+      completedAt: '2026-08-10T02:00:00.000Z',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse([task, otherTask]))
+      .mockResolvedValueOnce(mutationResponse(mismatchedTask));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('任务响应与请求不一致');
+    expect(requestUrl(fetchMock, 1)).toBe(`/api/core/tasks/${task.id}`);
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
+    expect(screen.getByText(otherTask.title)).toBeInTheDocument();
+    expect(screen.queryByText(mismatchedTask.title)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('reveals the deferred date control, retains its value, and sends an explicitly changed date', async () => {
@@ -521,6 +667,48 @@ describe('TasksWorkspace', () => {
     expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
   });
 
+  it('rejects a version-conflict currentTask for a different resource without replacing the trusted page', async () => {
+    const otherTask: Task = {
+      ...task,
+      id: '00000000-0000-4000-8000-000000000017',
+      title: '冲突前页面中的另一项任务',
+    };
+    const mismatchedCurrentTask: Task = {
+      ...otherTask,
+      title: '不可信的冲突资源响应',
+      version: 2,
+      updatedAt: '2026-08-10T03:00:00.000Z',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(taskResponse([task, otherTask]))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: 'VERSION_CONFLICT',
+              message: '数据已变化，请确认最新内容后重试',
+              details: { currentTask: mismatchedCurrentTask },
+            },
+          },
+          409,
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    renderWorkspace();
+    await screen.findByText(task.title);
+    await user.click(screen.getByRole('button', { name: `完成任务：${task.title}` }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('任务响应与请求不一致');
+    expect(requestUrl(fetchMock, 1)).toBe(`/api/core/tasks/${task.id}`);
+    expect(requestBody(fetchMock, 1)).toEqual({ version: 1, status: 'DONE' });
+    expect(screen.getByText(otherTask.title)).toBeInTheDocument();
+    expect(screen.queryByText(mismatchedCurrentTask.title)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not replace the trusted list when version-conflict details are malformed', async () => {
     const fetchMock = vi
       .fn()
@@ -621,6 +809,36 @@ describe('TasksWorkspace', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === 'POST')).toHaveLength(1);
     expect(screen.getByText(task.title)).toBeInTheDocument();
+  });
+
+  it('does not expose state-changing actions for terminal tasks', async () => {
+    const doneTask: Task = {
+      ...task,
+      id: '00000000-0000-4000-8000-000000000018',
+      title: '已完成的终态任务',
+      status: 'DONE',
+      version: 2,
+      completedAt: '2026-08-10T02:00:00.000Z',
+    };
+    const cancelledTask: Task = {
+      ...task,
+      id: '00000000-0000-4000-8000-000000000019',
+      title: '已取消的终态任务',
+      status: 'CANCELLED',
+      version: 2,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(taskResponse([doneTask, cancelledTask]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWorkspace();
+    await screen.findByText(doneTask.title);
+    expect(screen.queryByRole('button', { name: `完成任务：${doneTask.title}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `延期任务：${doneTask.title}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `取消任务：${doneTask.title}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `完成任务：${cancelledTask.title}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `延期任务：${cancelledTask.title}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `取消任务：${cancelledTask.title}` })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('renders task metadata with the frozen mutation controls but no delete, bulk, drag, calendar, or reopen UI', async () => {
