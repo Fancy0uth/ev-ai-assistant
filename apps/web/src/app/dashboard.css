@@ -1475,6 +1475,12 @@
     font-size: 1rem;
   }
 
+  .task-editor__actions button:first-child,
+  .task-editor__actions button:last-child {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+
   .tasks-readonly-row {
     padding: var(--space-4);
   }

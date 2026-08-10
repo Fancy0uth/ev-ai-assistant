@@ -68,11 +68,14 @@ describe('TasksWorkspace', () => {
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'));
   });
 
-  it('keeps every task control at the mobile font and touch-target floor', () => {
+  it('keeps every task control at the mobile font and touch-target floor despite editor button specificity', () => {
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
     const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
     const mobileControlRule = mobileCss.match(
       /\.task-composer input,[\s\S]*?\.tasks-pagination button\s*\{[\s\S]*?\}/,
+    )?.[0];
+    const mobileEditorActionRule = mobileCss.match(
+      /\.task-editor__actions button:first-child,\s*\.task-editor__actions button:last-child\s*\{[\s\S]*?\}/,
     )?.[0];
 
     expect(mobileControlRule).toBeDefined();
@@ -92,6 +95,9 @@ describe('TasksWorkspace', () => {
     expect(mobileControlRule).toContain('.task-defer-control button');
     expect(mobileControlRule).toContain('.task-edit-button');
     expect(mobileControlRule).toContain('.task-actions > button');
+    expect(mobileEditorActionRule).toBeDefined();
+    expect(mobileEditorActionRule).toContain('min-height: 2.75rem;');
+    expect(mobileEditorActionRule).toContain('font-size: 1rem;');
   });
 
   it.each([
