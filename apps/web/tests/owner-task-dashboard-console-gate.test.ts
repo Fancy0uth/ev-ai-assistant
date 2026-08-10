@@ -18,6 +18,7 @@ test('owner Task E2E keeps every console diagnostic collector active across the 
   const pageErrorListener = "page.on('pageerror', onPageError);";
   const normalizedConsoleListener = "page.on('console',onConsole);";
   const normalizedPageErrorListener = "page.on('pageerror',onPageError);";
+  const logoutMarker = "await page.locator('.nav-rail').getByRole('button', { name: '退出' }).click();";
   const finalUnauthorizedAssertion = 'expect(unauthorizedResponse.status()).toBe(401);';
   const finalDiagnosticAssertions = [
     'expect(consoleWarnings).toEqual([]);',
@@ -32,7 +33,7 @@ test('owner Task E2E keeps every console diagnostic collector active across the 
     "await page.getByRole('button', { name: `完成任务：${editedTitle}` }).click();",
     "await page.getByRole('button', { name: `延期任务：${lifecycleTitle}` }).click();",
     "await page.getByRole('button', { name: `取消任务：${lifecycleTitle}` }).click();",
-    "await page.locator('.nav-rail').getByRole('button', { name: '退出' }).click();",
+    logoutMarker,
     finalUnauthorizedAssertion,
   ];
 
@@ -67,7 +68,7 @@ test('owner Task E2E keeps every console diagnostic collector active across the 
 
   expect(source).toContain(finalUnauthorizedAssertion);
   const finalUnauthorizedIndex = source.indexOf(finalUnauthorizedAssertion);
-  const logoutIndex = source.indexOf(lifecycleMarkers[7]);
+  const logoutIndex = source.indexOf(logoutMarker);
   expect(finalUnauthorizedIndex).toBeGreaterThan(logoutIndex);
   const finalDiagnosticIndexes = finalDiagnosticAssertions.map((assertion) => {
     expect(source).toContain(assertion);
