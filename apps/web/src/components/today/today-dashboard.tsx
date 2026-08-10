@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  taskResponseSchema,
   todaySnapshotSchema,
   type Task,
   type TaskStatus,
@@ -8,10 +9,10 @@ import {
 } from '@ev/contracts';
 import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 import { StatusOverview } from './status-overview';
-import { TaskComposer, type TaskDraft } from './task-composer';
+import { TaskComposer, type TaskCreationResult, type TaskDraft } from './task-composer';
 import { TaskList } from './task-list';
 
 interface TodayDashboardProps {
@@ -19,10 +20,19 @@ interface TodayDashboardProps {
 }
 
 type Snapshot = TodaySnapshot['data'];
+type RefreshFailureMode = 'standard' | 'after-create';
 
 function errorMessage(error: unknown): string {
   if (error instanceof CoreClientError) return error.message;
   return 'Dashboard 暂时无法读取本地数据，请稍后重试';
+}
+
+function isCanonicalAuthenticationError(error: unknown): boolean {
+  return (
+    error instanceof CoreClientError &&
+    error.status === 401 &&
+    error.code === 'AUTHENTICATION_REQUIRED'
+  );
 }
 
 export function TodayDashboard({ initialDate }: TodayDashboardProps) {
@@ -30,11 +40,13 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [mutationKey, setMutationKey] = useState<string | null>(null);
+  const createInFlight = useRef(false);
 
   const handleFailure = useCallback(
     (failure: unknown): void => {
-      if (failure instanceof CoreClientError && failure.status === 401) {
+      if (isCanonicalAuthenticationError(failure)) {
         replace('/login');
         return;
       }
@@ -50,13 +62,18 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
     return todaySnapshotSchema.parse(payload).data;
   }, [initialDate]);
 
-  const refresh = useCallback(async (): Promise<boolean> => {
+  const refresh = useCallback(async (failureMode: RefreshFailureMode = 'standard'): Promise<boolean> => {
     try {
       const nextSnapshot = await loadSnapshot();
       setSnapshot(nextSnapshot);
       setError(null);
+      setRefreshWarning(null);
       return true;
     } catch (failure) {
+      if (failureMode === 'after-create' && !isCanonicalAuthenticationError(failure)) {
+        setRefreshWarning('任务已保存，但今天的数据刷新失败');
+        return false;
+      }
       handleFailure(failure);
       return false;
     }
@@ -81,19 +98,24 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
     };
   }, [handleFailure, loadSnapshot]);
 
-  async function createTask(draft: TaskDraft): Promise<boolean> {
+  async function createTask(draft: TaskDraft): Promise<TaskCreationResult> {
+    if (createInFlight.current) return 'failed';
+    createInFlight.current = true;
     setMutationKey('create');
     setError(null);
     try {
-      await requestCore('tasks', {
+      const payload = await requestCore('tasks', {
         method: 'POST',
         body: JSON.stringify({ ...draft, targetDate: initialDate }),
       });
-      return await refresh();
+      taskResponseSchema.parse(payload);
+      await refresh('after-create');
+      return 'saved';
     } catch (failure) {
       handleFailure(failure);
-      return false;
+      return 'failed';
     } finally {
+      createInFlight.current = false;
       setMutationKey(null);
     }
   }
@@ -143,6 +165,15 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
           <span aria-hidden="true" /> Core 已连接
         </div>
       </header>
+
+      {refreshWarning ? (
+        <div className="dashboard-alert" role="alert">
+          <p>{refreshWarning}</p>
+          <button type="button" onClick={() => void refresh('after-create')}>
+            重新加载今天的数据
+          </button>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="dashboard-alert" role="alert">

@@ -10,9 +10,11 @@ export interface TaskDraft {
   priority: TaskPriority;
 }
 
+export type TaskCreationResult = 'saved' | 'failed';
+
 interface TaskComposerProps {
   isPending: boolean;
-  onCreate: (draft: TaskDraft) => Promise<boolean>;
+  onCreate: (draft: TaskDraft) => Promise<TaskCreationResult>;
 }
 
 export function TaskComposer({ isPending, onCreate }: TaskComposerProps) {
@@ -29,7 +31,7 @@ export function TaskComposer({ isPending, onCreate }: TaskComposerProps) {
       return;
     }
     setValidationError(null);
-    if (await onCreate({ title: normalizedTitle, area, priority })) setTitle('');
+    if ((await onCreate({ title: normalizedTitle, area, priority })) === 'saved') setTitle('');
   }
 
   return (
