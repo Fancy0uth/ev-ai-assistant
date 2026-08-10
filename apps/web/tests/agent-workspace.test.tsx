@@ -121,12 +121,14 @@ describe('AgentWorkspace', () => {
       id: '00000000-0000-4000-8000-000000000011',
       title: '新会话',
     };
+    let sessionListReads = 0;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/core/agent/capabilities') {
         return Promise.resolve(jsonResponse(capabilityResponse('NOT_CONFIGURED')));
       }
       if (String(input) === '/api/core/agent/sessions?page=1&pageSize=20') {
-        return Promise.resolve(jsonResponse(sessionsResponse()));
+        sessionListReads += 1;
+        return Promise.resolve(jsonResponse(sessionsResponse(sessionListReads === 1 ? [] : [createdSession])));
       }
       if (String(input) === '/api/core/agent/sessions' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ data: createdSession }, 201));
@@ -210,10 +212,10 @@ describe('AgentWorkspace', () => {
     await screen.findByText('还没有会话');
     await user.click(screen.getByRole('button', { name: '新建会话' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
     expect(requestInit(fetchMock, 2)).toMatchObject({ method: 'POST', body: '{}' });
     expect(screen.getByText('当前会话：刚创建的会话')).toBeInTheDocument();
-    expect(screen.getByLabelText('消息内容')).toHaveFocus();
+    await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveFocus());
   });
 
   it('sends one trimmed exact request and renders only the returned server pair', async () => {
@@ -257,6 +259,8 @@ describe('AgentWorkspace', () => {
     expect(await screen.findByText('先处理最重要的任务。')).toBeInTheDocument();
     expect(screen.getByText('请安排今天')).toBeInTheDocument();
     expect(screen.getByLabelText('消息内容')).toHaveValue('');
+    expect(screen.getByLabelText('消息内容')).toBeEnabled();
+    expect(screen.getByLabelText('消息内容')).toHaveFocus();
   });
 
   it('preserves the draft and trusted messages when a send success payload is malformed', async () => {
@@ -405,6 +409,99 @@ describe('AgentWorkspace', () => {
     expect(screen.getByText('可信消息仍应保留')).toBeInTheDocument();
   });
 
+  it('rejects schema-valid messages that belong to another session and preserves trusted history', async () => {
+    let messageRequests = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === '/api/core/agent/capabilities') return Promise.resolve(jsonResponse(capabilityResponse('READY')));
+      if (String(input) === '/api/core/agent/sessions?page=1&pageSize=20') return Promise.resolve(jsonResponse(sessionsResponse([sessionOne, sessionTwo])));
+      if (String(input) === `/api/core/agent/sessions/${sessionOne.id}/messages?page=1&pageSize=100`) {
+        messageRequests += 1;
+        return messageRequests === 1
+          ? Promise.resolve(jsonResponse(messageResponse(sessionOne.id, [{ id: '00000000-0000-4000-8000-000000000208', role: 'ASSISTANT', content: '会话 A 的可信历史' }])))
+          : Promise.resolve(jsonResponse(messageResponse(sessionTwo.id, [{ id: '00000000-0000-4000-8000-000000000209', role: 'ASSISTANT', content: '不应显示的会话 B 消息' }])));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<AgentWorkspace />);
+    await screen.findByRole('button', { name: sessionOne.title });
+    await user.click(screen.getByRole('button', { name: sessionOne.title }));
+    expect(await screen.findByText('会话 A 的可信历史')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: sessionOne.title }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('当前会话');
+    expect(screen.getByText('会话 A 的可信历史')).toBeInTheDocument();
+    expect(screen.queryByText('不应显示的会话 B 消息')).not.toBeInTheDocument();
+  });
+
+  it('retains a created session when an older sessions response settles later', async () => {
+    const staleSessions = deferred<Response>();
+    const authoritativeSessions = deferred<Response>();
+    const createdSession = { ...sessionOne, id: '00000000-0000-4000-8000-000000000012', title: '创建后保留' };
+    let sessionReads = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/core/agent/capabilities') return Promise.resolve(jsonResponse(capabilityResponse('READY')));
+      if (String(input) === '/api/core/agent/sessions?page=1&pageSize=20') {
+        sessionReads += 1;
+        return sessionReads === 1 ? staleSessions.promise : authoritativeSessions.promise;
+      }
+      if (String(input) === '/api/core/agent/sessions' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: createdSession }, 201));
+      }
+      if (String(input) === `/api/core/agent/sessions/${createdSession.id}/messages?page=1&pageSize=100`) {
+        return Promise.resolve(jsonResponse(messageResponse(createdSession.id)));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<AgentWorkspace />);
+    await user.click(screen.getByRole('button', { name: '新建会话' }));
+
+    expect(await screen.findByRole('button', { name: createdSession.title })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=1&pageSize=20')).toHaveLength(2);
+    });
+
+    staleSessions.resolve(jsonResponse(sessionsResponse()));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: createdSession.title })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: createdSession.title })).toHaveAttribute('aria-pressed', 'true');
+    authoritativeSessions.resolve(jsonResponse(sessionsResponse([createdSession])));
+    expect(await screen.findByRole('button', { name: createdSession.title })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=1&pageSize=20')).toHaveLength(2);
+  });
+
+  it('keeps the last trusted sessions page usable when the requested page fails', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === '/api/core/agent/capabilities') return Promise.resolve(jsonResponse(capabilityResponse('READY')));
+      if (String(input) === '/api/core/agent/sessions?page=1&pageSize=20') {
+        return Promise.resolve(jsonResponse(sessionsResponse([sessionOne], 1, 20, 21, 2)));
+      }
+      if (String(input) === '/api/core/agent/sessions?page=2&pageSize=20') {
+        return Promise.resolve(errorResponse('CORE_UNAVAILABLE', '第二页读取失败', 503));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<AgentWorkspace />);
+    expect(await screen.findByRole('button', { name: sessionOne.title })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下一页会话' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('第二页读取失败');
+    expect(screen.getByRole('button', { name: sessionOne.title })).toBeInTheDocument();
+    expect(screen.getByText('第 1 / 2 页')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一页会话' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重新加载会话' })).toBeEnabled();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/agent/sessions?page=2&pageSize=20')).toHaveLength(1);
+  });
+
   it('issues at most one send POST for duplicate submit events', async () => {
     const send = deferred<Response>();
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -433,14 +530,14 @@ describe('AgentWorkspace', () => {
     });
   });
 
-  it('clears message loading when a successful send supersedes a pending history request', async () => {
+  it('keeps the composer disabled until initial history settles, then renders history and a server pair once', async () => {
     const history = deferred<Response>();
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/core/agent/capabilities') return Promise.resolve(jsonResponse(capabilityResponse('READY')));
       if (String(input) === '/api/core/agent/sessions?page=1&pageSize=20') return Promise.resolve(jsonResponse(sessionsResponse([sessionOne])));
       if (String(input) === `/api/core/agent/sessions/${sessionOne.id}/messages?page=1&pageSize=100`) return history.promise;
       if (String(input) === `/api/core/agent/sessions/${sessionOne.id}/messages` && init?.method === 'POST') {
-        return Promise.resolve(jsonResponse(sentPairResponse(sessionOne.id, '覆盖加载', '服务端消息对'), 201));
+        return Promise.resolve(jsonResponse(sentPairResponse(sessionOne.id, '新消息', '服务端新回复'), 201));
       }
       throw new Error(`Unexpected request: ${String(input)}`);
     });
@@ -451,12 +548,22 @@ describe('AgentWorkspace', () => {
     await screen.findByRole('button', { name: sessionOne.title });
     await user.click(screen.getByRole('button', { name: sessionOne.title }));
     expect(await screen.findByText('正在加载消息…')).toBeInTheDocument();
+    expect(screen.getByLabelText('消息内容')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled();
+    fireEvent.submit(screen.getByRole('button', { name: '发送消息' }).closest('form')!);
+    expect(fetchMock.mock.calls.filter(([url]) => url === `/api/core/agent/sessions/${sessionOne.id}/messages`)).toHaveLength(0);
 
-    await user.type(screen.getByLabelText('消息内容'), '覆盖加载');
+    history.resolve(jsonResponse(messageResponse(sessionOne.id, [{ id: '00000000-0000-4000-8000-000000000207', role: 'ASSISTANT', content: '已持久化历史' }])));
+
+    expect(await screen.findByText('已持久化历史')).toBeInTheDocument();
+    expect(screen.getByLabelText('消息内容')).toBeEnabled();
+    await user.type(screen.getByLabelText('消息内容'), '新消息');
     await user.click(screen.getByRole('button', { name: '发送消息' }));
 
-    expect(await screen.findByText('服务端消息对')).toBeInTheDocument();
-    expect(document.querySelector('.agent-message-list')).toHaveAttribute('aria-busy', 'false');
+    expect(await screen.findByText('服务端新回复')).toBeInTheDocument();
+    expect(screen.getAllByText('已持久化历史', { selector: '.agent-message__content' })).toHaveLength(1);
+    expect(screen.getAllByText('新消息', { selector: '.agent-message__content' })).toHaveLength(1);
+    expect(screen.getAllByText('服务端新回复', { selector: '.agent-message__content' })).toHaveLength(1);
   });
 
   it('renders long server text in a containment class guarded by responsive CSS', async () => {

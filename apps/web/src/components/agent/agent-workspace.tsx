@@ -23,8 +23,16 @@ interface LoadedMessages {
   page: MessagePage;
 }
 
+class UntrustedMessagePageError extends Error {
+  constructor() {
+    super('本地 Core 返回的消息不属于当前会话，请重新加载后重试。');
+    this.name = 'UntrustedMessagePageError';
+  }
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof CoreClientError) return error.message;
+  if (error instanceof UntrustedMessagePageError) return error.message;
   return '本地 Core 返回了无法识别的响应，请稍后重试。';
 }
 
@@ -68,6 +76,14 @@ function messagePageQuery(sessionId: string): string {
   return `agent/sessions/${sessionId}/messages?page=1&pageSize=100`;
 }
 
+function messagePageForSession(payload: unknown, sessionId: string): MessagePage {
+  const page = agentMessageListResponseSchema.parse(payload).data;
+  if (page.items.some((message) => message.sessionId !== sessionId)) {
+    throw new UntrustedMessagePageError();
+  }
+  return page;
+}
+
 export function AgentWorkspace() {
   const { replace } = useRouter();
   const [capability, setCapability] = useState<AgentCapability | null>(null);
@@ -97,6 +113,7 @@ export function AgentWorkspace() {
   const selectedSessionId = useRef<string | null>(null);
   const sessionsRef = useRef<SessionPage | null>(null);
   const messagesRef = useRef<LoadedMessages | null>(null);
+  const sessionRequestController = useRef<AbortController | null>(null);
   const messageRequestController = useRef<AbortController | null>(null);
   const createInFlight = useRef(false);
   const sendInFlight = useRef(false);
@@ -139,6 +156,8 @@ export function AgentWorkspace() {
 
   useEffect(() => {
     const controller = new AbortController();
+    sessionRequestController.current?.abort();
+    sessionRequestController.current = controller;
     const requestId = ++sessionRequestId.current;
     const keepsCurrentPage = sessionsRef.current?.pagination.page === sessionPageNumber;
     setSessionsLoading(!keepsCurrentPage);
@@ -161,7 +180,12 @@ export function AgentWorkspace() {
         setSessionsLoading(false);
       });
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (sessionRequestController.current === controller) {
+        sessionRequestController.current = null;
+      }
+    };
   }, [replace, sessionPageNumber, sessionReloadKey]);
 
   useEffect(() => {
@@ -182,7 +206,7 @@ export function AgentWorkspace() {
     setMissingSessionId(null);
 
     void requestCore(messagePageQuery(sessionId), { method: 'GET', signal: controller.signal })
-      .then((payload) => agentMessageListResponseSchema.parse(payload).data)
+      .then((payload) => messagePageForSession(payload, sessionId))
       .then((page) => {
         if (
           controller.signal.aborted ||
@@ -222,7 +246,14 @@ export function AgentWorkspace() {
     const intent = focusIntent.current;
     if (!intent || intent.sessionId !== selectedSession?.id) return;
 
-    if (intent.kind === 'input' && isConversationReady(capability)) {
+    if (intent.kind === 'input') {
+      if (
+        isSending ||
+        !isConversationReady(capability) ||
+        inputRef.current?.disabled
+      ) {
+        return;
+      }
       inputRef.current?.focus();
       focusIntent.current = null;
       return;
@@ -233,7 +264,7 @@ export function AgentWorkspace() {
       sessionButton.focus();
       focusIntent.current = null;
     }
-  }, [capability, selectedSession, sessions]);
+  }, [capability, isSending, messages, selectedSession, sessions]);
 
   const selectSession = useCallback((session: AgentSession) => {
     if (selectedSessionId.current === session.id) {
@@ -266,6 +297,9 @@ export function AgentWorkspace() {
     try {
       const payload = await requestCore('agent/sessions', { method: 'POST', body: JSON.stringify({}) });
       const createdSession = agentSessionResponseSchema.parse(payload).data;
+      sessionRequestId.current += 1;
+      sessionRequestController.current?.abort();
+      sessionRequestController.current = null;
       focusIntent.current = {
         kind: isConversationReady(capability) ? 'input' : 'session',
         sessionId: createdSession.id,
@@ -286,7 +320,8 @@ export function AgentWorkspace() {
           },
         };
       });
-      if (sessionPageNumber !== 1) setSessionPageNumber(1);
+      setSessionPageNumber(1);
+      setSessionReloadKey((current) => current + 1);
       selectSession(createdSession);
     } catch (error) {
       if (isCanonicalAuthenticationError(error)) {
@@ -298,7 +333,7 @@ export function AgentWorkspace() {
       createInFlight.current = false;
       setIsCreating(false);
     }
-  }, [capability, replace, selectSession, sessionPageNumber]);
+  }, [capability, replace, selectSession]);
 
   const sendMessage = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -310,6 +345,7 @@ export function AgentWorkspace() {
         !session ||
         missingSessionId === session.id ||
         !isConversationReady(capability) ||
+        messages?.sessionId !== session.id ||
         content.length === 0 ||
         content.length > 8000
       ) {
@@ -335,6 +371,7 @@ export function AgentWorkspace() {
 
         messageRequestId.current += 1;
         messageRequestController.current?.abort();
+        focusIntent.current = { kind: 'input', sessionId: session.id };
         setMessagesLoading(false);
         setMessages((current) => {
           const trustedMessages = current?.sessionId === session.id ? current.page.items : [];
@@ -353,7 +390,6 @@ export function AgentWorkspace() {
           };
         });
         setDraft('');
-        inputRef.current?.focus();
       } catch (error) {
         if (isCanonicalAuthenticationError(error)) {
           replace('/login');
@@ -379,16 +415,17 @@ export function AgentWorkspace() {
         setIsSending(false);
       }
     },
-    [capability, draft, missingSessionId, replace, selectedSession],
+    [capability, draft, messages, missingSessionId, replace, selectedSession],
   );
 
-  const currentSessionPage = sessions?.pagination.page === sessionPageNumber ? sessions : null;
+  const displayedSessionPage = sessions;
   const currentMessages =
     messages && messages.sessionId === selectedSession?.id ? messages.page.items : null;
   const canWrite =
     isConversationReady(capability) &&
     selectedSession !== null &&
-    missingSessionId !== selectedSession.id;
+    missingSessionId !== selectedSession.id &&
+    messages?.sessionId === selectedSession.id;
   const canSubmit = canWrite && draft.trim().length > 0 && draft.trim().length <= 8000 && !isSending;
 
   return (
@@ -420,11 +457,11 @@ export function AgentWorkspace() {
           </div>
         ) : null}
 
-        {sessionsLoading && !currentSessionPage ? (
+        {sessionsLoading && !displayedSessionPage ? (
           <p className="agent-loading" role="status">正在加载会话…</p>
-        ) : currentSessionPage?.items.length ? (
+        ) : displayedSessionPage?.items.length ? (
           <ul className="agent-session-list" aria-label="会话列表">
-            {currentSessionPage.items.map((session) => (
+            {displayedSessionPage.items.map((session) => (
               <li key={session.id}>
                 <button
                   ref={(element) => {
@@ -449,23 +486,25 @@ export function AgentWorkspace() {
         <nav className="agent-pagination" aria-label="会话分页">
           <button
             type="button"
-            disabled={!currentSessionPage || currentSessionPage.pagination.page <= 1 || sessionsLoading}
-            onClick={() => setSessionPageNumber((current) => Math.max(1, current - 1))}
+            disabled={!displayedSessionPage || displayedSessionPage.pagination.page <= 1 || sessionsLoading}
+            onClick={() =>
+              setSessionPageNumber(Math.max(1, (displayedSessionPage?.pagination.page ?? 1) - 1))
+            }
           >
             上一页会话
           </button>
           <span aria-live="polite">
-            第 {currentSessionPage?.pagination.page ?? sessionPageNumber} / {currentSessionPage?.pagination.totalPages || 1} 页
+            第 {displayedSessionPage?.pagination.page ?? sessionPageNumber} / {displayedSessionPage?.pagination.totalPages || 1} 页
           </span>
           <button
             type="button"
             disabled={
-              !currentSessionPage ||
-              currentSessionPage.pagination.totalPages === 0 ||
-              currentSessionPage.pagination.page >= currentSessionPage.pagination.totalPages ||
+              !displayedSessionPage ||
+              displayedSessionPage.pagination.totalPages === 0 ||
+              displayedSessionPage.pagination.page >= displayedSessionPage.pagination.totalPages ||
               sessionsLoading
             }
-            onClick={() => setSessionPageNumber((current) => current + 1)}
+            onClick={() => setSessionPageNumber((displayedSessionPage?.pagination.page ?? 0) + 1)}
           >
             下一页会话
           </button>
