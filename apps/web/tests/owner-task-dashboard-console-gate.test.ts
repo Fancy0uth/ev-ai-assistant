@@ -1,17 +1,22 @@
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 
+const gateTestFilePath = fileURLToPath(import.meta.url);
 const ownerTaskDashboardSpecPath = resolve(
-  process.cwd(),
-  'e2e/owner-task-dashboard.spec.ts',
+  dirname(fileURLToPath(import.meta.url)),
+  '../e2e/owner-task-dashboard.spec.ts',
 );
 
-test('owner Task E2E collects every console diagnostic across the full lifecycle', async () => {
+test('owner Task E2E keeps every console diagnostic collector active across the full lifecycle', async () => {
   const source = await readFile(ownerTaskDashboardSpecPath, 'utf8');
+  const gateSource = await readFile(gateTestFilePath, 'utf8');
   const firstNavigation = "await page.goto('/');";
   const consoleListener = "page.on('console', onConsole);";
   const pageErrorListener = "page.on('pageerror', onPageError);";
+  const consoleListenerOff = "page.off('console', onConsole);";
+  const pageErrorListenerOff = "page.off('pageerror', onPageError);";
   const finalUnauthorizedAssertion = 'expect(unauthorizedResponse.status()).toBe(401);';
   const finalDiagnosticAssertions = [
     'expect(consoleWarnings).toEqual([]);',
@@ -43,29 +48,61 @@ test('owner Task E2E collects every console diagnostic across the full lifecycle
   expect(source).toContain(pageErrorListener);
   expect(source).toContain(firstNavigation);
 
-  const firstListener = Math.min(
-    source.indexOf(consoleListener),
-    source.indexOf(pageErrorListener),
-  );
-  expect(firstListener).toBeGreaterThan(-1);
-  expect(firstListener).toBeLessThan(source.indexOf(firstNavigation));
+  const firstNavigationIndex = source.indexOf(firstNavigation);
+  const consoleListenerIndex = source.indexOf(consoleListener);
+  const pageErrorListenerIndex = source.indexOf(pageErrorListener);
+  expect(consoleListenerIndex).toBeGreaterThan(-1);
+  expect(consoleListenerIndex).toBeLessThan(firstNavigationIndex);
+  expect(pageErrorListenerIndex).toBeGreaterThan(-1);
+  expect(pageErrorListenerIndex).toBeLessThan(firstNavigationIndex);
 
   for (const marker of lifecycleMarkers) {
     expect(source).toContain(marker);
-    expect(source.indexOf(marker)).toBeGreaterThan(firstListener);
+    expect(source.indexOf(marker)).toBeGreaterThan(consoleListenerIndex);
+    expect(source.indexOf(marker)).toBeGreaterThan(pageErrorListenerIndex);
   }
 
   expect(source).toContain(finalUnauthorizedAssertion);
   const finalUnauthorizedIndex = source.indexOf(finalUnauthorizedAssertion);
+  const logoutIndex = source.indexOf(lifecycleMarkers[7]);
+  expect(finalUnauthorizedIndex).toBeGreaterThan(logoutIndex);
   const finalDiagnosticIndexes = finalDiagnosticAssertions.map((assertion) => {
     expect(source).toContain(assertion);
     return source.indexOf(assertion);
   });
   expect(Math.min(...finalDiagnosticIndexes)).toBeGreaterThan(finalUnauthorizedIndex);
-  expect(
-    source.indexOf("page.off('console', onConsole);"),
-  ).toBeGreaterThan(Math.max(...finalDiagnosticIndexes));
-  expect(
-    source.indexOf("page.off('pageerror', onPageError);"),
-  ).toBeGreaterThan(Math.max(...finalDiagnosticIndexes));
+  expect(source.split(consoleListenerOff)).toHaveLength(2);
+  expect(source.split(pageErrorListenerOff)).toHaveLength(2);
+  expect(source.indexOf(consoleListenerOff)).toBeGreaterThan(
+    Math.max(...finalDiagnosticIndexes),
+  );
+  expect(source.indexOf(pageErrorListenerOff)).toBeGreaterThan(
+    Math.max(...finalDiagnosticIndexes),
+  );
+
+  for (const diagnosticArray of [
+    'consoleWarnings',
+    'consoleErrors',
+    'pageErrors',
+  ]) {
+    expect(source.split(`const ${diagnosticArray}: string[] = [];`)).toHaveLength(2);
+    expect(source).not.toMatch(
+      new RegExp(`\\b${diagnosticArray}\\.length\\s*=\\s*0`),
+    );
+    expect(source).not.toContain(`${diagnosticArray}.splice(`);
+    expect(source).not.toContain(`${diagnosticArray}.pop(`);
+    expect(source).not.toContain(`${diagnosticArray}.shift(`);
+    expect(source).not.toMatch(
+      new RegExp(`\\b${diagnosticArray}\\s*=\\s*(?!=)`),
+    );
+  }
+  expect(source).not.toContain('removeAllListeners(');
+  expect(source).not.toContain('removeListener(');
+
+  expect(gateSource).not.toMatch(
+    /ownerTaskDashboardSpecPath\s*=\s*resolve\(\s*process\.cwd\(\)/,
+  );
+  expect(gateSource).toMatch(
+    /ownerTaskDashboardSpecPath\s*=\s*resolve\(\s*dirname\(fileURLToPath\(import\.meta\.url\)\)/,
+  );
 });
