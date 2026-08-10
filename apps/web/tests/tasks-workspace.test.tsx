@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,6 +66,32 @@ describe('TasksWorkspace', () => {
     replace.mockReset();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'));
+  });
+
+  it('keeps every task control at the mobile font and touch-target floor', () => {
+    const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
+    const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileControlRule = mobileCss.match(
+      /\.task-composer input,[\s\S]*?\.tasks-pagination button\s*\{[\s\S]*?\}/,
+    )?.[0];
+
+    expect(mobileControlRule).toBeDefined();
+    expect(mobileControlRule).toContain('min-height: 2.75rem;');
+    expect(mobileControlRule).toContain('font-size: 1rem;');
+    expect(mobileControlRule).toContain('.task-composer input');
+    expect(mobileControlRule).toContain('.task-composer select');
+    expect(mobileControlRule).toContain('.composer-submit');
+    expect(mobileControlRule).toContain('.task-secondary-action');
+    expect(mobileControlRule).toContain('.tasks-filters input');
+    expect(mobileControlRule).toContain('.tasks-filters select');
+    expect(mobileControlRule).toContain('.task-creator > button');
+    expect(mobileControlRule).toContain('.task-editor__fields input');
+    expect(mobileControlRule).toContain('.task-editor__fields select');
+    expect(mobileControlRule).toContain('.task-editor__actions button');
+    expect(mobileControlRule).toContain('.task-defer-control input');
+    expect(mobileControlRule).toContain('.task-defer-control button');
+    expect(mobileControlRule).toContain('.task-edit-button');
+    expect(mobileControlRule).toContain('.task-actions > button');
   });
 
   it.each([

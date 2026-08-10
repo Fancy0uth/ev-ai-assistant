@@ -1456,9 +1456,23 @@
     grid-template-columns: 1fr;
   }
 
+  .task-composer input,
+  .task-composer select,
+  .composer-submit,
+  .task-secondary-action,
+  .tasks-filters input,
   .tasks-filters select,
+  .task-creator > button,
+  .task-editor__fields input,
+  .task-editor__fields select,
+  .task-editor__actions button,
+  .task-defer-control input,
+  .task-defer-control button,
+  .task-edit-button,
+  .task-actions > button,
   .tasks-pagination button {
     min-height: 2.75rem;
+    font-size: 1rem;
   }
 
   .tasks-readonly-row {
@@ -1473,23 +1487,6 @@
   .task-defer-control {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .task-creator > button,
-  .task-editor__actions button,
-  .task-edit-button,
-  .task-actions > button,
-  .task-defer-control button {
-    min-height: 2.75rem;
-  }
-
-  .task-creator > button,
-  .task-editor__actions button,
-  .task-defer-control button,
-  .task-editor__fields input,
-  .task-editor__fields select,
-  .task-defer-control input {
-    font-size: 1rem;
   }
 
   .tasks-pagination {
