@@ -12,11 +12,12 @@ const ownerTaskDashboardSpecPath = resolve(
 test('owner Task E2E keeps every console diagnostic collector active across the full lifecycle', async () => {
   const source = await readFile(ownerTaskDashboardSpecPath, 'utf8');
   const gateSource = await readFile(gateTestFilePath, 'utf8');
+  const normalizedSource = source.replace(/\s+/g, '');
   const firstNavigation = "await page.goto('/');";
   const consoleListener = "page.on('console', onConsole);";
   const pageErrorListener = "page.on('pageerror', onPageError);";
-  const consoleListenerOff = "page.off('console', onConsole);";
-  const pageErrorListenerOff = "page.off('pageerror', onPageError);";
+  const normalizedConsoleListener = "page.on('console',onConsole);";
+  const normalizedPageErrorListener = "page.on('pageerror',onPageError);";
   const finalUnauthorizedAssertion = 'expect(unauthorizedResponse.status()).toBe(401);';
   const finalDiagnosticAssertions = [
     'expect(consoleWarnings).toEqual([]);',
@@ -47,6 +48,8 @@ test('owner Task E2E keeps every console diagnostic collector active across the 
   expect(source).toContain(consoleListener);
   expect(source).toContain(pageErrorListener);
   expect(source).toContain(firstNavigation);
+  expect(normalizedSource.split(normalizedConsoleListener)).toHaveLength(2);
+  expect(normalizedSource.split(normalizedPageErrorListener)).toHaveLength(2);
 
   const firstNavigationIndex = source.indexOf(firstNavigation);
   const consoleListenerIndex = source.indexOf(consoleListener);
@@ -71,33 +74,29 @@ test('owner Task E2E keeps every console diagnostic collector active across the 
     return source.indexOf(assertion);
   });
   expect(Math.min(...finalDiagnosticIndexes)).toBeGreaterThan(finalUnauthorizedIndex);
-  expect(source.split(consoleListenerOff)).toHaveLength(2);
-  expect(source.split(pageErrorListenerOff)).toHaveLength(2);
-  expect(source.indexOf(consoleListenerOff)).toBeGreaterThan(
-    Math.max(...finalDiagnosticIndexes),
-  );
-  expect(source.indexOf(pageErrorListenerOff)).toBeGreaterThan(
-    Math.max(...finalDiagnosticIndexes),
-  );
+  expect(normalizedSource).not.toContain('page.off(');
+  expect(normalizedSource).not.toContain('removeAllListeners(');
+  expect(normalizedSource).not.toContain('removeListener(');
 
   for (const diagnosticArray of [
     'consoleWarnings',
     'consoleErrors',
     'pageErrors',
   ]) {
-    expect(source.split(`const ${diagnosticArray}: string[] = [];`)).toHaveLength(2);
-    expect(source).not.toMatch(
-      new RegExp(`\\b${diagnosticArray}\\.length\\s*=\\s*0`),
+    const normalizedInitialization = `const${diagnosticArray}:string[]=[];`;
+    expect(normalizedSource.split(normalizedInitialization)).toHaveLength(2);
+    const sourceWithoutInitialization = normalizedSource.replace(
+      normalizedInitialization,
+      '',
     );
-    expect(source).not.toContain(`${diagnosticArray}.splice(`);
-    expect(source).not.toContain(`${diagnosticArray}.pop(`);
-    expect(source).not.toContain(`${diagnosticArray}.shift(`);
-    expect(source).not.toMatch(
-      new RegExp(`\\b${diagnosticArray}\\s*=\\s*(?!=)`),
+    expect(sourceWithoutInitialization).not.toMatch(
+      new RegExp(`\\b${diagnosticArray}=(?!=)`),
     );
+    expect(sourceWithoutInitialization).not.toContain(`${diagnosticArray}.length=0`);
+    expect(sourceWithoutInitialization).not.toContain(`${diagnosticArray}.splice(`);
+    expect(sourceWithoutInitialization).not.toContain(`${diagnosticArray}.pop(`);
+    expect(sourceWithoutInitialization).not.toContain(`${diagnosticArray}.shift(`);
   }
-  expect(source).not.toContain('removeAllListeners(');
-  expect(source).not.toContain('removeListener(');
 
   expect(gateSource).not.toMatch(
     /ownerTaskDashboardSpecPath\s*=\s*resolve\(\s*process\.cwd\(\)/,

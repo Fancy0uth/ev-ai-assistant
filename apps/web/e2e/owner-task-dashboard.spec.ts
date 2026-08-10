@@ -145,6 +145,4 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
   expect(consoleWarnings).toEqual([]);
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
-  page.off('console', onConsole);
-  page.off('pageerror', onPageError);
 });
