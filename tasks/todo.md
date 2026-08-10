@@ -44,7 +44,7 @@
 - [x] Task 16R：补齐 Terra 复审确认的三项 E2E 测试门缺口。
 - [x] Task 16R2a：把 `GET /v1/auth/session` 固化为显式 authenticated 状态探测，保留 Task/Agent 401 边界。
 - [x] Task 16R2b：更新 Web 启动分支并以全套 E2E 回归 P1-27 的零 console 门。
-- [ ] Task 16R3（Terra 修复 round 1 待完成）：在认证前覆盖 Task 全生命周期的 console warning/error/pageerror 门；门禁从 `import.meta.url` 解析 spec，分别约束两个 listener 的唯一注册/终态解绑，且禁止中途清空诊断数组；只允许两个测试文件、无生产改动，并在 logout/401 断言后归零。
+- [ ] Task 16R3（Terra 修复 round 2 待完成）：在认证前覆盖 Task 全生命周期的 console warning/error/pageerror 门；门禁从 `import.meta.url` 解析 spec，分别断言两个 listener 各自唯一注册。诊断持续性检查须先规范化普通空白，再禁止中途解绑或清空数组，避免空白变体绕过；仍只允许一份 E2E spec 与一份 gate test、无生产改动。实现提交 `3a4ce73` 仅改 gate test；审查包四文件范围由前置文档登记 `413eb65` 造成，属噪声而非实现范围外改动；在 logout/401 断言后归零，最终门禁保持未勾选。
 - [x] Task 17：原子统一全部 workspace 与内部依赖的 `0.2.0` 版本。
 - [x] Task 18：同步运行时健康信息、README 和 `CHANGELOG.md`。
 
