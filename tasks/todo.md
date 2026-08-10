@@ -45,7 +45,7 @@
 - [x] Task 16R2a：把 `GET /v1/auth/session` 固化为显式 authenticated 状态探测，保留 Task/Agent 401 边界。
 - [x] Task 16R2b：更新 Web 启动分支并以全套 E2E 回归 P1-27 的零 console 门。
 - [x] Task 16R3（Terra 修复 round 2 已完成）：在认证前覆盖 Task 全生命周期的 console warning/error/pageerror 门；门禁从 `import.meta.url` 解析 spec，分别断言两个 listener 各自唯一注册。诊断持续性检查先规范化普通空白，再禁止中途解绑或清空数组，避免空白变体绕过；仍只允许一份 E2E spec 与一份 gate test、无生产改动。文档登记提交 `c5ae2bc`、`413eb65`、`b2951a5`；实现提交 `d982a92`、`3a4ce73`、`a58630a`。最终 Terra round 2 Approved，effective P0/P1 为零；gate test 1/1、owner 定向 E2E 1/1 和完整 E2E 3/3 green。最终门禁保持未勾选。
-- [ ] Task 16R4（Terra 冻结）：关闭 P1-29——`owner-task-dashboard-console-gate.test.ts` 第 70 行把 `noUncheckedIndexedAccess` 下的 `lifecycleMarkers[7]`（`string | undefined`）传给 `source.indexOf`，阻断 typecheck/build。只允许该 gate test；将 logout marker 显式收窄为确定 `string` 或采用类型安全等价方式后，gate test、typecheck、build 均须 green；不改生产代码，不提前勾选最终门禁。
+- [x] Task 16R4（Terra 完成）：关闭 P1-29——`owner-task-dashboard-console-gate.test.ts` 第 70 行把 `noUncheckedIndexedAccess` 下的 `lifecycleMarkers[7]`（`string | undefined`）传给 `source.indexOf`，阻断 typecheck/build。只允许该 gate test；将 logout marker 显式收窄为确定 `string` 或采用类型安全等价方式后，gate test、typecheck、build 均须 green；不改生产代码，不提前勾选最终门禁。
 - [x] Task 17：原子统一全部 workspace 与内部依赖的 `0.2.0` 版本。
 - [x] Task 18：同步运行时健康信息、README 和 `CHANGELOG.md`。
 
