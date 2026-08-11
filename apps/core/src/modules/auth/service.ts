@@ -20,6 +20,7 @@ export interface AuthService {
   needsSetup(): boolean;
   setup(credentials: Credentials): Promise<AuthResult>;
   login(credentials: Credentials): Promise<AuthResult>;
+  optionalSessionOwner(token: string | undefined): Owner | null;
   authenticate(token: string | undefined): Owner;
   logout(token: string | undefined): void;
 }
@@ -51,6 +52,13 @@ export async function createAuthService(
       createdAt: issuedAt.toISOString(),
     });
     return { owner: publicOwner(owner), token, expiresAt };
+  }
+
+  function optionalSessionOwner(token: string | undefined): Owner | null {
+    const owner = token
+      ? repository.findOwnerBySession(sessionDigest(token), now().toISOString())
+      : null;
+    return owner ? publicOwner(owner) : null;
   }
 
   return {
@@ -93,14 +101,14 @@ export async function createAuthService(
       return createSession(owner);
     },
 
+    optionalSessionOwner,
+
     authenticate(token) {
-      const owner = token
-        ? repository.findOwnerBySession(sessionDigest(token), now().toISOString())
-        : undefined;
+      const owner = optionalSessionOwner(token);
       if (!owner) {
         throw new ApiError(401, 'AUTHENTICATION_REQUIRED', '请先登录本地账号');
       }
-      return publicOwner(owner);
+      return owner;
     },
 
     logout(token) {

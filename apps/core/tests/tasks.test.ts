@@ -1,11 +1,20 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { taskListResponseSchema, taskResponseSchema } from '@ev/contracts';
+import {
+  taskListResponseSchema,
+  taskResponseSchema,
+  taskVersionConflictDetailsSchema,
+} from '@ev/contracts';
+import type { Task, TaskListQuery } from '@ev/contracts';
+import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
+import { ApiError } from '../src/http/api-error';
 import { createTaskRepository } from '../src/modules/tasks/repository';
+import type { TaskRepository } from '../src/modules/tasks/repository';
+import { createTaskService } from '../src/modules/tasks/service';
 import { openDatabase } from '../src/storage/database';
 
 const credentials = {
@@ -221,12 +230,193 @@ describe('versioned local task API', () => {
       payload: { version: 1, status: 'DONE' },
     });
     expect(stale.statusCode).toBe(409);
-    expect(stale.json()).toEqual({
-      error: {
-        code: 'VERSION_CONFLICT',
-        message: '数据已变化，请确认最新内容后重试',
-      },
+    expect(stale.json().error).toMatchObject({
+      code: 'VERSION_CONFLICT',
+      message: '数据已变化，请确认最新内容后重试',
     });
-    expect(JSON.stringify(created.json())).not.toMatch(/password|session|token/i);
+    expect(taskVersionConflictDetailsSchema.parse(stale.json().error.details).currentTask).toMatchObject({
+      id: task.id,
+      status: 'IN_PROGRESS',
+      version: 2,
+    });
+    expect(JSON.stringify(stale.json())).not.toMatch(/ownerId|cookie|password|session|token/i);
+  });
+});
+
+describe('task list repository filters', () => {
+  const ownerId = '00000000-0000-4000-8000-000000000101';
+  const otherOwnerId = '00000000-0000-4000-8000-000000000102';
+  let database: Database.Database;
+  let repository: TaskRepository;
+  let service: ReturnType<typeof createTaskService>;
+  let filterDirectory: string;
+
+  const fixtureTasks = [
+    ['工作开放今天', 'WORK', 'OPEN', '2026-08-10'],
+    ['学习进行未来', 'STUDY', 'IN_PROGRESS', '2026-08-11'],
+    ['生活完成未来', 'LIFE', 'DONE', '2026-08-12'],
+    ['工作延期过去', 'WORK', 'DEFERRED', '2026-08-09'],
+    ['学习取消未安排', 'STUDY', 'CANCELLED', null],
+    ['工作开放未安排', 'WORK', 'OPEN', null],
+    ['生活开放今天', 'LIFE', 'OPEN', '2026-08-10'],
+    ['工作开放未来', 'WORK', 'OPEN', '2026-08-11'],
+    ['工作开放更晚', 'WORK', 'OPEN', '2026-08-12'],
+    ['学习开放未来', 'STUDY', 'OPEN', '2026-08-13'],
+  ] as const;
+
+  beforeEach(() => {
+    filterDirectory = mkdtempSync(join(tmpdir(), 'ev-core-task-filters-'));
+    database = openDatabase(join(filterDirectory, 'app.sqlite'));
+    database
+      .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+      .run(ownerId, '筛选测试主人', 'not-used-in-this-test', '2026-08-01T00:00:00.000Z');
+    repository = createTaskRepository(database);
+    service = createTaskService(repository);
+
+    fixtureTasks.forEach(([title, area, status, targetDate], index) => {
+      repository.create({
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+        ownerId,
+        title,
+        area,
+        priority: 'MEDIUM',
+        status,
+        targetDate,
+        completedAt: null,
+        version: 1,
+        createdAt: `2026-08-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+        updatedAt: `2026-08-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+      });
+    });
+  });
+
+  afterEach(() => {
+    database.close();
+    rmSync(filterDirectory, { recursive: true, force: true });
+  });
+
+  function titles(query: TaskListQuery): string[] {
+    return repository.list(ownerId, query).items.map((task) => task.title);
+  }
+
+  it.each([
+    [
+      'area',
+      { page: 1, pageSize: 20, area: 'WORK' },
+      ['工作开放今天', '工作开放未安排', '工作开放未来', '工作开放更晚', '工作延期过去'],
+    ],
+    [
+      'status',
+      { page: 1, pageSize: 20, status: 'IN_PROGRESS' },
+      ['学习进行未来'],
+    ],
+    [
+      'exact targetDate',
+      { page: 1, pageSize: 20, targetDate: '2026-08-10' },
+      ['工作开放今天', '生活开放今天'],
+    ],
+  ] satisfies Array<[string, TaskListQuery, string[]]>)('filters by %s', (_filter, query, expected) => {
+    expect(titles(query)).toEqual(expected);
+  });
+
+  it('includes only dates strictly after the FUTURE reference date', () => {
+    expect(
+      titles({ page: 1, pageSize: 20, dateScope: 'FUTURE', referenceDate: '2026-08-10' }),
+    ).toEqual(['学习进行未来', '工作开放未来', '工作开放更晚', '学习开放未来', '生活完成未来']);
+  });
+
+  it('includes only null target dates for UNDATED', () => {
+    expect(titles({ page: 1, pageSize: 20, dateScope: 'UNDATED' })).toEqual([
+      '工作开放未安排',
+      '学习取消未安排',
+    ]);
+  });
+
+  it('applies combined filters before computing page items and totals', () => {
+    const result = service.list(ownerId, {
+      page: 1,
+      pageSize: 1,
+      area: 'WORK',
+      status: 'OPEN',
+      dateScope: 'FUTURE',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.items.map((task) => task.title)).toEqual(['工作开放未来']);
+    expect(result.pagination).toEqual({ page: 1, pageSize: 1, total: 2, totalPages: 2 });
+  });
+
+  it('always isolates a filtered list to the requested owner', () => {
+    expect(
+      repository.list(otherOwnerId, {
+        page: 1,
+        pageSize: 20,
+        area: 'WORK',
+        status: 'OPEN',
+        dateScope: 'FUTURE',
+        referenceDate: '2026-08-10',
+      }),
+    ).toEqual({ items: [], total: 0 });
+  });
+});
+
+describe('task version conflict races', () => {
+  it('returns the latest same-owner task after update loses a race', () => {
+    const ownerId = '00000000-0000-4000-8000-000000000001';
+    const id = '00000000-0000-4000-8000-000000000002';
+    const initialTask: Task = {
+      id,
+      title: '更新项目计划',
+      area: 'WORK',
+      priority: 'MEDIUM',
+      status: 'OPEN',
+      targetDate: null,
+      completedAt: null,
+      version: 1,
+      createdAt: '2026-08-10T09:00:00.000Z',
+      updatedAt: '2026-08-10T09:00:00.000Z',
+    };
+    const latestTask: Task = {
+      ...initialTask,
+      title: '另一客户端已更新的计划',
+      status: 'IN_PROGRESS',
+      version: 2,
+      updatedAt: '2026-08-10T10:00:00.000Z',
+    };
+    const findByIdCalls: Array<[string, string]> = [];
+    const repository: TaskRepository = {
+      create: () => initialTask,
+      findById(foundOwnerId, foundId) {
+        findByIdCalls.push([foundOwnerId, foundId]);
+        return findByIdCalls.length === 1 ? initialTask : latestTask;
+      },
+      list: () => ({ items: [], total: 0 }),
+      listForDate: () => [],
+      update: () => undefined,
+    };
+    const service = createTaskService(repository, {
+      now: () => new Date('2026-08-10T10:01:00.000Z'),
+    });
+
+    let thrown: unknown;
+    try {
+      service.update(ownerId, id, { version: 1, status: 'DONE' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ApiError);
+    if (!(thrown instanceof ApiError)) throw thrown;
+    expect(thrown).toMatchObject({
+      statusCode: 409,
+      code: 'VERSION_CONFLICT',
+      message: '数据已变化，请确认最新内容后重试',
+    });
+    expect(taskVersionConflictDetailsSchema.parse(thrown.details)).toEqual({ currentTask: latestTask });
+    expect(findByIdCalls).toEqual([
+      [ownerId, id],
+      [ownerId, id],
+    ]);
+    expect(JSON.stringify(thrown.details)).not.toMatch(/ownerId|cookie|password|session|token/i);
   });
 });

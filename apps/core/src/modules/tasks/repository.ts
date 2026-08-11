@@ -38,6 +38,7 @@ export interface TaskRepository {
   create(task: NewTask): Task;
   findById(ownerId: string, id: string): Task | undefined;
   list(ownerId: string, query: TaskListQuery): TaskPage;
+  listForDate(ownerId: string, targetDate: string): Task[];
   update(ownerId: string, id: string, update: TaskUpdate): Task | undefined;
 }
 
@@ -68,6 +69,34 @@ const taskColumns = `
   created_at,
   updated_at
 `;
+
+function taskListPredicate(ownerId: string, query: TaskListQuery): {
+  where: string;
+  bindings: unknown[];
+} {
+  const conditions = ['owner_id = ?'];
+  const bindings: unknown[] = [ownerId];
+
+  if (query.area !== undefined) {
+    conditions.push('area = ?');
+    bindings.push(query.area);
+  }
+  if (query.status !== undefined) {
+    conditions.push('status = ?');
+    bindings.push(query.status);
+  }
+  if (query.targetDate !== undefined) {
+    conditions.push('target_date = ?');
+    bindings.push(query.targetDate);
+  } else if (query.dateScope === 'FUTURE') {
+    conditions.push('target_date > ?');
+    bindings.push(query.referenceDate);
+  } else if (query.dateScope === 'UNDATED') {
+    conditions.push('target_date is null');
+  }
+
+  return { where: conditions.join(' and '), bindings };
+}
 
 export function createTaskRepository(database: Database.Database): TaskRepository {
   const findByIdStatement = database.prepare(
@@ -120,9 +149,8 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
     findById,
 
     list(ownerId, query) {
-      const targetDate = query.targetDate ?? null;
       const offset = (query.page - 1) * query.pageSize;
-      const where = 'owner_id = ? and (? is null or target_date = ?)';
+      const { where, bindings } = taskListPredicate(ownerId, query);
       const rows = database
         .prepare(
           `select ${taskColumns}
@@ -145,11 +173,37 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
              id asc
            limit ? offset ?`,
         )
-        .all(ownerId, targetDate, targetDate, query.pageSize, offset) as TaskRow[];
+        .all(...bindings, query.pageSize, offset) as TaskRow[];
       const total = database
         .prepare(`select count(*) as total from tasks where ${where}`)
-        .get(ownerId, targetDate, targetDate) as { total: number };
+        .get(...bindings) as { total: number };
       return { items: rows.map(toTask), total: total.total };
+    },
+
+    listForDate(ownerId, targetDate) {
+      const rows = database
+        .prepare(
+          `select ${taskColumns}
+           from tasks
+           where owner_id = ? and target_date = ?
+           order by
+             case status
+               when 'IN_PROGRESS' then 0
+               when 'OPEN' then 1
+               when 'DEFERRED' then 2
+               when 'DONE' then 3
+               else 4
+             end,
+             case priority
+               when 'HIGH' then 0
+               when 'MEDIUM' then 1
+               else 2
+             end,
+             created_at asc,
+             id asc`,
+        )
+        .all(ownerId, targetDate) as TaskRow[];
+      return rows.map(toTask);
     },
 
     update(ownerId, id, update) {

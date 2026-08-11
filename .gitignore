@@ -1,5 +1,6 @@
 .worktrees/
 .superpowers/
+.sentrux/
 node_modules/
 .next/
 dist/

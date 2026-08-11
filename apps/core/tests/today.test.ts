@@ -1,7 +1,12 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { todaySnapshotSchema } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
+import { createTaskRepository } from '../src/modules/tasks/repository';
+import { openDatabase } from '../src/storage/database';
 
 const credentials = {
   username: '本地主人',
@@ -17,9 +22,11 @@ function readSessionToken(setCookieHeader: string | string[] | undefined): strin
 
 describe('Today snapshot API', () => {
   let app: FastifyInstance | undefined;
+  let testDirectory: string | undefined;
 
   afterEach(async () => {
     if (app) await app.close();
+    if (testDirectory) rmSync(testDirectory, { recursive: true, force: true });
   });
 
   it('returns an authenticated, explainable snapshot without claiming AI ran', async () => {
@@ -77,6 +84,116 @@ describe('Today snapshot API', () => {
       deepSeek: 'NOT_CONFIGURED',
       codex: 'NOT_CONFIGURED',
     });
+  });
+
+  it('calculates Today from every task for the signed-in owner and date', async () => {
+    const date = '2026-08-07';
+    const otherDate = '2026-08-08';
+    const timestamp = '2026-08-07T00:00:00.000Z';
+    const inProgressHighTaskId = '00000000-0000-4000-8000-000000000001';
+    const firstMediumTaskId = '00000000-0000-4000-8000-000000000002';
+    const inProgressLowTaskId = '00000000-0000-4000-8000-000000000003';
+    const lastMediumTaskId = '00000000-0000-4000-8000-000000000100';
+    const priorityTaskId = '00000000-0000-4000-8000-000000000101';
+    const otherDateTaskId = '00000000-0000-4000-8000-000000000102';
+    const otherOwnerId = '00000000-0000-4000-8000-000000000999';
+    testDirectory = mkdtempSync(join(tmpdir(), 'ev-core-today-'));
+    const databasePath = join(testDirectory, 'app.sqlite');
+
+    app = await buildApp({ databasePath, logger: false });
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/setup',
+      payload: credentials,
+    });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    await app.close();
+    app = undefined;
+
+    const database = openDatabase(databasePath);
+    try {
+      const repository = createTaskRepository(database);
+      const owner = database.prepare('select id from owners').get() as { id: string };
+
+      for (let index = 1; index <= 100; index += 1) {
+        repository.create({
+          id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+          ownerId: owner.id,
+          title: `进行中的中优先级任务 ${index}`,
+          area: 'WORK',
+          priority: index === 1 ? 'HIGH' : index === 3 ? 'LOW' : 'MEDIUM',
+          status: 'IN_PROGRESS',
+          targetDate: date,
+          completedAt: null,
+          version: 1,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      }
+      repository.create({
+        id: priorityTaskId,
+        ownerId: owner.id,
+        title: '第 101 个高优先级任务',
+        area: 'WORK',
+        priority: 'HIGH',
+        status: 'OPEN',
+        targetDate: date,
+        completedAt: null,
+        version: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      repository.create({
+        id: otherDateTaskId,
+        ownerId: owner.id,
+        title: '其他日期的高优先级任务',
+        area: 'WORK',
+        priority: 'HIGH',
+        status: 'OPEN',
+        targetDate: otherDate,
+        completedAt: null,
+        version: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+
+      expect(repository.listForDate(otherOwnerId, date)).toEqual([]);
+    } finally {
+      database.close();
+    }
+
+    app = await buildApp({ databasePath, logger: false });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/today?date=${date}`,
+      cookies: { ev_session: token },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const snapshot = todaySnapshotSchema.parse(response.json()).data;
+    expect(snapshot.tasks).toHaveLength(101);
+    const taskIds = snapshot.tasks.map(({ id }) => id);
+    expect(taskIds.slice(0, 2)).toEqual([inProgressHighTaskId, firstMediumTaskId]);
+    expect(taskIds.slice(98)).toEqual([
+      lastMediumTaskId,
+      inProgressLowTaskId,
+      priorityTaskId,
+    ]);
+    expect(taskIds).not.toContain(otherDateTaskId);
+    expect(snapshot.status).toMatchObject({
+      score: 60,
+      level: 'TIGHT',
+      source: 'RULES_V1',
+    });
+    expect(snapshot.status.reasons).toEqual([
+      '仍有 2 个高优先级任务',
+      '待处理任务共 101 个，注意控制负载',
+    ]);
+    expect(snapshot.status.priorities.map(({ id }) => id)).toEqual([
+      inProgressHighTaskId,
+      priorityTaskId,
+      firstMediumTaskId,
+    ]);
   });
 
   it('rejects unauthenticated and invalid-date requests', async () => {

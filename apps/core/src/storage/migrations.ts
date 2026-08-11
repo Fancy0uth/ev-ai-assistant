@@ -51,6 +51,38 @@ const migrations: readonly Migration[] = [
       create index tasks_owner_status_idx on tasks(owner_id, status);
     `,
   },
+  {
+    version: 2,
+    name: 'add_agent_storage',
+    sql: `
+      create table agent_sessions (
+        id text not null primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        title text not null check (
+          length(title) between 1 and 80
+          and length(trim(title)) > 0
+        ),
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create index agent_sessions_owner_updated_at_idx on agent_sessions(owner_id, updated_at);
+
+      create table agent_messages (
+        id text not null primary key,
+        session_id text not null references agent_sessions(id) on delete cascade,
+        role text not null check (role in ('USER', 'ASSISTANT')),
+        content text not null check (
+          length(content) between 1 and 8000
+          and length(trim(content)) > 0
+        ),
+        created_at text not null
+      );
+
+      create index agent_messages_session_created_at_id_idx
+        on agent_messages(session_id, created_at, id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

@@ -12,7 +12,7 @@ describe('Core health routes', () => {
     expect(healthResponseSchema.parse(response.json())).toEqual({
       status: 'ok',
       service: 'ev-core',
-      version: '0.1.0',
+      version: '0.2.0',
     });
 
     await app.close();

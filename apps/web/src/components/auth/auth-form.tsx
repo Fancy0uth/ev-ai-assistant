@@ -1,6 +1,6 @@
 'use client';
 
-import { credentialsSchema } from '@ev/contracts';
+import { credentialsSchema, sessionResponseSchema } from '@ev/contracts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
@@ -28,6 +28,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [setupCompletedMessage, setSetupCompletedMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const isSetup = mode === 'setup';
 
@@ -43,18 +44,23 @@ export function AuthForm({ mode }: AuthFormProps) {
 
     setIsPending(true);
     try {
-      await requestCore(`auth/${mode}`, {
+      const response = await requestCore(`auth/${mode}`, {
         method: 'POST',
         body: JSON.stringify({ username: username.trim(), password }),
       });
+      if (!sessionResponseSchema.safeParse(response).success) {
+        setError('本地 Core 返回了无法识别的响应，请稍后重试');
+        return;
+      }
       router.replace('/today');
     } catch (requestError) {
       if (
         isSetup &&
         requestError instanceof CoreClientError &&
+        requestError.status === 409 &&
         requestError.code === 'SETUP_ALREADY_COMPLETED'
       ) {
-        router.replace('/login');
+        setSetupCompletedMessage(requestError.message);
         return;
       }
       setError(
@@ -65,6 +71,21 @@ export function AuthForm({ mode }: AuthFormProps) {
     } finally {
       setIsPending(false);
     }
+  }
+
+  if (setupCompletedMessage) {
+    return (
+      <div className="auth-panel">
+        <header className="auth-panel__header">
+          <p className="system-kicker">初始化状态已更新</p>
+          <h1>本地账号已初始化</h1>
+          <p role="alert">{setupCompletedMessage}</p>
+        </header>
+        <Link className="primary-button" href="/login">
+          前往登录
+        </Link>
+      </div>
+    );
   }
 
   return (
@@ -93,7 +114,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? `${mode}-form-error` : undefined}
             onChange={(event) => setUsername(event.target.value)}
-            placeholder="例如：codex"
+            placeholder="输入本地用户名"
           />
           <p className="field-hint">3–32 个字符，仅用于这台电脑。</p>
         </div>
@@ -127,13 +148,6 @@ export function AuthForm({ mode }: AuthFormProps) {
           {isPending ? '正在连接本地 Core…' : isSetup ? '创建本地账号' : '登录'}
         </button>
       </form>
-
-      <p className="auth-switch">
-        {isSetup ? '已经初始化过？' : '这是首次启动？'}{' '}
-        <Link href={isSetup ? '/login' : '/setup'}>
-          {isSetup ? '转到登录' : '创建本地账号'}
-        </Link>
-      </p>
     </div>
   );
 }
