@@ -1,4 +1,4 @@
-import type { CalendarRule, Event, Term, TimeRequest } from '@ev/contracts';
+import type { CalendarRule, Event, Signal, Term, TimeRequest } from '@ev/contracts';
 import type Database from 'better-sqlite3';
 
 export interface NewTerm extends Term {
@@ -14,6 +14,10 @@ export interface NewEvent extends Event {
 }
 
 export interface NewTimeRequest extends TimeRequest {
+  ownerId: string;
+}
+
+export interface NewSignal extends Signal {
   ownerId: string;
 }
 
@@ -71,6 +75,17 @@ interface TimeRequestRow {
   updated_at: string;
 }
 
+interface SignalRow {
+  id: string;
+  local_date: string;
+  kind: Signal['kind'];
+  value: number;
+  source: Signal['source'];
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CalendarRepository {
   createTerm(term: NewTerm): Term;
   findTerm(ownerId: string, termId: string): Term | undefined;
@@ -80,6 +95,7 @@ export interface CalendarRepository {
   listEventsForDate(ownerId: string, localDate: string): Event[];
   createTimeRequest(request: NewTimeRequest): TimeRequest;
   listTimeRequestsForDate(ownerId: string, localDate: string): TimeRequest[];
+  createSignal(signal: NewSignal): Signal;
 }
 
 function toTerm(row: TermRow): Term {
@@ -144,6 +160,19 @@ function toTimeRequest(row: TimeRequestRow): TimeRequest {
   };
 }
 
+function toSignal(row: SignalRow): Signal {
+  return {
+    id: row.id,
+    localDate: row.local_date,
+    kind: row.kind,
+    value: row.value,
+    source: row.source,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 const termColumns = `
   id, title, timezone, week_one_monday, version, created_at, updated_at
 `;
@@ -161,6 +190,10 @@ const eventColumns = `
 const timeRequestColumns = `
   id, source, title, target_date, duration_minutes, priority, earliest_start_local_time,
   latest_end_local_time, is_fixed, version, created_at, updated_at
+`;
+
+const signalColumns = `
+  id, local_date, kind, value, source, version, created_at, updated_at
 `;
 
 export function createCalendarRepository(database: Database.Database): CalendarRepository {
@@ -319,6 +352,30 @@ export function createCalendarRepository(database: Database.Database): CalendarR
         )
         .all(ownerId, localDate) as TimeRequestRow[];
       return rows.map(toTimeRequest);
+    },
+
+    createSignal(signal) {
+      database
+        .prepare(
+          `insert into signals (
+             id, owner_id, local_date, kind, value, source, version, created_at, updated_at
+           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          signal.id,
+          signal.ownerId,
+          signal.localDate,
+          signal.kind,
+          signal.value,
+          signal.source,
+          signal.version,
+          signal.createdAt,
+          signal.updatedAt,
+        );
+      const row = database
+        .prepare(`select ${signalColumns} from signals where id = ? and owner_id = ?`)
+        .get(signal.id, signal.ownerId) as SignalRow;
+      return toSignal(row);
     },
   };
 }

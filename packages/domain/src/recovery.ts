@@ -1,7 +1,7 @@
 export interface RecoveryInput {
   sleepHours: number;
-  energy: 1 | 2 | 3 | 4 | 5;
-  discomfort: 0 | 1 | 2 | 3 | 4 | 5;
+  energy: number;
+  discomfort: number;
 }
 
 export interface RecoveryAssessment {
@@ -13,6 +13,12 @@ export interface RecoveryAssessment {
 export function calculateRecovery(input: RecoveryInput): RecoveryAssessment {
   if (!Number.isFinite(input.sleepHours) || input.sleepHours < 0 || input.sleepHours > 24) {
     throw new RangeError('sleepHours must be between 0 and 24');
+  }
+  if (!Number.isInteger(input.energy) || input.energy < 1 || input.energy > 5) {
+    throw new RangeError('energy must be an integer between 1 and 5');
+  }
+  if (!Number.isInteger(input.discomfort) || input.discomfort < 0 || input.discomfort > 5) {
+    throw new RangeError('discomfort must be an integer between 0 and 5');
   }
   const sleepScore = Math.min(40, Math.max(0, Math.round((input.sleepHours / 8) * 40)));
   const energyScore = input.energy * 12;

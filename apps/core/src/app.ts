@@ -16,6 +16,8 @@ import { createCourseImportService } from './modules/calendar/import-service';
 import { registerDayPlanningRoutes } from './modules/day-planning/routes';
 import { createDayPlanningService } from './modules/day-planning/service';
 import { registerHealthRoutes } from './modules/health/routes';
+import { registerFitnessRoutes } from './modules/fitness/routes';
+import { createFitnessService } from './modules/fitness/service';
 import { createDailyPlannerJobService } from './modules/jobs/service';
 import { createProposalRepository } from './modules/proposals/repository';
 import { registerProposalRoutes } from './modules/proposals/routes';
@@ -64,6 +66,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const taskService = createTaskService(createTaskRepository(database));
   const calendarRepository = createCalendarRepository(database);
   const calendarService = createCalendarService(calendarRepository);
+  const fitnessService = createFitnessService(calendarRepository);
   const proposalService = createProposalService(
     createProposalRepository(database),
     calendarRepository,
@@ -115,6 +118,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerTaskRoutes(app, { authService, taskService });
   await registerCalendarRoutes(app, { authService, calendarService });
   await registerCourseImportRoutes(app, { authService, courseImportService });
+  await registerFitnessRoutes(app, { authService, fitnessService });
   await registerProposalRoutes(app, { authService, proposalService });
   await registerProviderRoutes(app, { authService, providerService });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });

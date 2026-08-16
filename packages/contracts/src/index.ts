@@ -8,3 +8,4 @@ export * from './proposals';
 export * from './providers';
 export * from './tasks';
 export * from './today';
+export * from './wellbeing';
