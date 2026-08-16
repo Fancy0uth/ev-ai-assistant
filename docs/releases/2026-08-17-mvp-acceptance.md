@@ -57,7 +57,7 @@
 
 E2E 中页面级 console/pageerror 监听为零问题；终端中的 `NO_COLOR` Node 警告来自测试进程环境，不是浏览器页面错误。
 
-独立验收预览已使用全新的 `data/acceptance-preview-20260817` 数据目录启动：Core `http://127.0.0.1:4316/v1/health/ready` 和 Web `http://127.0.0.1:3016/setup` 均返回 HTTP 200。该目录中尚无 Owner；验收人员应自行建立唯一测试账号。
+独立验收预览已使用全新的 `data/acceptance-preview-final-86466683bdb046d29b69b9b1baf8e503` 数据目录启动：Core `http://127.0.0.1:4316/v1/health/ready` 和 Web `http://127.0.0.1:3016/setup` 均返回 HTTP 200。该目录中尚无 Owner；验收人员应自行建立唯一测试账号。
 
 ## 5. 缺陷、限制和回滚
 
