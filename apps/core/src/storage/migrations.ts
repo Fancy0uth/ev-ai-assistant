@@ -392,6 +392,22 @@ const migrations: readonly Migration[] = [
       create index meal_records_owner_date_idx on meal_records(owner_id, local_date, created_at, id);
     `,
   },
+  {
+    version: 9,
+    name: 'add_course_resources',
+    sql: `
+      create table course_resources (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        course_id text not null references courses(id) on delete cascade,
+        title text not null check (length(trim(title)) between 1 and 200),
+        url text not null check (length(url) between 1 and 2000),
+        source text not null check (source in ('USER_PROVIDED', 'PUBLIC_SEARCH')),
+        created_at text not null
+      );
+      create index course_resources_owner_course_idx on course_resources(owner_id, course_id, created_at, id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

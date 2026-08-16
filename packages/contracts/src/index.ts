@@ -3,6 +3,7 @@ export * from './agent';
 export * from './auth';
 export * from './calendar';
 export * from './course-import';
+export * from './courses';
 export * from './health';
 export * from './nutrition';
 export * from './proposals';
