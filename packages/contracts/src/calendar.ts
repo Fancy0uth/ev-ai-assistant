@@ -65,7 +65,6 @@ export const calendarRuleSchema = z
 export const eventSchema = z
   .object({
     id: z.uuid(),
-    ownerId: z.uuid(),
     calendarRuleId: z.uuid().nullable(),
     title: nonBlankTitleSchema,
     kind: eventKindSchema,
@@ -92,7 +91,6 @@ export const eventSchema = z
 export const actionSchema = z
   .object({
     id: z.uuid(),
-    ownerId: z.uuid(),
     eventId: z.uuid().nullable(),
     title: nonBlankTitleSchema,
     kind: actionKindSchema,
@@ -107,7 +105,6 @@ export const actionSchema = z
 export const activitySessionSchema = z
   .object({
     id: z.uuid(),
-    ownerId: z.uuid(),
     actionId: z.uuid().nullable(),
     kind: activitySessionKindSchema,
     startedAt: z.iso.datetime(),
@@ -131,7 +128,6 @@ export const activitySessionSchema = z
 export const signalSchema = z
   .object({
     id: z.uuid(),
-    ownerId: z.uuid(),
     localDate: z.iso.date(),
     kind: signalKindSchema,
     value: z.number().min(0).max(100),
@@ -145,7 +141,6 @@ export const signalSchema = z
 export const timeRequestSchema = z
   .object({
     id: z.uuid(),
-    ownerId: z.uuid(),
     source: timeRequestSourceSchema,
     title: nonBlankTitleSchema,
     targetDate: z.iso.date(),

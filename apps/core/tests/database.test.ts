@@ -46,6 +46,35 @@ const migration001FixtureSql = `
       create index tasks_owner_status_idx on tasks(owner_id, status);
     `;
 
+const migration002FixtureSql = `
+      create table agent_sessions (
+        id text not null primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        title text not null check (
+          length(title) between 1 and 80
+          and length(trim(title)) > 0
+        ),
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create index agent_sessions_owner_updated_at_idx on agent_sessions(owner_id, updated_at);
+
+      create table agent_messages (
+        id text not null primary key,
+        session_id text not null references agent_sessions(id) on delete cascade,
+        role text not null check (role in ('USER', 'ASSISTANT')),
+        content text not null check (
+          length(content) between 1 and 8000
+          and length(trim(content)) > 0
+        ),
+        created_at text not null
+      );
+
+      create index agent_messages_session_created_at_id_idx
+        on agent_messages(session_id, created_at, id);
+    `;
+
 describe('SQLite lifecycle', () => {
   let testDirectory: string;
 
@@ -72,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 2 });
+    expect(migrations).toEqual({ count: 3 });
     second.close();
   });
 
@@ -259,6 +288,7 @@ describe('SQLite lifecycle', () => {
       ).toEqual([
         { version: 1, name: 'initial_core_schema' },
         { version: 2, name: 'add_agent_storage' },
+        { version: 3, name: 'add_local_daily_console' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -377,11 +407,146 @@ describe('SQLite lifecycle', () => {
     const reopened = openDatabase(databasePath);
     try {
       expect(
-        reopened.prepare('select count(*) as count from schema_migrations where version = 2').get(),
+        reopened.prepare('select count(*) as count from schema_migrations where version = 3').get(),
       ).toEqual({ count: 1 });
       expect(reopened.pragma('foreign_keys', { simple: true })).toBe(1);
     } finally {
       reopened.close();
+    }
+  });
+
+  it('upgrades a frozen migration 002 database while retaining Owner, Task and Agent rows', () => {
+    const databasePath = join(testDirectory, 'app.sqlite');
+    const fixture = new Database(databasePath);
+    const owner = {
+      singleton_key: 1,
+      id: 'owner-v2',
+      username: 'fixture-owner-v2',
+      password_hash: 'fixture-hash-v2',
+      created_at: '2026-08-10T00:00:00.000Z',
+    };
+    const task = {
+      id: 'task-v2',
+      owner_id: owner.id,
+      title: 'Migration must preserve me',
+      area: 'WORK',
+      priority: 'MEDIUM',
+      status: 'IN_PROGRESS',
+      target_date: '2026-08-17',
+      completed_at: null,
+      version: 4,
+      created_at: '2026-08-10T00:01:00.000Z',
+      updated_at: '2026-08-16T00:01:00.000Z',
+    };
+    const agentSession = {
+      id: 'agent-session-v2',
+      owner_id: owner.id,
+      title: 'Keep my conversation',
+      created_at: '2026-08-10T00:02:00.000Z',
+      updated_at: '2026-08-10T00:02:00.000Z',
+    };
+    const agentMessage = {
+      id: 'agent-message-v2',
+      session_id: agentSession.id,
+      role: 'USER',
+      content: 'Keep my message',
+      created_at: '2026-08-10T00:03:00.000Z',
+    };
+
+    try {
+      fixture.pragma('foreign_keys = ON');
+      fixture.exec(`
+        create table schema_migrations (
+          version integer primary key,
+          name text not null,
+          applied_at text not null
+        );
+      `);
+      fixture.exec(migration001FixtureSql);
+      fixture.exec(migration002FixtureSql);
+      fixture
+        .prepare('insert into schema_migrations (version, name, applied_at) values (?, ?, ?)')
+        .run(1, 'initial_core_schema', '2026-08-07T00:00:00.000Z');
+      fixture
+        .prepare('insert into schema_migrations (version, name, applied_at) values (?, ?, ?)')
+        .run(2, 'add_agent_storage', '2026-08-10T00:00:00.000Z');
+      fixture
+        .prepare(
+          `insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)`,
+        )
+        .run(owner.id, owner.username, owner.password_hash, owner.created_at);
+      fixture
+        .prepare(
+          `insert into tasks (
+            id, owner_id, title, area, priority, status, target_date, completed_at,
+            version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          task.id,
+          task.owner_id,
+          task.title,
+          task.area,
+          task.priority,
+          task.status,
+          task.target_date,
+          task.completed_at,
+          task.version,
+          task.created_at,
+          task.updated_at,
+        );
+      fixture
+        .prepare(
+          `insert into agent_sessions (id, owner_id, title, created_at, updated_at)
+           values (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          agentSession.id,
+          agentSession.owner_id,
+          agentSession.title,
+          agentSession.created_at,
+          agentSession.updated_at,
+        );
+      fixture
+        .prepare(
+          `insert into agent_messages (id, session_id, role, content, created_at)
+           values (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          agentMessage.id,
+          agentMessage.session_id,
+          agentMessage.role,
+          agentMessage.content,
+          agentMessage.created_at,
+        );
+    } finally {
+      fixture.close();
+    }
+
+    const upgraded = openDatabase(databasePath);
+    try {
+      expect(upgraded.prepare('select * from owners where id = ?').get(owner.id)).toEqual(owner);
+      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual(task);
+      expect(
+        upgraded.prepare('select * from agent_sessions where id = ?').get(agentSession.id),
+      ).toEqual(agentSession);
+      expect(
+        upgraded.prepare('select * from agent_messages where id = ?').get(agentMessage.id),
+      ).toEqual(agentMessage);
+      expect(
+        upgraded.prepare('select version, name from schema_migrations order by version').all(),
+      ).toEqual([
+        { version: 1, name: 'initial_core_schema' },
+        { version: 2, name: 'add_agent_storage' },
+        { version: 3, name: 'add_local_daily_console' },
+      ]);
+      expect(
+        upgraded
+          .prepare("select name from sqlite_master where type = 'table' and name = 'proposals'")
+          .get(),
+      ).toEqual({ name: 'proposals' });
+    } finally {
+      upgraded.close();
     }
   });
 });

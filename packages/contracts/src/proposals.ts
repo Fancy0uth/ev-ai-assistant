@@ -42,7 +42,6 @@ const proposalTitleSchema = z
 export const proposalSchema = z
   .object({
     id: z.uuid(),
-    ownerId: z.uuid(),
     kind: proposalKindSchema,
     status: proposalStatusSchema,
     source: proposalSourceSchema,

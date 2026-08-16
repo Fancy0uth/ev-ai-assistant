@@ -36,7 +36,6 @@ describe('calendar and proposal contracts', () => {
   it('requires a versioned, reviewable proposal before changes can materialize', () => {
     const proposal = {
       id: 'b502a238-10c6-4b7b-bd87-6981095ad4bd',
-      ownerId: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c',
       kind: 'SCHEDULE',
       status: 'PENDING',
       source: 'COURSE_IMPORT',
@@ -68,7 +67,6 @@ describe('calendar and proposal contracts', () => {
   it('keeps Event, Signal and TimeRequest distinct for the daily coordination loop', () => {
     const base = {
       id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c',
-      ownerId: '4c9ca70a-f3cf-4c0c-ae9d-e2bb4eb3f5b3',
       version: 1,
       createdAt: '2026-08-17T00:00:00.000Z',
       updatedAt: '2026-08-17T00:00:00.000Z',
@@ -87,6 +85,20 @@ describe('calendar and proposal contracts', () => {
         status: 'CONFIRMED',
       }).kind,
     ).toBe('MEETING');
+    expect(
+      eventSchema.safeParse({
+        ...base,
+        ownerId: '4c9ca70a-f3cf-4c0c-ae9d-e2bb4eb3f5b3',
+        calendarRuleId: null,
+        title: '不应暴露 Owner',
+        kind: 'PERSONAL',
+        localDate: '2026-08-17',
+        startLocalTime: '10:00',
+        endLocalTime: '10:30',
+        isHard: false,
+        status: 'CONFIRMED',
+      }).success,
+    ).toBe(false);
     expect(
       signalSchema.safeParse({
         ...base,
