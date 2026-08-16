@@ -1,4 +1,5 @@
 import type { AgentCapability, AgentSession } from '@ev/contracts';
+import Link from 'next/link';
 
 interface AgentContextPanelProps {
   capability: AgentCapability | null;
@@ -41,6 +42,9 @@ export function AgentContextPanel({ capability, session }: AgentContextPanelProp
         {availability.detail}
       </p>
       <p className="agent-context-panel__local-note">数据保存在本地 Core。</p>
+      <Link className="agent-settings-link" href="/settings/providers">
+        查看 Provider 状态与配置边界
+      </Link>
     </aside>
   );
 }
