@@ -39,7 +39,7 @@ export async function registerTodayRoutes(
         status,
         tasks,
         events: calendarRepository.listEventsForDate(ownerId, date),
-        signals: [],
+        signals: calendarRepository.listSignalsForDate(ownerId, date),
         pendingProposals: proposalService.listPending(ownerId),
         yesterday,
         agents: {

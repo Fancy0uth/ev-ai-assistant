@@ -536,6 +536,32 @@
   padding: var(--space-5);
 }
 
+.overview-card--recovery {
+  border-top: 0.1875rem solid var(--amber-500);
+}
+
+.recovery-card__level {
+  margin: var(--space-5) 0 0;
+  color: var(--ink-950);
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.recovery-card__note,
+.recovery-card__boundary {
+  margin: var(--space-2) 0 0;
+  color: #65706b;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.recovery-card__boundary {
+  padding-top: var(--space-3);
+  color: #737d79;
+  border-top: 1px solid var(--paper-200);
+  font-size: 0.625rem;
+}
+
 .section-heading h2,
 .task-list-card__header h2,
 .composer-copy h2 {

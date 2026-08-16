@@ -62,6 +62,24 @@ const populatedSnapshot = {
   },
 };
 
+const recoverySnapshot = {
+  data: {
+    ...emptySnapshot.data,
+    signals: [
+      {
+        id: '00000000-0000-4000-8000-000000000111',
+        localDate: '2026-08-07',
+        kind: 'RECOVERY',
+        value: 25,
+        source: 'CHECK_IN',
+        version: 1,
+        createdAt: '2026-08-07T01:00:00.000Z',
+        updatedAt: '2026-08-07T01:00:00.000Z',
+      },
+    ],
+  },
+};
+
 const longTitleSnapshot = {
   data: {
     ...populatedSnapshot.data,
@@ -116,6 +134,17 @@ describe('TodayDashboard', () => {
     const renderedIds = Array.from(document.querySelectorAll('[id]'), ({ id }) => id);
     expect(new Set(renderedIds).size).toBe(renderedIds.length);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('shows the latest local recovery signal as a decision input', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(recoverySnapshot)));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(await screen.findByText('恢复状态')).toBeInTheDocument();
+    expect(screen.getByText('注意恢复')).toBeInTheDocument();
+    expect(screen.getByText('25 / 100')).toBeInTheDocument();
+    expect(screen.getByText('来自本地打卡，不构成医疗判断')).toBeInTheDocument();
   });
 
   it('acknowledges a schema-valid create before its background Today projection settles', async () => {

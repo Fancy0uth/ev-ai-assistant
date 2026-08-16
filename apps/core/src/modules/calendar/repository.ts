@@ -96,6 +96,7 @@ export interface CalendarRepository {
   createTimeRequest(request: NewTimeRequest): TimeRequest;
   listTimeRequestsForDate(ownerId: string, localDate: string): TimeRequest[];
   createSignal(signal: NewSignal): Signal;
+  listSignalsForDate(ownerId: string, localDate: string): Signal[];
 }
 
 function toTerm(row: TermRow): Term {
@@ -376,6 +377,18 @@ export function createCalendarRepository(database: Database.Database): CalendarR
         .prepare(`select ${signalColumns} from signals where id = ? and owner_id = ?`)
         .get(signal.id, signal.ownerId) as SignalRow;
       return toSignal(row);
+    },
+
+    listSignalsForDate(ownerId, localDate) {
+      const rows = database
+        .prepare(
+          `select ${signalColumns}
+           from signals
+           where owner_id = ? and local_date = ?
+           order by created_at asc, id asc`,
+        )
+        .all(ownerId, localDate) as SignalRow[];
+      return rows.map(toSignal);
     },
   };
 }

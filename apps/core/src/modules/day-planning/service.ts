@@ -21,7 +21,7 @@ export function createDayPlanningService(
         status: calculateDailyStatus({ tasks, yesterday: null }),
         events: calendarRepository.listEventsForDate(ownerId, localDate),
         tasks,
-        signals: [],
+        signals: calendarRepository.listSignalsForDate(ownerId, localDate),
         pendingProposals: proposalService.listPending(ownerId),
       };
     },

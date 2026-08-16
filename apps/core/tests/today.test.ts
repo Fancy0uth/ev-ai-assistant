@@ -86,6 +86,45 @@ describe('Today snapshot API', () => {
     });
   });
 
+  it('includes the signed-in owner’s recovery signals for the requested day', async () => {
+    app = await buildApp({ logger: false });
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/setup',
+      payload: credentials,
+    });
+    const token = readSessionToken(setup.headers['set-cookie']);
+
+    const checkIn = await app.inject({
+      method: 'POST',
+      url: '/v1/check-ins',
+      cookies: { ev_session: token },
+      payload: {
+        localDate: '2026-08-07',
+        sleepHours: 5,
+        energy: 2,
+        discomfort: 4,
+      },
+    });
+    expect(checkIn.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/today?date=2026-08-07',
+      cookies: { ev_session: token },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(todaySnapshotSchema.parse(response.json()).data.signals).toEqual([
+      expect.objectContaining({
+        kind: 'RECOVERY',
+        source: 'CHECK_IN',
+        value: 25,
+        localDate: '2026-08-07',
+      }),
+    ]);
+  });
+
   it('calculates Today from every task for the signed-in owner and date', async () => {
     const date = '2026-08-07';
     const otherDate = '2026-08-08';
