@@ -1,40 +1,45 @@
-# EV AI Dashboard：v0.2.0 Dashboard 稳定化执行总览
+# EV AI Dashboard：MVP 实施总览
 
-## 权威文档
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | 已获目标模式授权，待执行 |
+| 权威输入 | [PRD](../docs/product/PRD.md)、[MVP](../docs/product/MVP-SCOPE.md)、[TECH_SPEC](../docs/technical/TECH_SPEC.md)、[ARCHITECTURE](../docs/technical/ARCHITECTURE.md) |
+| 历史计划 | v0.2 Dashboard 稳定化历史保留在 `docs/superpowers/plans/2026-08-10-v0.2.0-dashboard-stabilization.md` |
 
-- [产品总规格](../docs/superpowers/specs/2026-08-07-local-first-personal-ai-dashboard-v2-design.md)
-- [v0.2.0 改进设计](../docs/superpowers/specs/2026-08-10-v0.2.0-improvement-design.md)
-- [v0.2.0 TDD 实施计划](../docs/superpowers/plans/2026-08-10-v0.2.0-dashboard-stabilization.md)
-- ADR-005 至 ADR-008：本地 Core、Agent 路由、外部集成延期、Windows 先于 Docker。
+## 实施顺序
 
-旧 Supabase、`.ics` 与可选 Bridge 规格仅作历史记录。本文件中的 `v0.2.0` 指 Dashboard 稳定化版本，不是 Event/Scheduler 产品 Milestone 0.2。
+1. **基线恢复**：先使 workspace 安装、Core 契约和 Web 测试恢复可信。
+2. **日程核心闭环**：Contracts/Domain、SQLite 加法迁移、Event/Action/Signal、Proposal 事务与 Today 聚合。
+3. **课表输入与每日协调**：上传、Provider Port、候选/周次展开、确认、07:00 Job。
+4. **专业模块**：本地记忆、项目快照、课程、健身、饮食；每个模块只完成 MVP 最小纵向链路。
+5. **Web 控制台**：真实路由、首页、日程与详情页、设置/记忆/Agent 状态；桌面和 iPhone 响应式。
+6. **验证与交付**：最小自动化、浏览器流程、缺陷记录和修复、质量/验收文档。
 
-## 当前真实状态
+## 依赖图
 
-- [x] 从干净提交 `83f4b37` 发布私有 GitHub 技术预览 `v0.1.0`。
-- [x] 完成 v0.1 基线自动化、Code Intel lite 与桌面/移动浏览器审计。
-- [x] 由主 Agent 复核并冻结 v0.2.0 改进设计与实施计划。
-- [ ] 实现、复审并集成全部 v0.2.0 P0/P1 切片。
-- [ ] 通过全仓、迁移、安全、依赖、Code Intel 和四视口浏览器门禁。
-- [ ] 完成验收文档、推送分支、创建 ready-for-review PR，并启动独立预览。
+```text
+Baseline
+  └─ Contracts + Domain
+       └─ Migration + Repositories
+            └─ Proposal + Day View
+                 ├─ Course import + daily scheduler
+                 ├─ Memory + Provider configuration
+                 ├─ Project snapshot / Learning
+                 └─ Fitness / Nutrition
+                      └─ Web pages + iPhone layout
+                           └─ E2E, bug fixes, acceptance
+```
 
-## 阶段顺序
+## 质量门
 
-1. 契约：Agent 资源、Task 查询与 409 最新实体。
-2. 数据：SQLite migration 002 与 001→002 保留数据证明。
-3. Core：Agent Repository/Service/API、Today 101+、Task 冲突语义。
-4. 安全与认证：BFF loopback/Cookie 最小化、根路由与单 Owner 启动解析。
-5. Dashboard：共享真实路由 Shell、独立 Tasks、Today 恢复与响应式修复、独立 Agent UI。
-6. 质量：隔离 E2E、四视口矩阵、版本与 CHANGELOG。
-7. 发布候选：全套门禁、Sol 最终审查、验收文档、PR 和独立预览。
+- 每个切片：先写失败测试，最小实现，运行目标测试，独立提交。
+- 每两到三个切片：`npm test`、`npm run typecheck`、`npm run lint`、`git diff --check`。
+- 进入 E2E 前：所有单元/集成测试绿；E2E 使用独立端口与 `EV_DATA_DIR`。
+- 交付前：记录实际测试范围、未覆盖范围、发现的 bug 和对应修复，不以模拟 Provider 伪造真实连接。
 
-## 角色与提交规则
+## 绝不跨越的边界
 
-- Terra：每次只实现一个 TDD 切片，使用独立 fork 和原子提交。
-- Sol：每个切片后在新上下文做契约、质量、安全和最小边界复审。
-- 主 Agent：冻结契约、集成、分类审查意见、运行最终门禁和编写验收文档。
-- 当前没有 v0.2.0 实现任务被标记为完成；不得用文档存在代替实现和验证证据。
-
-## 停止边界
-
-涉及真实 Provider/Key、长期记忆、外部服务、Docker/Tailscale、原生 App、多用户、破坏性迁移或范围外产品功能时停止并重新请求批准。有效 P0/P1、迁移数据丢失、Agent 503 后写入、BFF 非 loopback 凭据暴露或高危/严重运行时漏洞都会阻止 PR。
+- 不让 Agent 写项目、日程或外部系统；日程只由确认 Proposal 应用。
+- 不在仓库/日志中存密钥，不上传本地记忆/完整项目/健康历史。
+- 不实现 Apple 日历、手环、学校登录、多用户、Docker、公开 Core 或原生 App。
+- 新依赖、外部 Provider、不可逆迁移与远程部署按 TECH_SPEC 的安全门审查。
