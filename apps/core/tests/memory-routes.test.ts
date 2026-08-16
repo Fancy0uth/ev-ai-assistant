@@ -75,5 +75,8 @@ describe('local memory HTTP API', () => {
     });
     expect(removed.statusCode).toBe(204);
     expect(existsSync(projection)).toBe(false);
+    const remainingRevisions = await app.inject({ method: 'GET', url: '/v1/memory/FITNESS/revisions', cookies: { ev_session: token } });
+    expect(remainingRevisions.statusCode).toBe(200);
+    expect(remainingRevisions.json().data).toEqual([]);
   });
 });

@@ -41,6 +41,16 @@ describe('local inspectable memory', () => {
     expect(restored.version).toBe(3);
     expect(memory.read(ownerId, 'FITNESS')?.content).toContain('当前膝盖无不适');
   });
+
+  it('does not commit a memory revision when its Markdown projection cannot be written', () => {
+    const blockedProjectionRoot = join(directory, 'projection-root-file');
+    writeFileSync(blockedProjectionRoot, 'not a directory');
+    const memory = createMemoryService(database, blockedProjectionRoot);
+
+    expect(() => memory.write(ownerId, 'GENERAL', '这次写入必须完整。')).toThrow();
+    expect(memory.read(ownerId, 'GENERAL')).toBeUndefined();
+    expect(memory.listRevisions(ownerId, 'GENERAL')).toEqual([]);
+  });
 });
 
 describe('read-only project snapshots', () => {

@@ -13,6 +13,19 @@ const initialDocument = {
 };
 
 describe('MemoryWorkspace', () => {
+  it('does not allow an initial response to overwrite a draft while memory is still loading', async () => {
+    let resolveInitialLoad: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { resolveInitialLoad = resolve; })));
+
+    render(<MemoryWorkspace />);
+
+    const editor = screen.getByLabelText('GENERAL 记忆内容');
+    expect(editor).toBeDisabled();
+    resolveInitialLoad?.(jsonResponse({ data: [] }));
+    expect(await screen.findByText('GENERAL · 尚未建立')).toBeInTheDocument();
+    expect(editor).toBeEnabled();
+  });
+
   it('lets the owner inspect and version an editable local memory projection', async () => {
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (url === '/api/core/memory') return Promise.resolve(jsonResponse({ data: [initialDocument] }));

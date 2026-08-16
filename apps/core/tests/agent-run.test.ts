@@ -102,4 +102,35 @@ describe('provider-neutral Agent Runs', () => {
       output: { suggestedActions: ['确认今天的学习时间块'] },
     });
   });
+
+  it('routes ready DeepSeek and local Codex providers independently', async () => {
+    const deepSeek: DomainAgentProvider = {
+      key: 'DEEPSEEK',
+      async run() { return { summary: '生活任务已分析', suggestedActions: ['安排早餐'] }; },
+    };
+    const localCodex: DomainAgentProvider = {
+      key: 'CODEX_LOCAL',
+      async run() { return { summary: '项目快照已分析', suggestedActions: ['阅读 PRD'] }; },
+    };
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'),
+      logger: false,
+      domainAgentProviders: { DEEPSEEK: deepSeek, CODEX_LOCAL: localCodex },
+    });
+    const setupResponse = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setupResponse.headers['set-cookie']);
+
+    const profiles = await app.inject({ method: 'GET', url: '/v1/providers', cookies: { ev_session: token } });
+    expect(profiles.json().data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'DEEPSEEK', availability: 'READY' }),
+      expect.objectContaining({ key: 'CODEX_LOCAL', availability: 'READY' }),
+    ]));
+
+    const run = await app.inject({
+      method: 'POST', url: '/v1/agent-runs', cookies: { ev_session: token },
+      payload: { providerKey: 'CODEX_LOCAL', capability: 'PROJECT_ANALYSIS', context: { domains: ['PROJECT'], entityIds: [] } },
+    });
+    expect(run.statusCode).toBe(201);
+    expect(run.json().data.output).toMatchObject({ summary: '项目快照已分析' });
+  });
 });

@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { ProviderKey } from '@ev/contracts';
 import { ApiError, registerErrorHandling } from './http/api-error';
 import { createAgentRepository } from './modules/agent/repository';
 import { registerAgentRoutes } from './modules/agent/routes';
@@ -47,6 +48,7 @@ export interface AppOptions {
   agentProvider?: AgentProvider;
   courseScheduleVisionProvider?: CourseScheduleVisionProvider;
   domainAgentProvider?: DomainAgentProvider;
+  domainAgentProviders?: Partial<Record<ProviderKey, DomainAgentProvider>>;
   databasePath?: string;
   memoryProjectionRoot?: string;
   enableDailyPlanner?: boolean;
@@ -103,10 +105,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     createProposalRepository(database),
     () => authRepository.findOwnerId(),
   );
-  const providerService = createProviderService(
-    database,
-    options.domainAgentProvider ? { provider: options.domainAgentProvider } : {},
-  );
+  const providerService = createProviderService(database, {
+    providers: {
+      ...(options.domainAgentProvider ? { [options.domainAgentProvider.key]: options.domainAgentProvider } : {}),
+      ...options.domainAgentProviders,
+    },
+  });
   const nutritionService = createNutritionService(database);
   const memoryService = createMemoryService(
     database,

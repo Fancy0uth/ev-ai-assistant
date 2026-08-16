@@ -1,7 +1,13 @@
 import * as z from 'zod';
 
 const titleSchema = z.string().trim().min(1).max(200);
-const urlSchema = z.url().max(2000);
+const urlSchema = z.url().max(2000).refine(
+  (value) => {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  },
+  '课程链接仅支持 HTTP 或 HTTPS',
+);
 
 export const courseSchema = z.object({
   id: z.uuid(), termId: z.uuid(), title: titleSchema, courseCode: z.string().max(80).nullable(),

@@ -95,7 +95,7 @@ export function MemoryWorkspace() {
   }
 
   async function remove(): Promise<void> {
-    if (!document || !window.confirm(`删除 ${scopeCopy[scope]} 记忆的当前投影？历史版本仍会保留。`)) return;
+    if (!document || !window.confirm(`永久删除 ${scopeCopy[scope]} 记忆及其全部历史版本？此操作无法恢复。`)) return;
     setFailure(null);
     try {
       await requestCore(`memory/${scope}`, { method: 'DELETE', body: JSON.stringify({ expectedVersion: document.version }) });
@@ -112,21 +112,21 @@ export function MemoryWorkspace() {
       <header className="domain-workspace__header">
         <p className="section-kicker">LOCAL MEMORY / AUDITABLE</p>
         <h1 id="memory-heading">Agent 本地记忆</h1>
-        <p>记忆按领域分开保存。后台 Agent 可以自然更新它，但你始终可以查看、编辑、恢复或删除当前投影。</p>
+        <p>记忆按领域分开保存。后台 Agent 可以自然更新它，但你始终可以查看、编辑、恢复旧版本，或永久删除整个领域记忆。</p>
       </header>
 
       <div className="memory-workspace">
         <nav aria-label="记忆范围" className="memory-scopes">
-          {scopes.map((item) => <button key={item} aria-pressed={item === scope} type="button" onClick={() => selectScope(item)}>切换记忆范围：{item}<small>{scopeCopy[item]}</small></button>)}
+          {scopes.map((item) => <button key={item} aria-pressed={item === scope} disabled={isLoading} type="button" onClick={() => selectScope(item)}>切换记忆范围：{item}<small>{scopeCopy[item]}</small></button>)}
         </nav>
         <div className="domain-card memory-editor">
           <div className="memory-editor__heading"><div><p className="section-kicker">{scope}</p><h2>{document ? `${scope} · v${document.version}` : `${scope} · 尚未建立`}</h2></div><span>{isLoading ? '正在读取…' : '仅本机'}</span></div>
           <label htmlFor="memory-content">{scope} 记忆内容</label>
-          <textarea id="memory-content" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="用简洁的 Markdown 记录稳定、可复用的偏好或上下文。" />
+          <textarea disabled={isLoading} id="memory-content" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="用简洁的 Markdown 记录稳定、可复用的偏好或上下文。" />
           <div className="memory-editor__actions">
-            <button disabled={isSaving || draft.trim().length === 0} type="button" onClick={() => void save()}><Save aria-hidden="true" size={16} /> {isSaving ? '正在保存…' : '保存新版本'}</button>
-            <button type="button" onClick={() => void loadRevisions()}><History aria-hidden="true" size={16} /> 查看历史版本</button>
-            <button disabled={!document} type="button" onClick={() => void remove()}><Trash2 aria-hidden="true" size={16} /> 删除当前记忆</button>
+            <button disabled={isLoading || isSaving || draft.trim().length === 0} type="button" onClick={() => void save()}><Save aria-hidden="true" size={16} /> {isSaving ? '正在保存…' : '保存新版本'}</button>
+            <button disabled={isLoading} type="button" onClick={() => void loadRevisions()}><History aria-hidden="true" size={16} /> 查看历史版本</button>
+            <button disabled={isLoading || !document} type="button" onClick={() => void remove()}><Trash2 aria-hidden="true" size={16} /> 删除当前记忆</button>
           </div>
           {failure ? <p className="domain-form__error" role="alert">{failure}</p> : null}
           <p className="domain-result__boundary">SQLite 保存版本事实；MEMORY.md 是本地可读投影。</p>

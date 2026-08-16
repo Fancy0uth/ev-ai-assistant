@@ -118,11 +118,11 @@ export function createMemoryService(
            values (?, ?, ?, ?, ?, ?)`,
         )
         .run(newId(), ownerId, scope, normalized, version, timestamp);
+      writeMemoryProjection(projectionRoot, scope, normalized);
     });
     save();
     const document = read(ownerId, scope);
     if (!document) throw new Error('memory document disappeared');
-    writeMemoryProjection(projectionRoot, scope, document.content);
     return document;
   }
 
@@ -149,8 +149,11 @@ export function createMemoryService(
       const existing = read(ownerId, scope);
       if (!existing) throw new ApiError(404, 'MEMORY_NOT_FOUND', '记忆不存在');
       assertExpectedVersion(existing, expectedVersion);
-      database.prepare('delete from memory_documents where owner_id = ? and scope = ?').run(ownerId, scope);
-      deleteMemoryProjection(projectionRoot, scope);
+      database.transaction(() => {
+        database.prepare('delete from memory_revisions where owner_id = ? and scope = ?').run(ownerId, scope);
+        database.prepare('delete from memory_documents where owner_id = ? and scope = ?').run(ownerId, scope);
+        deleteMemoryProjection(projectionRoot, scope);
+      })();
     },
   };
 }

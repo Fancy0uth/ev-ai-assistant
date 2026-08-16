@@ -6,8 +6,12 @@ export function writeMemoryProjection(root: string, scope: string, content: stri
   mkdirSync(directory, { recursive: true });
   const target = join(directory, 'MEMORY.md');
   const temporary = join(directory, `.MEMORY.${process.pid}.${Date.now()}.tmp`);
-  writeFileSync(temporary, `# ${scope} Memory\n\n${content}\n`, 'utf8');
-  renameSync(temporary, target);
+  try {
+    writeFileSync(temporary, `# ${scope} Memory\n\n${content}\n`, 'utf8');
+    renameSync(temporary, target);
+  } finally {
+    if (existsSync(temporary)) rmSync(temporary);
+  }
 }
 
 export function deleteMemoryProjection(root: string, scope: string): void {

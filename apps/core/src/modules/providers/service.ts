@@ -5,6 +5,7 @@ import {
   type AgentRun,
   type AgentRunOutput,
   type CreateAgentRunInput,
+  type ProviderKey,
   type ProviderProfile,
 } from '@ev/contracts';
 import type Database from 'better-sqlite3';
@@ -26,7 +27,7 @@ interface AgentRunRow {
 interface ProviderServiceOptions {
   now?: () => Date;
   newId?: () => string;
-  provider?: DomainAgentProvider;
+  providers?: Partial<Record<ProviderKey, DomainAgentProvider>>;
 }
 
 export interface ProviderService {
@@ -59,6 +60,7 @@ export function createProviderService(
 ): ProviderService {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? randomUUID;
+  const providers = options.providers ?? {};
   const findRunStatement = database.prepare(
     `select ${runColumns} from agent_runs where id = ? and owner_id = ?`,
   );
@@ -87,19 +89,24 @@ export function createProviderService(
     return run;
   }
 
+  function providerFor(key: ProviderKey): DomainAgentProvider | undefined {
+    const provider = providers[key];
+    return provider?.key === key ? provider : undefined;
+  }
+
   return {
     listProfiles() {
       return [
         {
           key: 'DEEPSEEK',
           label: 'DeepSeek（生活与轻量任务）',
-          availability: options.provider?.key === 'DEEPSEEK' ? 'READY' : 'NOT_CONFIGURED',
+          availability: providerFor('DEEPSEEK') ? 'READY' : 'NOT_CONFIGURED',
           acceptsSecrets: false,
         },
         {
           key: 'CODEX_LOCAL',
           label: '本地 Codex（只读项目分析）',
-          availability: options.provider?.key === 'CODEX_LOCAL' ? 'READY' : 'NOT_CONFIGURED',
+          availability: providerFor('CODEX_LOCAL') ? 'READY' : 'NOT_CONFIGURED',
           acceptsSecrets: false,
         },
       ];
@@ -136,14 +143,15 @@ export function createProviderService(
           timestamp,
           timestamp,
         );
-      if (!options.provider || options.provider.key !== input.providerKey) {
+      const provider = providerFor(input.providerKey);
+      if (!provider) {
         throw new ApiError(503, 'AGENT_PROVIDER_NOT_CONFIGURED', 'Agent Provider 尚未配置');
       }
 
       let output: AgentRunOutput;
       try {
         output = agentRunOutputSchema.parse(
-          await options.provider.run({ capability: input.capability, context: input.context }),
+          await provider.run({ capability: input.capability, context: input.context }),
         );
       } catch {
         updateRun(ownerId, id, 'FAILED', null, 'PROVIDER_RESPONSE_INVALID');
