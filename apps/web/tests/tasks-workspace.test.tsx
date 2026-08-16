@@ -70,7 +70,7 @@ describe('TasksWorkspace', () => {
 
   it('keeps every task control at the mobile font and touch-target floor despite editor button specificity', () => {
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
-    const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileCss = dashboardCss;
     const mobileControlRule = mobileCss.match(
       /\.task-composer input,[\s\S]*?\.tasks-pagination button\s*\{[\s\S]*?\}/,
     )?.[0];

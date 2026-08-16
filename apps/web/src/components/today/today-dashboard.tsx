@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 import { StatusOverview } from './status-overview';
 import { DayConsole } from './day-console';
+import { ModuleQuickLinks } from './module-quick-links';
 import { TaskComposer, type TaskCreationResult, type TaskDraft } from './task-composer';
 import { TaskList } from './task-list';
 
@@ -207,6 +208,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
 
       <StatusOverview snapshot={snapshot} />
       <DayConsole snapshot={snapshot} decidingProposalId={mutationKey} onDecision={decideProposal} />
+      <ModuleQuickLinks />
       <TaskComposer isPending={mutationKey === 'create'} onCreate={createTask} />
       <TaskList
         tasks={snapshot.tasks}

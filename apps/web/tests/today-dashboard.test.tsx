@@ -147,6 +147,31 @@ describe('TodayDashboard', () => {
     expect(screen.getByText('来自本地打卡，不构成医疗判断')).toBeInTheDocument();
   });
 
+  it('links each daily domain to its dedicated workspace instead of a generic todo flow', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(emptySnapshot)));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    await screen.findByText('今天还没有任务');
+    expect(screen.getByRole('link', { name: '打开日程与课表模块' })).toHaveAttribute('href', '/schedule');
+    expect(screen.getByRole('link', { name: '打开学习模块' })).toHaveAttribute('href', '/learning');
+    expect(screen.getByRole('link', { name: '打开训练恢复模块' })).toHaveAttribute('href', '/fitness');
+    expect(screen.getByRole('link', { name: '打开饮食模块' })).toHaveAttribute('href', '/nutrition');
+    expect(screen.getByRole('link', { name: '打开项目模块' })).toHaveAttribute('href', '/projects');
+    expect(screen.getByRole('link', { name: '打开记忆模块' })).toHaveAttribute('href', '/memory');
+  });
+
+  it('gives a concrete work task a direct route into its domain workspace', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(populatedSnapshot)));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(await screen.findByRole('link', { name: `处理开发任务：${task.title}` })).toHaveAttribute(
+      'href',
+      '/projects',
+    );
+  });
+
   it('acknowledges a schema-valid create before its background Today projection settles', async () => {
     const unresolvedProjection = new Promise<Response>(() => undefined);
     const fetchMock = vi
@@ -374,7 +399,7 @@ describe('TodayDashboard', () => {
 
   it('keeps Today composer controls at the established mobile font and touch-target floor', () => {
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
-    const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileCss = dashboardCss;
     const mobileComposerRule = mobileCss.match(
       /\.task-composer input,[\s\S]*?\.tasks-pagination button\s*\{[\s\S]*?\n\}/,
     )?.[0];

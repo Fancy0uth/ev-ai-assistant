@@ -2,6 +2,7 @@
 
 import type { Task, TaskStatus } from '@ev/contracts';
 import { Check, Clock3, RotateCcw } from 'lucide-react';
+import Link from 'next/link';
 
 interface TaskListProps {
   tasks: Task[];
@@ -11,6 +12,7 @@ interface TaskListProps {
 
 const areaCopy = { WORK: '开发', STUDY: '学习', LIFE: '生活' } as const;
 const priorityCopy = { HIGH: '高', MEDIUM: '中', LOW: '低' } as const;
+const areaWorkspace = { WORK: '/projects', STUDY: '/learning', LIFE: '/nutrition' } as const;
 
 export function TaskList({ tasks, updatingTaskId, onStatusChange }: TaskListProps) {
   return (
@@ -71,6 +73,13 @@ export function TaskList({ tasks, updatingTaskId, onStatusChange }: TaskListProp
                     <span>{priorityCopy[task.priority]}优先级</span>
                     <span>v{task.version}</span>
                   </div>
+                  <Link
+                    aria-label={`处理${areaCopy[task.area]}任务：${task.title}`}
+                    className="task-module-link"
+                    href={areaWorkspace[task.area]}
+                  >
+                    进入{areaCopy[task.area]}模块
+                  </Link>
                 </div>
                 <button
                   className="task-secondary-action"
