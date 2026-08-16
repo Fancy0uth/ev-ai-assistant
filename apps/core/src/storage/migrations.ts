@@ -345,6 +345,34 @@ const migrations: readonly Migration[] = [
       create index agent_runs_owner_created_idx on agent_runs(owner_id, created_at desc, id);
     `,
   },
+  {
+    version: 7,
+    name: 'add_memory_revisions',
+    sql: `
+      create table memory_documents (
+        owner_id text not null references owners(id) on delete cascade,
+        scope text not null check (scope in ('GENERAL', 'FITNESS', 'LEARNING', 'PROJECT')),
+        content text not null check (length(content) between 1 and 20000),
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        primary key (owner_id, scope)
+      );
+
+      create table memory_revisions (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        scope text not null check (scope in ('GENERAL', 'FITNESS', 'LEARNING', 'PROJECT')),
+        content text not null check (length(content) between 1 and 20000),
+        version integer not null check (version >= 1),
+        created_at text not null,
+        unique (owner_id, scope, version)
+      );
+
+      create index memory_revisions_owner_scope_version_idx
+        on memory_revisions(owner_id, scope, version desc);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

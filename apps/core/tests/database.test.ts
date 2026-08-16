@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 6 });
+    expect(migrations).toEqual({ count: 7 });
     second.close();
   });
 
@@ -296,6 +296,7 @@ describe('SQLite lifecycle', () => {
         { version: 4, name: 'add_course_import_runs' },
         { version: 5, name: 'add_daily_planner_jobs' },
         { version: 6, name: 'add_agent_runs' },
+        { version: 7, name: 'add_memory_revisions' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -414,7 +415,7 @@ describe('SQLite lifecycle', () => {
     const reopened = openDatabase(databasePath);
     try {
       expect(
-        reopened.prepare('select count(*) as count from schema_migrations where version = 6').get(),
+        reopened.prepare('select count(*) as count from schema_migrations where version = 7').get(),
       ).toEqual({ count: 1 });
       expect(reopened.pragma('foreign_keys', { simple: true })).toBe(1);
     } finally {
@@ -549,6 +550,7 @@ describe('SQLite lifecycle', () => {
         { version: 4, name: 'add_course_import_runs' },
         { version: 5, name: 'add_daily_planner_jobs' },
         { version: 6, name: 'add_agent_runs' },
+        { version: 7, name: 'add_memory_revisions' },
       ]);
       expect(
         upgraded

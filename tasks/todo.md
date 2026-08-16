@@ -17,8 +17,8 @@
 ## Phase 2：Agent 与专业模块
 
 - [x] T07：实现 Provider Profile、Context Manifest、Agent Run 和未配置的诚实状态。
-- [ ] T08：实现本地分域记忆 revision/Markdown 投影与恢复。
-- [ ] T09：实现授权项目快照与只读 Project Brief。
+- [x] T08：实现本地分域记忆 revision/Markdown 投影与恢复。
+- [x] T09：实现授权项目快照与只读 Project Brief。
 - [ ] T10：实现课程档案、资料引用和预习 Action Proposal。
 - [ ] T11：实现 Check-in、恢复 Signal、动作目录和 Workout Proposal。
 - [ ] T12：实现食物候选、可替换数据 Provider、确认后的饮食记录。
