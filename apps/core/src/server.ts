@@ -5,6 +5,7 @@ import { loadConfig } from './config';
 const config = loadConfig();
 const app = await buildApp({
   databasePath: join(config.dataDir, 'app.sqlite'),
+  memoryProjectionRoot: join(config.dataDir, 'memory'),
   logger: true,
   secureCookies: config.secureCookies,
   enableDailyPlanner: true,

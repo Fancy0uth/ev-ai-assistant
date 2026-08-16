@@ -19,6 +19,7 @@ export const createCourseResourceSchema = z.object({ title: titleSchema, url: ur
 export const courseResponseSchema = z.object({ data: courseSchema }).strict();
 export const courseListResponseSchema = z.object({ data: z.array(courseSchema) }).strict();
 export const courseResourceResponseSchema = z.object({ data: courseResourceSchema }).strict();
+export const courseResourceListResponseSchema = z.object({ data: z.array(courseResourceSchema) }).strict();
 export type Course = z.infer<typeof courseSchema>;
 export type CourseResource = z.infer<typeof courseResourceSchema>;
 export type CreateCourseInput = z.infer<typeof createCourseSchema>;

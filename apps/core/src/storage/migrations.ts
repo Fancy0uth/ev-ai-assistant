@@ -408,6 +408,22 @@ const migrations: readonly Migration[] = [
       create index course_resources_owner_course_idx on course_resources(owner_id, course_id, created_at, id);
     `,
   },
+  {
+    version: 10,
+    name: 'add_read_only_project_scopes',
+    sql: `
+      create table project_scopes (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        label text not null check (length(trim(label)) between 1 and 120),
+        root_path text not null check (length(trim(root_path)) between 1 and 2000),
+        created_at text not null,
+        updated_at text not null,
+        unique(owner_id, root_path)
+      );
+      create index project_scopes_owner_created_idx on project_scopes(owner_id, created_at, id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

@@ -1,4 +1,4 @@
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export function writeMemoryProjection(root: string, scope: string, content: string): void {
@@ -8,4 +8,9 @@ export function writeMemoryProjection(root: string, scope: string, content: stri
   const temporary = join(directory, `.MEMORY.${process.pid}.${Date.now()}.tmp`);
   writeFileSync(temporary, `# ${scope} Memory\n\n${content}\n`, 'utf8');
   renameSync(temporary, target);
+}
+
+export function deleteMemoryProjection(root: string, scope: string): void {
+  const target = join(root, scope, 'MEMORY.md');
+  if (existsSync(target)) rmSync(target);
 }

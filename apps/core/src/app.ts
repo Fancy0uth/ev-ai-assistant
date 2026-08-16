@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -20,6 +22,10 @@ import { registerFitnessRoutes } from './modules/fitness/routes';
 import { createFitnessService } from './modules/fitness/service';
 import { registerLearningRoutes } from './modules/learning/routes';
 import { createLearningService } from './modules/learning/service';
+import { registerMemoryRoutes } from './modules/memory/routes';
+import { createMemoryService } from './modules/memory/service';
+import { registerProjectScopeRoutes } from './modules/projects/routes';
+import { createProjectScopeService } from './modules/projects/scope-service';
 import { createDailyPlannerJobService } from './modules/jobs/service';
 import { createProposalRepository } from './modules/proposals/repository';
 import { registerProposalRoutes } from './modules/proposals/routes';
@@ -42,6 +48,7 @@ export interface AppOptions {
   courseScheduleVisionProvider?: CourseScheduleVisionProvider;
   domainAgentProvider?: DomainAgentProvider;
   databasePath?: string;
+  memoryProjectionRoot?: string;
   enableDailyPlanner?: boolean;
   logger?: boolean;
   secureCookies?: boolean;
@@ -51,7 +58,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const app = Fastify({
     logger: options.logger ?? true,
   });
-  const database = openDatabase(options.databasePath ?? ':memory:');
+  const databasePath = options.databasePath ?? ':memory:';
+  const database = openDatabase(databasePath);
 
   registerErrorHandling(app);
   await app.register(cookie);
@@ -100,6 +108,11 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.domainAgentProvider ? { provider: options.domainAgentProvider } : {},
   );
   const nutritionService = createNutritionService(database);
+  const memoryService = createMemoryService(
+    database,
+    options.memoryProjectionRoot ?? (databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant-memory') : join(dirname(databasePath), 'memory')),
+  );
+  const projectScopeService = createProjectScopeService(database);
   let dailyPlannerTimer: NodeJS.Timeout | undefined;
   if (options.enableDailyPlanner) {
     void Promise.resolve().then(() => dailyPlannerJobService.runStartupCatchUp());
@@ -127,6 +140,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerFitnessRoutes(app, { authService, fitnessService });
   await registerNutritionRoutes(app, { authService, nutritionService });
   await registerLearningRoutes(app, { authService, learningService });
+  await registerMemoryRoutes(app, { authService, memoryService });
+  await registerProjectScopeRoutes(app, { authService, projectScopeService });
   await registerProposalRoutes(app, { authService, proposalService });
   await registerProviderRoutes(app, { authService, providerService });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });

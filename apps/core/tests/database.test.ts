@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 9 });
+    expect(migrations).toEqual({ count: 10 });
     second.close();
   });
 
@@ -299,6 +299,7 @@ describe('SQLite lifecycle', () => {
         { version: 7, name: 'add_memory_revisions' },
         { version: 8, name: 'add_confirmed_meal_records' },
         { version: 9, name: 'add_course_resources' },
+        { version: 10, name: 'add_read_only_project_scopes' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -555,6 +556,7 @@ describe('SQLite lifecycle', () => {
         { version: 7, name: 'add_memory_revisions' },
         { version: 8, name: 'add_confirmed_meal_records' },
         { version: 9, name: 'add_course_resources' },
+        { version: 10, name: 'add_read_only_project_scopes' },
       ]);
       expect(
         upgraded

@@ -15,10 +15,20 @@ interface CourseRow {
   updated_at: string;
 }
 
+interface CourseResourceRow {
+  id: string;
+  course_id: string;
+  title: string;
+  url: string;
+  source: CourseResource['source'];
+  created_at: string;
+}
+
 export function createLearningService(database: Database.Database, calendar: CalendarRepository, options: { now?: () => Date; newId?: () => string } = {}) {
   const now = options.now ?? (() => new Date()); const newId = options.newId ?? randomUUID;
   const courseColumns = 'id, term_id, title, course_code, official_url, version, created_at, updated_at';
   const toCourse = (row: CourseRow): Course => ({ id: row.id, termId: row.term_id, title: row.title, courseCode: row.course_code, officialUrl: row.official_url, version: row.version, createdAt: row.created_at, updatedAt: row.updated_at });
+  const toResource = (row: CourseResourceRow): CourseResource => ({ id: row.id, courseId: row.course_id, title: row.title, url: row.url, source: row.source, createdAt: row.created_at });
   return {
     createCourse(ownerId: string, input: CreateCourseInput): Course {
       if (!calendar.findTerm(ownerId, input.termId)) throw new ApiError(404, 'TERM_NOT_FOUND', '学期不存在');
@@ -36,6 +46,11 @@ export function createLearningService(database: Database.Database, calendar: Cal
       const exists = database.prepare('select 1 from courses where id = ? and owner_id = ?').get(courseId, ownerId); if (!exists) throw new ApiError(404, 'COURSE_NOT_FOUND', '课程不存在');
       const resource: CourseResource = { id: newId(), courseId, title: input.title, url: input.url, source: 'USER_PROVIDED', createdAt: now().toISOString() };
       database.prepare('insert into course_resources (id, owner_id, course_id, title, url, source, created_at) values (?, ?, ?, ?, ?, ?, ?)').run(resource.id, ownerId, courseId, resource.title, resource.url, resource.source, resource.createdAt); return resource;
+    },
+    listResources(ownerId: string, courseId: string): CourseResource[] {
+      const exists = database.prepare('select 1 from courses where id = ? and owner_id = ?').get(courseId, ownerId);
+      if (!exists) throw new ApiError(404, 'COURSE_NOT_FOUND', '课程不存在');
+      return (database.prepare('select id, course_id, title, url, source, created_at from course_resources where owner_id = ? and course_id = ? order by created_at asc, id asc').all(ownerId, courseId) as CourseResourceRow[]).map(toResource);
     },
   };
 }

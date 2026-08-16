@@ -54,6 +54,16 @@ describe('local course profiles and attributed resources', () => {
     expect(resource.statusCode).toBe(201);
     expect(resource.json().data).toMatchObject({ source: 'USER_PROVIDED', title: '第一周课程说明' });
 
+    const resources = await app.inject({
+      method: 'GET',
+      url: `/v1/courses/${course.json().data.id}/resources`,
+      cookies: { ev_session: token },
+    });
+    expect(resources.statusCode).toBe(200);
+    expect(resources.json().data).toEqual([
+      expect.objectContaining({ source: 'USER_PROVIDED', title: '第一周课程说明' }),
+    ]);
+
     const listed = await app.inject({ method: 'GET', url: '/v1/courses', cookies: { ev_session: token } });
     expect(listed.statusCode).toBe(200);
     expect(listed.json().data).toEqual([expect.objectContaining({ title: '机器学习导论' })]);
