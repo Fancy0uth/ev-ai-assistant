@@ -12,7 +12,7 @@
 - [x] T03：定义 Event、Action、ActivitySession、Signal、Proposal 的共享契约与纯领域规则。
 - [x] T04：以加法 SQLite 迁移和 Repository 建立日程/Proposal 数据层，并证明旧数据保留。
 - [x] T05：实现 Proposal 版本确认、冲突检测与 Today Day View 聚合。
-- [ ] T06：实现 Course Import Run、周次到日期展开与 07:00 持久 Job。
+- [x] T06：实现 Course Import Run、周次到日期展开与 07:00 持久 Job。
 
 ## Phase 2：Agent 与专业模块
 

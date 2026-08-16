@@ -281,6 +281,48 @@ const migrations: readonly Migration[] = [
         on proposal_audits(proposal_id, created_at, id);
     `,
   },
+  {
+    version: 4,
+    name: 'add_course_import_runs',
+    sql: `
+      create table course_import_runs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        term_id text not null references terms(id) on delete cascade,
+        status text not null check (status in ('BLOCKED', 'REVIEW_REQUIRED', 'PROPOSED', 'FAILED')),
+        image_mime_type text not null check (image_mime_type in ('image/png', 'image/jpeg', 'image/webp')),
+        image_byte_size integer not null check (image_byte_size between 1 and 5000000),
+        image_sha256 text not null check (length(image_sha256) = 64),
+        candidates_json text not null check (json_valid(candidates_json)),
+        proposal_id text references proposals(id) on delete set null,
+        failure_code text,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create index course_import_runs_owner_created_idx
+        on course_import_runs(owner_id, created_at desc, id);
+    `,
+  },
+  {
+    version: 5,
+    name: 'add_daily_planner_jobs',
+    sql: `
+      create table daily_plan_jobs (
+        owner_id text not null references owners(id) on delete cascade,
+        local_date text not null,
+        status text not null check (status in ('PENDING_CONFIRMATION', 'NO_CHANGES')),
+        proposal_id text references proposals(id) on delete set null,
+        created_at text not null,
+        updated_at text not null,
+        primary key (owner_id, local_date),
+        check (
+          (status = 'PENDING_CONFIRMATION' and proposal_id is not null)
+          or (status = 'NO_CHANGES' and proposal_id is null)
+        )
+      );
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

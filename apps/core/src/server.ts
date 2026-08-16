@@ -7,6 +7,7 @@ const app = await buildApp({
   databasePath: join(config.dataDir, 'app.sqlite'),
   logger: true,
   secureCookies: config.secureCookies,
+  enableDailyPlanner: true,
 });
 let isShuttingDown = false;
 

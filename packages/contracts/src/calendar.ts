@@ -29,6 +29,29 @@ const nonBlankTitleSchema = z
   .max(200)
   .refine((value) => value.trim().length > 0, '标题不能为空');
 
+export const termSchema = z
+  .object({
+    id: z.uuid(),
+    title: nonBlankTitleSchema,
+    timezone: z.string().min(1).max(100),
+    weekOneMonday: z.iso.date(),
+    version: z.number().int().positive(),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const createTermSchema = z
+  .object({
+    title: nonBlankTitleSchema.transform((value) => value.trim()),
+    timezone: z.string().trim().min(1).max(100),
+    weekOneMonday: z.iso.date(),
+  })
+  .strict();
+
+export const termResponseSchema = z.object({ data: termSchema }).strict();
+export const termListResponseSchema = z.object({ data: z.array(termSchema) }).strict();
+
 export const calendarRuleSchema = z
   .object({
     id: z.uuid(),
@@ -169,6 +192,8 @@ export const timeRequestSchema = z
   });
 
 export type LocalTime = z.infer<typeof localTimeSchema>;
+export type Term = z.infer<typeof termSchema>;
+export type CreateTermInput = z.input<typeof createTermSchema>;
 export type TeachingWeekPattern = z.infer<typeof teachingWeekPatternSchema>;
 export type CalendarRule = z.infer<typeof calendarRuleSchema>;
 export type EventKind = z.infer<typeof eventKindSchema>;

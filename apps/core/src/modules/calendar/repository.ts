@@ -1,15 +1,5 @@
-import type { CalendarRule, Event } from '@ev/contracts';
+import type { CalendarRule, Event, Term, TimeRequest } from '@ev/contracts';
 import type Database from 'better-sqlite3';
-
-export interface Term {
-  id: string;
-  title: string;
-  timezone: string;
-  weekOneMonday: string;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface NewTerm extends Term {
   ownerId: string;
@@ -20,6 +10,10 @@ export interface NewCalendarRule extends CalendarRule {
 }
 
 export interface NewEvent extends Event {
+  ownerId: string;
+}
+
+export interface NewTimeRequest extends TimeRequest {
   ownerId: string;
 }
 
@@ -62,12 +56,30 @@ interface EventRow {
   updated_at: string;
 }
 
+interface TimeRequestRow {
+  id: string;
+  source: TimeRequest['source'];
+  title: string;
+  target_date: string;
+  duration_minutes: number;
+  priority: TimeRequest['priority'];
+  earliest_start_local_time: string | null;
+  latest_end_local_time: string | null;
+  is_fixed: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CalendarRepository {
   createTerm(term: NewTerm): Term;
   findTerm(ownerId: string, termId: string): Term | undefined;
+  listTerms(ownerId: string): Term[];
   createRule(rule: NewCalendarRule): CalendarRule;
   createEvent(event: NewEvent): Event;
   listEventsForDate(ownerId: string, localDate: string): Event[];
+  createTimeRequest(request: NewTimeRequest): TimeRequest;
+  listTimeRequestsForDate(ownerId: string, localDate: string): TimeRequest[];
 }
 
 function toTerm(row: TermRow): Term {
@@ -115,6 +127,23 @@ function toEvent(row: EventRow): Event {
   };
 }
 
+function toTimeRequest(row: TimeRequestRow): TimeRequest {
+  return {
+    id: row.id,
+    source: row.source,
+    title: row.title,
+    targetDate: row.target_date,
+    durationMinutes: row.duration_minutes,
+    priority: row.priority,
+    earliestStartLocalTime: row.earliest_start_local_time,
+    latestEndLocalTime: row.latest_end_local_time,
+    isFixed: row.is_fixed === 1,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 const termColumns = `
   id, title, timezone, week_one_monday, version, created_at, updated_at
 `;
@@ -127,6 +156,11 @@ const ruleColumns = `
 const eventColumns = `
   id, calendar_rule_id, title, kind, local_date, start_local_time, end_local_time, is_hard,
   status, version, created_at, updated_at
+`;
+
+const timeRequestColumns = `
+  id, source, title, target_date, duration_minutes, priority, earliest_start_local_time,
+  latest_end_local_time, is_fixed, version, created_at, updated_at
 `;
 
 export function createCalendarRepository(database: Database.Database): CalendarRepository {
@@ -159,6 +193,18 @@ export function createCalendarRepository(database: Database.Database): CalendarR
     findTerm(ownerId, termId) {
       const row = findTermStatement.get(termId, ownerId) as TermRow | undefined;
       return row ? toTerm(row) : undefined;
+    },
+
+    listTerms(ownerId) {
+      const rows = database
+        .prepare(
+          `select ${termColumns}
+           from terms
+           where owner_id = ?
+           order by week_one_monday desc, created_at desc, id asc`,
+        )
+        .all(ownerId) as TermRow[];
+      return rows.map(toTerm);
     },
 
     createRule(rule) {
@@ -228,6 +274,51 @@ export function createCalendarRepository(database: Database.Database): CalendarR
         )
         .all(ownerId, localDate) as EventRow[];
       return rows.map(toEvent);
+    },
+
+    createTimeRequest(request) {
+      database
+        .prepare(
+          `insert into time_requests (
+             id, owner_id, source, title, target_date, duration_minutes, priority,
+             earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at,
+             updated_at
+           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          request.id,
+          request.ownerId,
+          request.source,
+          request.title,
+          request.targetDate,
+          request.durationMinutes,
+          request.priority,
+          request.earliestStartLocalTime,
+          request.latestEndLocalTime,
+          request.isFixed ? 1 : 0,
+          request.version,
+          request.createdAt,
+          request.updatedAt,
+        );
+      const row = database
+        .prepare(`select ${timeRequestColumns} from time_requests where id = ? and owner_id = ?`)
+        .get(request.id, request.ownerId) as TimeRequestRow;
+      return toTimeRequest(row);
+    },
+
+    listTimeRequestsForDate(ownerId, localDate) {
+      const rows = database
+        .prepare(
+          `select ${timeRequestColumns}
+           from time_requests
+           where owner_id = ? and target_date = ?
+           order by
+             case priority when 'HIGH' then 0 when 'MEDIUM' then 1 else 2 end,
+             created_at asc,
+             id asc`,
+        )
+        .all(ownerId, localDate) as TimeRequestRow[];
+      return rows.map(toTimeRequest);
     },
   };
 }
