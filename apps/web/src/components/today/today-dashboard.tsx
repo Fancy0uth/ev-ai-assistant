@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 import { StatusOverview } from './status-overview';
+import { DayConsole } from './day-console';
 import { TaskComposer, type TaskCreationResult, type TaskDraft } from './task-composer';
 import { TaskList } from './task-list';
 
@@ -140,6 +141,22 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
     }
   }
 
+  async function decideProposal(proposalId: string, input: { version: number; decision: 'ACCEPT' | 'REJECT' }): Promise<void> {
+    setMutationKey(proposalId);
+    setError(null);
+    try {
+      await requestCore(`proposals/${proposalId}/decision`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      await refresh();
+    } catch (failure) {
+      handleFailure(failure);
+    } finally {
+      setMutationKey(null);
+    }
+  }
+
   if (isLoading || (!snapshot && !error)) {
     return <DashboardSkeleton />;
   }
@@ -189,6 +206,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
       ) : null}
 
       <StatusOverview snapshot={snapshot} />
+      <DayConsole snapshot={snapshot} decidingProposalId={mutationKey} onDecision={decideProposal} />
       <TaskComposer isPending={mutationKey === 'create'} onCreate={createTask} />
       <TaskList
         tasks={snapshot.tasks}

@@ -55,8 +55,11 @@ export const todaySnapshotSchema = z
       .object({
         date: localDateSchema,
         status: dailyStatusSchema,
-        tasks: z.array(taskSchema),
-        yesterday: yesterdaySummarySchema.nullable(),
+          tasks: z.array(taskSchema),
+          events: z.array(eventSchema).default([]),
+          signals: z.array(signalSchema).default([]),
+          pendingProposals: z.array(proposalSchema).default([]),
+          yesterday: yesterdaySummarySchema.nullable(),
         agents: z
           .object({
             deepSeek: z.literal('NOT_CONFIGURED'),

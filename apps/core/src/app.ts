@@ -118,7 +118,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerProposalRoutes(app, { authService, proposalService });
   await registerProviderRoutes(app, { authService, providerService });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });
-  await registerTodayRoutes(app, { authService, taskService });
+  await registerTodayRoutes(app, {
+    authService,
+    taskService,
+    calendarRepository,
+    proposalService,
+  });
 
   return app;
 }
