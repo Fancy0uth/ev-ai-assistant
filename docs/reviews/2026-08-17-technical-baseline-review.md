@@ -4,7 +4,7 @@
 | --- | --- |
 | 日期 | 2026-08-17 |
 | 审查范围 | 现有 v0.2 原型、已批准 PRD/MVP 与本次技术设计 |
-| 结论 | **Request changes：不得在该测试基线上直接扩展产品功能** |
+| 结论 | 基线安装/契约问题已恢复；可开始功能实现，但存在一个需在正式发布前处置的高危运行时依赖告警 |
 
 ## 1. 审查证据
 
@@ -15,7 +15,7 @@
 - 原生证据：129 个文件、303 个符号、312 条 import。
 - 限制：本次 Code Intel 版本未生成 `summary.md`、`hospital.md`、`understanding.md` 或 `report.json`，只有 content-addressed JSON；关系精度标记为 `heuristic`，因此不能把它当作完整调用图或 hospital 结论。
 
-### 自动测试复测
+### 初次自动测试复测
 
 执行命令：`npm test`
 
@@ -27,13 +27,23 @@
 | core | 45/59 通过，14 失败 | auth、agent API、task 409 路径失败 |
 | web | 无法启动 | `ERR_MODULE_NOT_FOUND: @vitejs/plugin-react` |
 
-`apps/web/package.json` 与 `package-lock.json` 都声明 `@vitejs/plugin-react@6.0.5`，但 `npm ls @vitejs/plugin-react --workspace @ev/web` 返回空树，证明当前安装树与锁文件/manifest 不一致。该现象需要先复现并修复安装边界，不能把缺少插件误判为应用逻辑已通过。
+`apps/web/package.json` 与 `package-lock.json` 都声明 `@vitejs/plugin-react@6.0.5`，但初次 `npm ls @vitejs/plugin-react --workspace @ev/web` 返回空树，证明当前安装树与锁文件/manifest 不一致。
+
+### 基线恢复复测
+
+隔离 worktree 执行 `npm ci --include=dev --ignore-scripts` 后，依赖不再向上解析主工作区中陈旧的 `@ev/contracts` Junction；该工作区本身拥有正确的 workspace link 和 Web dev dependency。`better-sqlite3@13.0.3` 自带的 Windows N-API 预构建二进制可被测试实际加载，因此不需要安装 Visual Studio C++ Build Tools。
+
+| 验证 | 结果 |
+| --- | --- |
+| `npm ls @vitejs/plugin-react --workspace @ev/web` | 解析为 `@vitejs/plugin-react@6.0.5` |
+| `npm run test --workspace @ev/core` | 59/59 通过 |
+| `npm run test --workspace @ev/web -- --reporter=dot` | 138/138 通过 |
 
 ## 2. 发现与处置
 
-### Required — BASELINE-001：Core HTTP 契约回归
+### Resolved — BASELINE-001：Core HTTP 契约运行时误解析
 
-**严重级别：P1 / 阻断后续功能测试**
+**初始严重级别：P1 / 已恢复**
 
 认证端点、Agent 端点和 Task 版本冲突测试出现 500 或响应形状不符。典型证据包括：
 
@@ -42,17 +52,25 @@
 - Agent session/capability 的测试出现 `Cannot read properties of undefined (reading 'parse')`，或预期 2xx/4xx 而实际 500；
 - Task stale-version 应返回 409，却实际为 500。
 
-源代码中的 `sessionResponseSchema` 与 route 表达的意图看似正确，故不能仅修改断言。必须先确认测试运行时实际解析到了哪个 `@ev/contracts` 模块、导出是否一致、是否存在 workspace 链接/安装树陈旧，以及错误处理器的真实原始异常。修复后必须新增或保留能捕获该运行时解析问题的回归测试。
+根因已确认：隔离 worktree 没有自己的完整 `node_modules`，Node 从父工作区加载了旧的 `@ev/contracts` Junction；该旧包没有 `agent.ts`，因此运行时 schema export 与当前源码不一致。源代码与断言没有被篡改；通过从 lockfile 恢复隔离 worktree 的依赖树，Core 59/59 测试已通过。
 
-**处理决定：** 任务拆解中的第一条实现切片；在它全绿前，不合并任何基于 Core 的新领域功能。
+**处理决定：** T02 已完成。每次独立 worktree 启动测试前先执行受控安装并确认 workspace links；不再把父目录 `node_modules` 当作测试依赖。
 
-### Required — BASELINE-002：Web 测试安装边界不完整
+### Resolved — BASELINE-002：Web 测试安装边界不完整
 
-**严重级别：P1 / 阻断 Web 回归测试**
+**初始严重级别：P1 / 已恢复**
 
 Web Vitest 在加载 `vitest.config.ts` 前即失败，因为运行时找不到 manifest/lockfile 已声明的 `@vitejs/plugin-react`。这使组件、BFF 和移动交互没有可信回归覆盖。
 
-**处理决定：** 确定唯一 npm workspace 安装根，使用与锁文件一致的受控安装流程恢复依赖；修复后验证 `npm ls`、Web Vitest、typecheck 和 E2E 入口。不得手动伪造 `node_modules`、删除测试或修改 lockfile 以制造通过。
+**处理决定：** T01 已完成。`npm ci --include=dev --ignore-scripts` 从锁文件恢复唯一工作区安装边界，Web Vitest 138/138 通过。常规安装脚本会在本机缺少 VS C++ Build Tools 时尝试编译 `better-sqlite3` 并失败；使用包内预构建二进制的受控 ignore-scripts 安装是当前 Windows 开发环境的记录流程。
+
+### Required — SECURITY-002：运行时依赖审计存在无自动修复的高危告警
+
+**严重级别：P1 / 阻止正式生产发布，暂不阻止本地开发**
+
+`npm audit --omit=dev --json` 报告 `next → postcss → nanoid` 的 3 个 high 告警，且 `fixAvailable: false`。该告警来自当前锁定依赖树，而不是本次业务实现。
+
+**处理决定：** 不执行 `npm audit fix --force`。每次依赖升级后复查 Next.js/PostCSS 的官方安全公告与变更说明；若下一可用版本修复则作为独立依赖升级任务并运行全套回归。正式部署/发布前该 P1 必须解决或获得明确风险接受。
 
 ### Required — PRODUCT-ARCH-001：原型的 Task/聊天模型不符合已批准产品
 

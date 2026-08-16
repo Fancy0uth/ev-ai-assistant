@@ -4,8 +4,8 @@
 
 ## Phase 0：基线
 
-- [ ] T01：修复 npm workspace 安装边界和 Web Vitest 启动。
-- [ ] T02：定位并修复 Core Auth/Agent/Task 契约运行时回归。
+- [x] T01：修复 npm workspace 安装边界和 Web Vitest 启动。
+- [x] T02：定位并修复 Core Auth/Agent/Task 契约运行时回归。
 
 ## Phase 1：日程核心
 
