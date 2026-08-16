@@ -125,5 +125,6 @@ async function proxyToCore(request: Request, context: RouteContext): Promise<Res
 export const dynamic = 'force-dynamic';
 export const GET = proxyToCore;
 export const POST = proxyToCore;
+export const PUT = proxyToCore;
 export const PATCH = proxyToCore;
 export const DELETE = proxyToCore;

@@ -56,7 +56,8 @@ describe('Playwright server isolation', () => {
     expect(config.use?.baseURL).toBe('http://127.0.0.1:3217');
     expect(core.url).toBe('http://127.0.0.1:4327/v1/health/ready');
     expect(web.url).toBe('http://127.0.0.1:3217/setup');
-    expect(web.command).toBe('npm run dev --workspace @ev/web -- --hostname 127.0.0.1 --port 3217');
+    expect(core.command).toBe('node --import tsx apps/core/src/server.ts');
+    expect(web.command).toBe('node node_modules/next/dist/bin/next dev apps/web --hostname 127.0.0.1 --port 3217');
     expect(core.env.EV_CORE_HOST).toBe('127.0.0.1');
     expect(core.env.EV_CORE_PORT).toBe('4327');
     expect(web.env.EV_CORE_URL).toBe('http://127.0.0.1:4327');

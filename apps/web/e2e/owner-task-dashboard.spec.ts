@@ -45,7 +45,7 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
   expect(taskTitle).toHaveLength(200);
   expect(taskTitle).not.toMatch(/\s/);
   const taskInput = page.getByLabel('新任务');
-  const areaSelect = page.getByLabel('领域');
+  const areaSelect = page.getByLabel('领域', { exact: true });
   const prioritySelect = page.getByLabel('优先级');
   const addTaskButton = page.getByRole('button', { name: '添加到今天' });
   await taskInput.focus();

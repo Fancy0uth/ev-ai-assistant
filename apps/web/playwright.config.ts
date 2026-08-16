@@ -45,10 +45,10 @@ export const playwrightConfig = defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: [
+  ...(process.env.EV_E2E_MANAGED === '1' ? {} : { webServer: [
     {
       name: 'Core',
-      command: 'npm run start --workspace @ev/core',
+      command: 'node --import tsx apps/core/src/server.ts',
       cwd: workspaceRoot,
       env: {
         ...process.env,
@@ -65,7 +65,7 @@ export const playwrightConfig = defineConfig({
     },
     {
       name: 'Web',
-      command: 'npm run dev --workspace @ev/web -- --hostname 127.0.0.1 --port 3217',
+      command: 'node node_modules/next/dist/bin/next dev apps/web --hostname 127.0.0.1 --port 3217',
       cwd: workspaceRoot,
       env: {
         ...process.env,
@@ -76,7 +76,7 @@ export const playwrightConfig = defineConfig({
       timeout: 60_000,
       stdout: 'pipe',
     },
-  ],
+  ] }),
 });
 
 export default playwrightConfig;
