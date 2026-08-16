@@ -1,5 +1,7 @@
 # EV AI Dashboard 系统架构（ARCHITECTURE）
 
+> 实施状态说明（2026-08-17）：本文描述已批准的目标架构，其中包含尚未交付的 Provider、RAG、视觉识别和远程访问设计。当前 MVP 的实际结构、接口和限制见[本地 MVP 技术设计](IMPLEMENTED-MVP-DESIGN.md)。
+
 | 字段 | 内容 |
 | --- | --- |
 | 版本 | 0.1 |

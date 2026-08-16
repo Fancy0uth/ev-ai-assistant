@@ -19,18 +19,18 @@
 - [x] T07：实现 Provider Profile、Context Manifest、Agent Run 和未配置的诚实状态。
 - [x] T08：实现本地分域记忆 revision/Markdown 投影与恢复。
 - [x] T09：实现授权项目快照与只读 Project Brief。
-- [ ] T10：实现课程档案、资料引用和预习 Action Proposal。
-- [ ] T11：实现 Check-in、恢复 Signal、动作目录和 Workout Proposal。
-- [ ] T12：实现食物候选、可替换数据 Provider、确认后的饮食记录。
+- [ ] T10：课程档案、资料引用和预习 Action Proposal。（本轮已交付课程档案/资料引用；公开检索与预习 Proposal 延后）
+- [ ] T11：Check-in、恢复 Signal、动作目录和 Workout Proposal。（本轮已交付 Check-in/恢复 Signal；动作目录/RAG/Proposal 延后）
+- [ ] T12：食物候选、可替换数据 Provider、确认后的饮食记录。（本轮已交付人工确认餐食；自然语言候选/Provider 延后）
 
 ## Phase 3：Web 控制台
 
-- [ ] T13：重建真实路由 Shell、Today 控制台、日程/Proposal 页面。
-- [ ] T14：实现项目、课程、健身、饮食的不同详情工作区。
-- [ ] T15：实现 Agent/记忆/Provider 设置页，并完成桌面与 iPhone 响应式。
+- [x] T13：重建真实路由 Shell、Today 控制台、日程/Proposal 页面。
+- [x] T14：实现项目、课程、健身、饮食的不同详情工作区。
+- [x] T15：实现 Agent/记忆/Provider 设置页，并完成桌面与 iPhone 响应式。
 
 ## Phase 4：验证与交付
 
-- [ ] T16：补齐 Core/Contracts/Domain 集成回归测试与迁移测试。
-- [ ] T17：执行最小桌面/iPhone E2E，记录并修复 P0/P1 bug。
-- [ ] T18：完成变更记录、测试报告、已知限制、验收文档和独立本地预览。
+- [x] T16：补齐 Core/Contracts/Domain 集成回归测试与迁移测试。
+- [x] T17：执行最小桌面/iPhone E2E，记录并修复 P0/P1 bug。
+- [x] T18：完成变更记录、测试报告、已知限制、验收文档和独立本地预览。
