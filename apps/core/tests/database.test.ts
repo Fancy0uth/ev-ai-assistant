@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 5 });
+    expect(migrations).toEqual({ count: 6 });
     second.close();
   });
 
@@ -282,7 +282,11 @@ describe('SQLite lifecycle', () => {
             "select name from sqlite_master where type = 'table' and name like 'agent_%' order by name",
           )
           .all(),
-      ).toEqual([{ name: 'agent_messages' }, { name: 'agent_sessions' }]);
+      ).toEqual([
+        { name: 'agent_messages' },
+        { name: 'agent_runs' },
+        { name: 'agent_sessions' },
+      ]);
       expect(
         upgraded.prepare('select version, name from schema_migrations order by version').all(),
       ).toEqual([
@@ -291,6 +295,7 @@ describe('SQLite lifecycle', () => {
         { version: 3, name: 'add_local_daily_console' },
         { version: 4, name: 'add_course_import_runs' },
         { version: 5, name: 'add_daily_planner_jobs' },
+        { version: 6, name: 'add_agent_runs' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -409,7 +414,7 @@ describe('SQLite lifecycle', () => {
     const reopened = openDatabase(databasePath);
     try {
       expect(
-        reopened.prepare('select count(*) as count from schema_migrations where version = 5').get(),
+        reopened.prepare('select count(*) as count from schema_migrations where version = 6').get(),
       ).toEqual({ count: 1 });
       expect(reopened.pragma('foreign_keys', { simple: true })).toBe(1);
     } finally {
@@ -543,6 +548,7 @@ describe('SQLite lifecycle', () => {
         { version: 3, name: 'add_local_daily_console' },
         { version: 4, name: 'add_course_import_runs' },
         { version: 5, name: 'add_daily_planner_jobs' },
+        { version: 6, name: 'add_agent_runs' },
       ]);
       expect(
         upgraded

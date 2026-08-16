@@ -5,5 +5,6 @@ export * from './calendar';
 export * from './course-import';
 export * from './health';
 export * from './proposals';
+export * from './providers';
 export * from './tasks';
 export * from './today';

@@ -16,7 +16,7 @@
 
 ## Phase 2：Agent 与专业模块
 
-- [ ] T07：实现 Provider Profile、Context Manifest、Agent Run 和未配置的诚实状态。
+- [x] T07：实现 Provider Profile、Context Manifest、Agent Run 和未配置的诚实状态。
 - [ ] T08：实现本地分域记忆 revision/Markdown 投影与恢复。
 - [ ] T09：实现授权项目快照与只读 Project Brief。
 - [ ] T10：实现课程档案、资料引用和预习 Action Proposal。

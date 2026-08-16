@@ -323,6 +323,28 @@ const migrations: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 6,
+    name: 'add_agent_runs',
+    sql: `
+      create table agent_runs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        provider_key text not null check (provider_key in ('DEEPSEEK', 'CODEX_LOCAL')),
+        capability text not null check (capability in (
+          'LIFE_PLANNING', 'FITNESS_COACHING', 'LEARNING_SUPPORT', 'PROJECT_ANALYSIS'
+        )),
+        status text not null check (status in ('BLOCKED', 'SUCCEEDED', 'FAILED')),
+        context_json text not null check (json_valid(context_json)),
+        output_json text check (output_json is null or json_valid(output_json)),
+        failure_code text,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create index agent_runs_owner_created_idx on agent_runs(owner_id, created_at desc, id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

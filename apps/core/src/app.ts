@@ -20,6 +20,8 @@ import { createDailyPlannerJobService } from './modules/jobs/service';
 import { createProposalRepository } from './modules/proposals/repository';
 import { registerProposalRoutes } from './modules/proposals/routes';
 import { createProposalService } from './modules/proposals/service';
+import { registerProviderRoutes } from './modules/providers/routes';
+import { createProviderService } from './modules/providers/service';
 import { createTaskRepository } from './modules/tasks/repository';
 import { registerTaskRoutes } from './modules/tasks/routes';
 import { createTaskService } from './modules/tasks/service';
@@ -27,10 +29,12 @@ import { registerTodayRoutes } from './modules/today/routes';
 import { openDatabase } from './storage/database';
 import type { AgentProvider } from './modules/agent/provider';
 import type { CourseScheduleVisionProvider } from './modules/agents/provider';
+import type { DomainAgentProvider } from './modules/agents/provider';
 
 export interface AppOptions {
   agentProvider?: AgentProvider;
   courseScheduleVisionProvider?: CourseScheduleVisionProvider;
+  domainAgentProvider?: DomainAgentProvider;
   databasePath?: string;
   enableDailyPlanner?: boolean;
   logger?: boolean;
@@ -83,6 +87,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     createProposalRepository(database),
     () => authRepository.findOwnerId(),
   );
+  const providerService = createProviderService(
+    database,
+    options.domainAgentProvider ? { provider: options.domainAgentProvider } : {},
+  );
   let dailyPlannerTimer: NodeJS.Timeout | undefined;
   if (options.enableDailyPlanner) {
     void Promise.resolve().then(() => dailyPlannerJobService.runStartupCatchUp());
@@ -108,6 +116,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerCalendarRoutes(app, { authService, calendarService });
   await registerCourseImportRoutes(app, { authService, courseImportService });
   await registerProposalRoutes(app, { authService, proposalService });
+  await registerProviderRoutes(app, { authService, providerService });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });
   await registerTodayRoutes(app, { authService, taskService });
 
