@@ -3,7 +3,7 @@ export type TeachingWeekPattern = 'EVERY_WEEK' | 'ODD_WEEKS' | 'EVEN_WEEKS';
 export interface CalendarRuleExpansionInput {
   ruleId: string;
   termWeekOneMonday: string;
-  weekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  weekday: number;
   startLocalTime: string;
   endLocalTime: string;
   weekStart: number;
@@ -60,6 +60,9 @@ function minuteOfDay(localTime: string): number {
 export function expandCalendarRule(input: CalendarRuleExpansionInput): CalendarOccurrence[] {
   if (!Number.isInteger(input.weekStart) || !Number.isInteger(input.weekEnd) || input.weekStart < 1) {
     throw new RangeError('teaching weeks must be positive integers');
+  }
+  if (!Number.isInteger(input.weekday) || input.weekday < 1 || input.weekday > 7) {
+    throw new RangeError('weekday must be an integer between 1 and 7');
   }
   if (input.weekEnd < input.weekStart) throw new RangeError('weekEnd must not precede weekStart');
   if (minuteOfDay(input.startLocalTime) >= minuteOfDay(input.endLocalTime)) {

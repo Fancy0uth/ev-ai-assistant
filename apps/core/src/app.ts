@@ -8,7 +8,13 @@ import { createAgentService } from './modules/agent/service';
 import { createAuthRepository } from './modules/auth/repository';
 import { registerAuthRoutes } from './modules/auth/routes';
 import { createAuthService } from './modules/auth/service';
+import { createCalendarRepository } from './modules/calendar/repository';
+import { registerDayPlanningRoutes } from './modules/day-planning/routes';
+import { createDayPlanningService } from './modules/day-planning/service';
 import { registerHealthRoutes } from './modules/health/routes';
+import { createProposalRepository } from './modules/proposals/repository';
+import { registerProposalRoutes } from './modules/proposals/routes';
+import { createProposalService } from './modules/proposals/service';
 import { createTaskRepository } from './modules/tasks/repository';
 import { registerTaskRoutes } from './modules/tasks/routes';
 import { createTaskService } from './modules/tasks/service';
@@ -46,6 +52,16 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.agentProvider ? { provider: options.agentProvider } : {},
   );
   const taskService = createTaskService(createTaskRepository(database));
+  const calendarRepository = createCalendarRepository(database);
+  const proposalService = createProposalService(
+    createProposalRepository(database),
+    calendarRepository,
+  );
+  const dayPlanningService = createDayPlanningService(
+    calendarRepository,
+    taskService,
+    proposalService,
+  );
   await registerHealthRoutes(app, database);
   await registerAuthRoutes(app, {
     authService,
@@ -57,6 +73,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     ...(options.agentProvider ? { agentProvider: options.agentProvider } : {}),
   });
   await registerTaskRoutes(app, { authService, taskService });
+  await registerProposalRoutes(app, { authService, proposalService });
+  await registerDayPlanningRoutes(app, { authService, dayPlanningService });
   await registerTodayRoutes(app, { authService, taskService });
 
   return app;

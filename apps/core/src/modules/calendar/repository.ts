@@ -152,8 +152,8 @@ export function createCalendarRepository(database: Database.Database): CalendarR
           term.createdAt,
           term.updatedAt,
         );
-      const { ownerId: _ownerId, ...saved } = term;
-      return saved;
+      const row = findTermStatement.get(term.id, term.ownerId) as TermRow;
+      return toTerm(row);
     },
 
     findTerm(ownerId, termId) {

@@ -1,4 +1,6 @@
 import * as z from 'zod';
+import { eventSchema, signalSchema } from './calendar';
+import { proposalSchema } from './proposals';
 import { localDateSchema, taskAreaSchema, taskPrioritySchema, taskSchema, taskStatusSchema } from './tasks';
 
 export const dailyStatusLevelSchema = z.enum(['STEADY', 'TIGHT', 'OVERLOADED']);
@@ -32,6 +34,21 @@ export const yesterdaySummarySchema = z
 
 export const todayQuerySchema = z.object({ date: localDateSchema }).strict();
 
+export const dayPathParamsSchema = z.object({ date: localDateSchema }).strict();
+
+export const dayViewSchema = z
+  .object({
+    date: localDateSchema,
+    status: dailyStatusSchema,
+    events: z.array(eventSchema),
+    tasks: z.array(taskSchema),
+    signals: z.array(signalSchema),
+    pendingProposals: z.array(proposalSchema),
+  })
+  .strict();
+
+export const dayViewResponseSchema = z.object({ data: dayViewSchema }).strict();
+
 export const todaySnapshotSchema = z
   .object({
     data: z
@@ -53,3 +70,4 @@ export const todaySnapshotSchema = z
 
 export type DailyStatus = z.infer<typeof dailyStatusSchema>;
 export type TodaySnapshot = z.infer<typeof todaySnapshotSchema>;
+export type DayView = z.infer<typeof dayViewSchema>;

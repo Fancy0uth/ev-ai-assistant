@@ -21,6 +21,21 @@ describe('expandCalendarRule', () => {
     ]);
     expect(occurrences.every((occurrence) => occurrence.ruleId === 'rule-database')).toBe(true);
   });
+
+  it('rejects an out-of-range weekday before calculating dates', () => {
+    expect(() =>
+      expandCalendarRule({
+        ruleId: 'invalid-weekday',
+        termWeekOneMonday: '2026-09-07',
+        weekday: 8,
+        startLocalTime: '08:00',
+        endLocalTime: '09:40',
+        weekStart: 1,
+        weekEnd: 1,
+        weekPattern: 'EVERY_WEEK',
+      }),
+    ).toThrow('weekday must be an integer between 1 and 7');
+  });
 });
 
 describe('detectConflicts', () => {

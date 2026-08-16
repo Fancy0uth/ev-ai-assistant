@@ -70,6 +70,26 @@ export const proposalDecisionSchema = z
   })
   .strict();
 
+export const proposalPathParamsSchema = z.object({ id: z.uuid() }).strict();
+
+export const proposalListQuerySchema = z
+  .object({
+    status: z.literal('PENDING').default('PENDING'),
+  })
+  .strict();
+
+export const proposalResponseSchema = z.object({ data: proposalSchema }).strict();
+
+export const proposalListResponseSchema = z
+  .object({
+    data: z.array(proposalSchema),
+  })
+  .strict();
+
+export const proposalVersionConflictDetailsSchema = z
+  .object({ currentProposal: proposalSchema })
+  .strict();
+
 export type ProposalKind = z.infer<typeof proposalKindSchema>;
 export type ProposalStatus = z.infer<typeof proposalStatusSchema>;
 export type ProposalSource = z.infer<typeof proposalSourceSchema>;

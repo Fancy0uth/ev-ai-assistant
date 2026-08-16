@@ -77,8 +77,7 @@ describe('owner-scoped calendar and proposal repositories', () => {
       createdAt: now,
       updatedAt: now,
     };
-    const { ownerId: _ownerId, ...savedEvent } = event;
-    calendar.createEvent(event);
+    const savedEvent = calendar.createEvent(event);
 
     expect(calendar.listEventsForDate(ownerId, '2026-09-07')).toEqual([savedEvent]);
     expect(calendar.listEventsForDate(otherOwnerId, '2026-09-07')).toEqual([]);
@@ -116,8 +115,8 @@ describe('owner-scoped calendar and proposal repositories', () => {
       expiresAt: null,
     };
 
-    const { ownerId: _ownerId, ...savedProposal } = proposal;
-    expect(proposals.create(proposal)).toEqual(savedProposal);
+    const savedProposal = proposals.create(proposal);
+    expect(savedProposal).toMatchObject({ id: proposal.id, title: proposal.title });
     expect(proposals.findById(ownerId, proposal.id)).toEqual(savedProposal);
     expect(proposals.findById(otherOwnerId, proposal.id)).toBeUndefined();
     expect(proposals.listPending(otherOwnerId)).toEqual([]);

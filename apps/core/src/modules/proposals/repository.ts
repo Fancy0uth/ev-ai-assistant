@@ -1,9 +1,11 @@
 import {
   proposalChangeSchema,
   proposalSchema,
+  type ProposalDecisionInput,
   type Proposal,
   type ProposalChange,
 } from '@ev/contracts';
+import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 export interface NewProposal extends Proposal {
@@ -26,6 +28,13 @@ export interface ProposalRepository {
   create(proposal: NewProposal): Proposal;
   findById(ownerId: string, proposalId: string): Proposal | undefined;
   listPending(ownerId: string): Proposal[];
+  decide(
+    ownerId: string,
+    proposalId: string,
+    input: ProposalDecisionInput,
+    decidedAt: string,
+    applyAcceptedChanges: (proposal: Proposal) => void,
+  ): Proposal | undefined;
 }
 
 function parseChanges(changesJson: string): ProposalChange[] {
@@ -54,6 +63,56 @@ export function createProposalRepository(database: Database.Database): ProposalR
   const findByIdStatement = database.prepare(
     `select ${proposalColumns} from proposals where id = ? and owner_id = ?`,
   );
+  const updateDecisionStatement = database.prepare(
+    `update proposals
+     set status = ?, version = version + 1, decided_at = ?
+     where id = ? and owner_id = ? and status = 'PENDING' and version = ?`,
+  );
+  const insertAuditStatement = database.prepare(
+    `insert into proposal_audits (
+       id, owner_id, proposal_id, decision, expected_version, applied_version, created_at
+     ) values (?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  const decide = database.transaction(
+    (
+      ownerId: string,
+      proposalId: string,
+      input: ProposalDecisionInput,
+      decidedAt: string,
+      applyAcceptedChanges: (proposal: Proposal) => void,
+    ): Proposal | undefined => {
+      const row = findByIdStatement.get(proposalId, ownerId) as ProposalRow | undefined;
+      if (!row) return undefined;
+      const current = toProposal(row);
+      if (current.status !== 'PENDING' || current.version !== input.version) return undefined;
+      if (input.decision === 'ACCEPT') applyAcceptedChanges(current);
+
+      const status = input.decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
+      const updated = updateDecisionStatement.run(
+        status,
+        decidedAt,
+        proposalId,
+        ownerId,
+        input.version,
+      );
+      if (updated.changes !== 1) return undefined;
+      insertAuditStatement.run(
+        randomUUID(),
+        ownerId,
+        proposalId,
+        input.decision,
+        input.version,
+        input.version + 1,
+        decidedAt,
+      );
+      return proposalSchema.parse({
+        ...current,
+        status,
+        version: input.version + 1,
+      });
+    },
+  );
 
   return {
     create(proposal) {
@@ -77,8 +136,8 @@ export function createProposalRepository(database: Database.Database): ProposalR
           proposal.expiresAt,
           null,
         );
-      const { ownerId: _ownerId, ...saved } = proposal;
-      return saved;
+      const row = findByIdStatement.get(proposal.id, proposal.ownerId) as ProposalRow;
+      return toProposal(row);
     },
 
     findById(ownerId, proposalId) {
@@ -97,5 +156,7 @@ export function createProposalRepository(database: Database.Database): ProposalR
         .all(ownerId) as ProposalRow[];
       return rows.map(toProposal);
     },
+
+    decide,
   };
 }
