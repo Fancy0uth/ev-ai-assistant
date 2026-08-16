@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 7 });
+    expect(migrations).toEqual({ count: 8 });
     second.close();
   });
 
@@ -297,6 +297,7 @@ describe('SQLite lifecycle', () => {
         { version: 5, name: 'add_daily_planner_jobs' },
         { version: 6, name: 'add_agent_runs' },
         { version: 7, name: 'add_memory_revisions' },
+        { version: 8, name: 'add_confirmed_meal_records' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -415,7 +416,7 @@ describe('SQLite lifecycle', () => {
     const reopened = openDatabase(databasePath);
     try {
       expect(
-        reopened.prepare('select count(*) as count from schema_migrations where version = 7').get(),
+        reopened.prepare('select count(*) as count from schema_migrations where version = 8').get(),
       ).toEqual({ count: 1 });
       expect(reopened.pragma('foreign_keys', { simple: true })).toBe(1);
     } finally {
@@ -551,6 +552,7 @@ describe('SQLite lifecycle', () => {
         { version: 5, name: 'add_daily_planner_jobs' },
         { version: 6, name: 'add_agent_runs' },
         { version: 7, name: 'add_memory_revisions' },
+        { version: 8, name: 'add_confirmed_meal_records' },
       ]);
       expect(
         upgraded

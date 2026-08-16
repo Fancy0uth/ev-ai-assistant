@@ -373,6 +373,25 @@ const migrations: readonly Migration[] = [
         on memory_revisions(owner_id, scope, version desc);
     `,
   },
+  {
+    version: 8,
+    name: 'add_confirmed_meal_records',
+    sql: `
+      create table meal_records (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        local_date text not null,
+        entries_json text not null check (json_valid(entries_json)),
+        calories real not null check (calories >= 0),
+        protein_grams real not null check (protein_grams >= 0),
+        carbohydrate_grams real not null check (carbohydrate_grams >= 0),
+        fat_grams real not null check (fat_grams >= 0),
+        created_at text not null
+      );
+
+      create index meal_records_owner_date_idx on meal_records(owner_id, local_date, created_at, id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

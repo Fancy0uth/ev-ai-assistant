@@ -22,6 +22,8 @@ import { createDailyPlannerJobService } from './modules/jobs/service';
 import { createProposalRepository } from './modules/proposals/repository';
 import { registerProposalRoutes } from './modules/proposals/routes';
 import { createProposalService } from './modules/proposals/service';
+import { registerNutritionRoutes } from './modules/nutrition/routes';
+import { createNutritionService } from './modules/nutrition/service';
 import { registerProviderRoutes } from './modules/providers/routes';
 import { createProviderService } from './modules/providers/service';
 import { createTaskRepository } from './modules/tasks/repository';
@@ -94,6 +96,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     database,
     options.domainAgentProvider ? { provider: options.domainAgentProvider } : {},
   );
+  const nutritionService = createNutritionService(database);
   let dailyPlannerTimer: NodeJS.Timeout | undefined;
   if (options.enableDailyPlanner) {
     void Promise.resolve().then(() => dailyPlannerJobService.runStartupCatchUp());
@@ -119,6 +122,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerCalendarRoutes(app, { authService, calendarService });
   await registerCourseImportRoutes(app, { authService, courseImportService });
   await registerFitnessRoutes(app, { authService, fitnessService });
+  await registerNutritionRoutes(app, { authService, nutritionService });
   await registerProposalRoutes(app, { authService, proposalService });
   await registerProviderRoutes(app, { authService, providerService });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });
