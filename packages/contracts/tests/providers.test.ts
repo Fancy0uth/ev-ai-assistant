@@ -22,6 +22,15 @@ describe('DeepSeek credential contracts', () => {
     });
   });
 
+  it('rejects unknown credential write fields so storage records cannot enter the API input', () => {
+    expect(
+      deepSeekCredentialWriteInputSchema.safeParse({
+        apiKey: 'ds-test-key',
+        encryptedApiKey: 'ciphertext',
+      }).success,
+    ).toBe(false);
+  });
+
   it('requires the exact delete confirmation so a mistyped request cannot remove a credential', () => {
     expect(deepSeekCredentialDeleteInputSchema.parse({ confirmation: 'DELETE' })).toEqual({
       confirmation: 'DELETE',
@@ -29,6 +38,15 @@ describe('DeepSeek credential contracts', () => {
     expect(deepSeekCredentialDeleteInputSchema.safeParse({ confirmation: 'delete' }).success).toBe(
       false,
     );
+  });
+
+  it('rejects unknown deletion fields so removal stays limited to exact confirmation', () => {
+    expect(
+      deepSeekCredentialDeleteInputSchema.safeParse({
+        confirmation: 'DELETE',
+        apiKey: 'ds-test-key',
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts non-sensitive public status so settings can render credential state without a secret', () => {
@@ -51,6 +69,32 @@ describe('DeepSeek credential contracts', () => {
     }
   });
 
+  it('rejects a key in successful connection status so nested public state cannot leak credentials', () => {
+    expect(
+      deepSeekCredentialStatusResponseSchema.safeParse({
+        data: {
+          ...publicCredentialStatus.data,
+          lastConnectionTest: { status: 'SUCCEEDED', apiKey: 'ds-test-key' },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a key in failed connection status so nested error details cannot leak credentials', () => {
+    expect(
+      deepSeekCredentialStatusResponseSchema.safeParse({
+        data: {
+          ...publicCredentialStatus.data,
+          lastConnectionTest: {
+            status: 'FAILED',
+            failureCode: 'NETWORK_ERROR',
+            apiKey: 'ds-test-key',
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('represents every provider failure category so callers retain actionable recovery guidance', () => {
     const failureCodes = [
       'AUTHENTICATION_FAILED',
@@ -65,6 +109,15 @@ describe('DeepSeek credential contracts', () => {
         deepSeekConnectionTestResultSchema.parse({ status: 'FAILED', failureCode }),
       ).toEqual({ status: 'FAILED', failureCode });
     }
+  });
+
+  it('rejects unknown failure categories so callers cannot rely on unsupported recovery guidance', () => {
+    expect(
+      deepSeekConnectionTestResultSchema.safeParse({
+        status: 'FAILED',
+        failureCode: 'UNKNOWN_ERROR',
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects a failure code on success so stale errors cannot misrepresent a healthy connection', () => {
