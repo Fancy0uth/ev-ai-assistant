@@ -1776,6 +1776,170 @@
 .provider-status--ready { color: #356c51; background: #e2efe6; }
 .settings-workspace__note { padding-top: var(--space-4); border-top: 1px solid var(--paper-300); }
 
+.provider-credential-live {
+  min-height: 1.3rem;
+}
+
+.provider-credential-card {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  margin-top: var(--space-6);
+  padding: var(--space-5);
+  background: var(--paper-50);
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-md);
+}
+
+.provider-credential-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.provider-credential-card__header h2 {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: 1rem;
+}
+
+.provider-credential-card__header p,
+.provider-delete-confirmation p,
+.provider-credential-form__hint {
+  margin: var(--space-2) 0 0;
+  color: #65706b;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.provider-status--configured {
+  color: #356c51;
+  background: #e2efe6;
+}
+
+.provider-credential-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.provider-credential-details div {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--paper-100);
+  border-radius: var(--radius-sm);
+}
+
+.provider-credential-details dt {
+  color: #737d79;
+  font-size: 0.625rem;
+}
+
+.provider-credential-details dd {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-800);
+  font-size: 0.75rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.provider-credential-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.provider-credential-form label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--ink-700);
+  font-size: 0.6875rem;
+  font-weight: 750;
+}
+
+.provider-credential-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.625rem;
+  padding: 0 var(--space-3);
+  color: var(--ink-950);
+  background: #ffffff;
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+}
+
+.provider-credential-form input:focus {
+  border-color: var(--cyan-600);
+  box-shadow: 0 0 0 0.1875rem var(--cyan-100);
+  outline: none;
+}
+
+.provider-credential-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.provider-credential-actions button {
+  display: inline-flex;
+  min-height: 2.625rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-3);
+  color: var(--ink-800);
+  background: #ffffff;
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 750;
+}
+
+.provider-credential-actions button:first-child {
+  color: #ffffff;
+  background: var(--ink-900);
+  border-color: var(--ink-900);
+}
+
+.provider-credential-actions button:hover:not(:disabled) {
+  color: var(--cyan-600);
+  border-color: var(--cyan-600);
+}
+
+.provider-credential-actions button:first-child:hover:not(:disabled) {
+  color: #ffffff;
+  background: var(--cyan-600);
+}
+
+.provider-credential-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.provider-credential-actions .provider-credential-actions__delete {
+  color: #762a26;
+  background: var(--red-100);
+  border-color: #e1a4a0;
+}
+
+.provider-delete-confirmation {
+  padding: var(--space-3);
+  background: var(--red-100);
+  border: 1px solid #e1a4a0;
+  border-radius: var(--radius-sm);
+}
+
+.provider-delete-confirmation p {
+  margin-top: 0;
+  color: #762a26;
+}
+
+.provider-delete-confirmation .provider-credential-actions {
+  margin-top: var(--space-3);
+}
+
 .domain-workspace {
   max-width: 68rem;
 }
@@ -2830,5 +2994,41 @@
   .memory-editor__actions button,
   .memory-history button {
     width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .provider-credential-card {
+    padding: var(--space-4);
+  }
+
+  .provider-credential-card__header,
+  .provider-credential-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .provider-credential-details {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-credential-actions button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 320px) {
+  .provider-credential-card,
+  .provider-credential-card__header,
+  .provider-credential-form,
+  .provider-credential-actions {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .provider-credential-form input,
+  .provider-credential-actions button {
+    min-height: 2.75rem;
+    max-width: 100%;
   }
 }
