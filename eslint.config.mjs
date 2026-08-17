@@ -17,6 +17,7 @@ export default defineConfig([
     '.superpowers/**',
     '.next/**',
     '**/.next/**',
+    '**/.next-*/**',
     'dist/**',
     '**/dist/**',
     'coverage/**',
