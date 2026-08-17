@@ -21,6 +21,7 @@ export default defineConfig([
     'dist/**',
     '**/dist/**',
     'coverage/**',
+    'data/e2e-runs/**',
     'playwright-report/**',
     'test-results/**',
     'next-env.d.ts',
