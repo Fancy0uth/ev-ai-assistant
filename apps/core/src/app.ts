@@ -35,6 +35,9 @@ import { registerNutritionRoutes } from './modules/nutrition/routes';
 import { createNutritionService } from './modules/nutrition/service';
 import { registerProviderRoutes } from './modules/providers/routes';
 import { createProviderService } from './modules/providers/service';
+import { createProviderCredentialService } from './modules/providers/credential-service';
+import type { DeepSeekConnectionTester } from './modules/providers/deepseek-connection';
+import { createWindowsDpapiSecretStore, type SecretStorePort } from './modules/providers/secret-store';
 import { createTaskRepository } from './modules/tasks/repository';
 import { registerTaskRoutes } from './modules/tasks/routes';
 import { createTaskService } from './modules/tasks/service';
@@ -49,6 +52,8 @@ export interface AppOptions {
   courseScheduleVisionProvider?: CourseScheduleVisionProvider;
   domainAgentProvider?: DomainAgentProvider;
   domainAgentProviders?: Partial<Record<ProviderKey, DomainAgentProvider>>;
+  secretStore?: SecretStorePort;
+  deepSeekConnectionTester?: DeepSeekConnectionTester;
   databasePath?: string;
   memoryProjectionRoot?: string;
   enableDailyPlanner?: boolean;
@@ -111,6 +116,11 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       ...options.domainAgentProviders,
     },
   });
+  const providerCredentialService = createProviderCredentialService(
+    database,
+    options.secretStore ?? createWindowsDpapiSecretStore(),
+    options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
+  );
   const nutritionService = createNutritionService(database);
   const memoryService = createMemoryService(
     database,
@@ -147,7 +157,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerMemoryRoutes(app, { authService, memoryService });
   await registerProjectScopeRoutes(app, { authService, projectScopeService });
   await registerProposalRoutes(app, { authService, proposalService });
-  await registerProviderRoutes(app, { authService, providerService });
+  await registerProviderRoutes(app, { authService, providerService, providerCredentialService });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });
   await registerTodayRoutes(app, {
     authService,

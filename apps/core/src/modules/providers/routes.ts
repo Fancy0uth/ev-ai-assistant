@@ -2,17 +2,37 @@ import {
   agentRunListResponseSchema,
   agentRunResponseSchema,
   createAgentRunSchema,
+  deepSeekCredentialDeleteInputSchema,
+  deepSeekCredentialStatusResponseSchema,
+  deepSeekCredentialWriteInputSchema,
   providerListResponseSchema,
 } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
+import { ApiError } from '../../http/api-error';
 import { parseRequestInput } from '../../http/validation';
 import { authenticatedOwnerId, createAuthGuard } from '../auth/guard';
 import type { AuthService } from '../auth/service';
+import {
+  CredentialNotConfiguredError,
+  type ProviderCredentialService,
+} from './credential-service';
+import { SecretStoreUnavailableError } from './secret-store';
 import type { ProviderService } from './service';
 
 interface ProviderRouteOptions {
   authService: AuthService;
   providerService: ProviderService;
+  providerCredentialService: ProviderCredentialService;
+}
+
+function rethrowCredentialError(error: unknown): never {
+  if (error instanceof CredentialNotConfiguredError) {
+    throw new ApiError(409, 'CREDENTIAL_NOT_CONFIGURED', '尚未配置 DeepSeek 凭据');
+  }
+  if (error instanceof SecretStoreUnavailableError) {
+    throw new ApiError(503, 'SECRET_STORE_UNAVAILABLE', '本地密钥存储暂时不可用');
+  }
+  throw error;
 }
 
 export async function registerProviderRoutes(
@@ -22,6 +42,49 @@ export async function registerProviderRoutes(
   const authGuard = createAuthGuard(options.authService);
   app.get('/v1/providers', { preHandler: authGuard }, async () => {
     return providerListResponseSchema.parse({ data: options.providerService.listProfiles() });
+  });
+  app.get('/v1/providers/deepseek/credential', { preHandler: authGuard }, async (request) => {
+    return deepSeekCredentialStatusResponseSchema.parse({
+      data: options.providerCredentialService.getMetadata(authenticatedOwnerId(request)),
+    });
+  });
+  app.put('/v1/providers/deepseek/credential', { preHandler: authGuard }, async (request) => {
+    const ownerId = authenticatedOwnerId(request);
+    const input = parseRequestInput(
+      deepSeekCredentialWriteInputSchema,
+      request.body,
+      'DeepSeek 凭据请求不符合要求',
+    );
+    try {
+      return deepSeekCredentialStatusResponseSchema.parse({
+        data: await options.providerCredentialService.save(ownerId, input.apiKey),
+      });
+    } catch (error) {
+      return rethrowCredentialError(error);
+    }
+  });
+  app.delete('/v1/providers/deepseek/credential', { preHandler: authGuard }, async (request) => {
+    const ownerId = authenticatedOwnerId(request);
+    parseRequestInput(
+      deepSeekCredentialDeleteInputSchema,
+      request.body,
+      'DeepSeek 凭据删除请求不符合要求',
+    );
+    options.providerCredentialService.remove(ownerId);
+    return deepSeekCredentialStatusResponseSchema.parse({
+      data: options.providerCredentialService.getMetadata(ownerId),
+    });
+  });
+  app.post('/v1/providers/deepseek/connection-test', { preHandler: authGuard }, async (request) => {
+    const ownerId = authenticatedOwnerId(request);
+    try {
+      await options.providerCredentialService.testConnection(ownerId);
+      return deepSeekCredentialStatusResponseSchema.parse({
+        data: options.providerCredentialService.getMetadata(ownerId),
+      });
+    } catch (error) {
+      return rethrowCredentialError(error);
+    }
   });
   app.get('/v1/agent-runs', { preHandler: authGuard }, async (request) => {
     return agentRunListResponseSchema.parse({
