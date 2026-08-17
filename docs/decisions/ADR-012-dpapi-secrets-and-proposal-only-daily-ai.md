@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -19,6 +19,8 @@ v0.3 需要让单 Owner 在设置页配置 DeepSeek，并让每日排程真正�
 3. 每次 DeepSeek 调用都经过 `ContextManifest` 与结构化输出校验；密钥、请求正文和健康原文不进入日志。
 4. 日程协调 Agent 只能创建 `DailyPlanProposal`。任何 Event、Action 或时间块写入只由 Owner 在审阅后通过版本校验确认。
 5. Windows adapter 的自动化测试使用内存 Fake；真实 DPAPI 仅以人工连接测试验证。Linux/macOS 将来通过同一 Port 接入各自 Secret Store，不在本 ADR 中预设实现。
+
+实现约束：`withApiKey` 只能在 Core 内以 `void` callback 暂时交出明文，不能通过返回值把密钥带回调用链；PowerShell 子进程的输入走 stdin，所有异常、超时或输出超限都 fail-closed。
 
 ## Alternatives Considered
 
@@ -43,3 +45,8 @@ v0.3 需要让单 Owner 在设置页配置 DeepSeek，并让每日排程真正�
 - v0.3 需要一个 Windows 专用实现与清晰的“不支持当前系统”状态；实现复杂度可通过 Port 隔离。
 - Key 替换/删除与 Context 外发需要明确 UI 和审计记录。
 - 每日计划首次变得真实可用，但仍不会自动执行；这为后续项目、课程、健身和饮食 Agent 提供安全的同一 Proposal 通道。
+
+## References
+
+- [Microsoft ProtectedData / DPAPI](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.protecteddata?view=windowsdesktop-9.0)
+- [Node.js child_process](https://nodejs.org/download/release/latest-v24.x/docs/api/all.html#child-process)
