@@ -44,7 +44,7 @@
 - [x] V3-01：冻结 Provider 密钥、状态、错误码和 Owner 授权契约。
 - [x] V3-02：实现 `SecretStorePort` 与 Windows DPAPI 密钥 adapter。
 - [x] V3-03a：实现 DeepSeek 连接测试 Core 与结果持久化。
-- [ ] V3-03b：实现 Owner Provider API、设置页和主动连接测试入口。
+- [x] V3-03b：实现 Owner Provider API、设置页和主动连接测试入口。
 - [ ] V3-04：冻结 Daily Plan、Proposal Item 与 Context Manifest 契约。
 - [ ] V3-05：完成加法迁移与最小每日计划 Context Builder。
 - [ ] V3-06：实现生成、确定性校验和保存 Daily Plan Proposal。

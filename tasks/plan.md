@@ -2,7 +2,7 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 状态 | In progress — Provider 安全底座与 DeepSeek 连接测试已完成；下一步为受认证设置入口。 |
+| 状态 | In progress — Provider 安全底座、DeepSeek 连接测试和受认证设置入口已完成；下一步为每日计划契约。 |
 | 权威输入 | [v0.3 规格](../docs/superpowers/specs/2026-08-17-v0.3-daily-ai-control-loop.md)、[v0.3 计划](../docs/superpowers/plans/2026-08-17-v0.3-daily-ai-control-loop.md)、[ADR-012](../docs/decisions/ADR-012-dpapi-secrets-and-proposal-only-daily-ai.md) |
 | 历史计划 | v0.2 和本地基础 MVP 计划保留在 `docs/superpowers/plans/`；当前文件只跟踪下一条真实 AI 闭环。 |
 
