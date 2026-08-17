@@ -161,6 +161,106 @@ describe('SQLite lifecycle', () => {
     }
   });
 
+  it('upgrades a simulated v10 database to v11 without changing its Owner or Task', () => {
+    const databasePath = join(testDirectory, 'v10.sqlite');
+    const owner = {
+      singleton_key: 1,
+      id: 'owner-v10',
+      username: 'owner-v10',
+      password_hash: 'fixture-hash-v10',
+      created_at: '2026-08-17T00:00:00.000Z',
+    };
+    const task = {
+      id: 'task-v10',
+      owner_id: owner.id,
+      title: 'Preserve the v10 task',
+      area: 'WORK',
+      priority: 'HIGH',
+      status: 'IN_PROGRESS',
+      target_date: '2026-08-17',
+      completed_at: null,
+      version: 5,
+      created_at: '2026-08-17T00:01:00.000Z',
+      updated_at: '2026-08-17T00:02:00.000Z',
+    };
+    const v10 = openDatabase(databasePath);
+    try {
+      v10
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run(owner.id, owner.username, owner.password_hash, owner.created_at);
+      v10
+        .prepare(
+          `insert into tasks (
+            id, owner_id, title, area, priority, status, target_date, completed_at,
+            version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          task.id,
+          task.owner_id,
+          task.title,
+          task.area,
+          task.priority,
+          task.status,
+          task.target_date,
+          task.completed_at,
+          task.version,
+          task.created_at,
+          task.updated_at,
+        );
+      v10.exec('drop table provider_credentials');
+      v10.prepare('delete from schema_migrations where version = ?').run(11);
+    } finally {
+      v10.close();
+    }
+
+    const upgraded = openDatabase(databasePath);
+    try {
+      expect(upgraded.prepare('select * from owners where id = ?').get(owner.id)).toEqual(owner);
+      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual(task);
+      expect(
+        upgraded.prepare('select version, name from schema_migrations where version = 11').get(),
+      ).toEqual({ version: 11, name: 'add_provider_credentials' });
+      upgraded
+        .prepare(
+          `insert into provider_credentials (
+            owner_id, provider_key, protected_value, version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          owner.id,
+          'DEEPSEEK',
+          'opaque-v10-token',
+          1,
+          '2026-08-17T00:03:00.000Z',
+          '2026-08-17T00:03:00.000Z',
+        );
+      expect(() =>
+        upgraded
+          .prepare(
+            `insert into provider_credentials (
+              owner_id, provider_key, protected_value, version, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            'missing-owner',
+            'DEEPSEEK',
+            'opaque-missing-owner-token',
+            1,
+            '2026-08-17T00:03:00.000Z',
+            '2026-08-17T00:03:00.000Z',
+          ),
+      ).toThrow();
+      expect(() =>
+        upgraded
+          .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+          .run('owner-v10-second', 'owner-v10-second', 'fixture-hash', owner.created_at),
+      ).toThrow();
+    } finally {
+      upgraded.close();
+    }
+  });
+
   it('rejects agent session titles longer than the raw 80-character limit', () => {
     const database = openDatabase(join(testDirectory, 'app.sqlite'));
     try {

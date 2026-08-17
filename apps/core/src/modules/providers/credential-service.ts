@@ -23,7 +23,7 @@ export class CredentialNotConfiguredError extends Error {
 export interface ProviderCredentialService {
   getMetadata(ownerId: string): DeepSeekCredentialMetadata;
   save(ownerId: string, apiKey: string): Promise<DeepSeekCredentialMetadata>;
-  withApiKey<T>(ownerId: string, callback: (apiKey: string) => T | Promise<T>): Promise<T>;
+  withApiKey(ownerId: string, callback: (apiKey: string) => void | Promise<void>): Promise<void>;
   remove(ownerId: string): void;
 }
 
@@ -95,7 +95,7 @@ export function createProviderCredentialService(
       } catch {
         throw unavailable();
       }
-      return callback(apiKey);
+      await callback(apiKey);
     },
 
     remove(ownerId) {
