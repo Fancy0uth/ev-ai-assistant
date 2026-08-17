@@ -525,6 +525,131 @@ const migrations: readonly Migration[] = [
         on daily_plan_runs(owner_id, created_at desc, id);
     `,
   },
+  {
+    version: 14,
+    name: 'add_daily_plan_proposals',
+    sql: `
+      create table schedule_versions (
+        owner_id text primary key references owners(id) on delete cascade,
+        version integer not null check (version >= 1),
+        updated_at text not null
+      );
+
+      insert into schedule_versions (owner_id, version, updated_at)
+      select id, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') from owners;
+
+      create trigger schedule_versions_after_owner_insert
+      after insert on owners begin
+        insert into schedule_versions (owner_id, version, updated_at)
+        values (new.id, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+      end;
+
+      create trigger schedule_versions_after_event_insert
+      after insert on events begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = new.owner_id;
+      end;
+
+      create trigger schedule_versions_after_event_update
+      after update on events begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = new.owner_id;
+      end;
+
+      create trigger schedule_versions_after_event_delete
+      after delete on events begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = old.owner_id;
+      end;
+
+      create trigger schedule_versions_after_time_request_insert
+      after insert on time_requests begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = new.owner_id;
+      end;
+
+      create trigger schedule_versions_after_time_request_update
+      after update on time_requests begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = new.owner_id;
+      end;
+
+      create trigger schedule_versions_after_time_request_delete
+      after delete on time_requests begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = old.owner_id;
+      end;
+
+      create trigger schedule_versions_after_recovery_signal_insert
+      after insert on signals
+      when new.kind = 'RECOVERY' begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = new.owner_id;
+      end;
+
+      create trigger schedule_versions_after_recovery_signal_update
+      after update on signals
+      when old.kind = 'RECOVERY' or new.kind = 'RECOVERY' begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = new.owner_id;
+      end;
+
+      create trigger schedule_versions_after_recovery_signal_delete
+      after delete on signals
+      when old.kind = 'RECOVERY' begin
+        update schedule_versions
+        set version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = old.owner_id;
+      end;
+
+      create unique index daily_plan_runs_id_owner_id_idx
+        on daily_plan_runs(id, owner_id);
+
+      create table daily_plan_proposals (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        run_id text not null,
+        contract_version text not null check (contract_version = 'DAILY_PLAN_V1'),
+        local_date text not null,
+        status text not null check (status in (
+          'PENDING_REVIEW',
+          'PARTIALLY_APPLIED',
+          'APPLIED',
+          'REJECTED',
+          'STALE'
+        )),
+        base_schedule_version integer not null check (base_schedule_version >= 1),
+        summary text not null check (length(trim(summary)) between 1 and 800),
+        items_json text not null check (json_valid(items_json)),
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        foreign key (run_id, owner_id)
+          references daily_plan_runs(id, owner_id) on delete cascade
+      );
+
+      create index daily_plan_proposals_owner_date_status_idx
+        on daily_plan_proposals(owner_id, local_date, status);
+      create index daily_plan_proposals_run_id_idx on daily_plan_proposals(run_id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {
