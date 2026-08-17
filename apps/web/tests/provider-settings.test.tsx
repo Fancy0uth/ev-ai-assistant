@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ProviderSettingsPage from '@/app/(dashboard)/settings/providers/page';
@@ -39,6 +39,15 @@ function requestBody(call: number): unknown {
   return JSON.parse(String(init?.body));
 }
 
+function createDeferred<T>() {
+  let resolve: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve: resolve! };
+}
+
 describe('ProviderSettingsPage', () => {
   beforeEach(() => {
     requestCoreMock.mockReset();
@@ -54,7 +63,10 @@ describe('ProviderSettingsPage', () => {
     expect(screen.getByRole('button', { name: '测试连接' })).toBeDisabled();
     expect(screen.getByLabelText('DeepSeek API Key')).toHaveAttribute('type', 'password');
     expect(screen.getByLabelText('DeepSeek API Key')).toHaveAttribute('autocomplete', 'off');
-    expect(requestCoreMock).toHaveBeenCalledWith('providers/deepseek/credential', { method: 'GET' });
+    expect(requestCoreMock).toHaveBeenCalledWith(
+      'providers/deepseek/credential',
+      expect.objectContaining({ method: 'GET', signal: expect.anything() }),
+    );
   });
 
   it('saves only the typed key, clears the field, and never renders sensitive values', async () => {
@@ -75,9 +87,56 @@ describe('ProviderSettingsPage', () => {
       expect.objectContaining({ method: 'PUT' }),
     );
     expect(requestBody(1)).toEqual({ apiKey: fakeKey });
+    expect(requestCoreMock).toHaveBeenCalledTimes(2);
+    expect(requestCoreMock.mock.calls.map(([path]) => path)).toEqual([
+      'providers/deepseek/credential',
+      'providers/deepseek/credential',
+    ]);
+    expect(requestCoreMock.mock.calls.some(([path]) => path === 'providers/deepseek/connection-test')).toBe(false);
     expect(input).toHaveValue('');
     expect(screen.queryByText(fakeKey)).not.toBeInTheDocument();
     expect(screen.queryByText(opaqueToken)).not.toBeInTheDocument();
+  });
+
+  it('aborts an in-flight save on unmount without later UI updates or exposing the typed key', async () => {
+    const save = createDeferred<unknown>();
+    let saveSignal: AbortSignal | undefined;
+    requestCoreMock
+      .mockResolvedValueOnce(credentialResponse())
+      .mockImplementationOnce(async (_path, init) => {
+        saveSignal = init.signal ?? undefined;
+        return save.promise;
+      });
+    const user = userEvent.setup();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const { container, unmount } = render(<ProviderSettingsPage />);
+      const input = await screen.findByLabelText('DeepSeek API Key');
+      await user.type(input, fakeKey);
+      await user.click(screen.getByRole('button', { name: '保存密钥' }));
+
+      expect(input).toHaveValue('');
+      expect(container).not.toHaveTextContent(fakeKey);
+      expect(requestCoreMock.mock.calls.map(([path]) => path)).toEqual([
+        'providers/deepseek/credential',
+        'providers/deepseek/credential',
+      ]);
+      expect(saveSignal).toBeDefined();
+
+      unmount();
+      expect(saveSignal?.aborted).toBe(true);
+
+      await act(async () => {
+        save.resolve(credentialResponse('CONFIGURED'));
+        await save.promise;
+      });
+
+      expect(container).not.toHaveTextContent(fakeKey);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('runs a manual connection test and renders its succeeded category', async () => {
@@ -94,7 +153,7 @@ describe('ProviderSettingsPage', () => {
     expect(requestCoreMock).toHaveBeenNthCalledWith(
       2,
       'providers/deepseek/connection-test',
-      { method: 'POST' },
+      expect.objectContaining({ method: 'POST', signal: expect.anything() }),
     );
   });
 
@@ -138,6 +197,30 @@ describe('ProviderSettingsPage', () => {
       expect.objectContaining({ method: 'DELETE' }),
     );
     expect(requestBody(1)).toEqual({ confirmation: 'DELETE' });
+  });
+
+  it('focuses the labelled delete confirmation for keyboard users and restores focus on cancel', async () => {
+    requestCoreMock.mockResolvedValue(credentialResponse('CONFIGURED'));
+    const user = userEvent.setup();
+
+    render(<ProviderSettingsPage />);
+    const deleteTrigger = await screen.findByRole('button', { name: '删除密钥' });
+    deleteTrigger.focus();
+    await user.keyboard('{Enter}');
+
+    const confirmation = await screen.findByRole('alertdialog', { name: '确认删除密钥' });
+    const confirmButton = screen.getByRole('button', { name: '确认删除' });
+    expect(confirmation).toHaveAccessibleDescription('删除后无法恢复，确定继续吗？');
+    await waitFor(() => expect(confirmButton).toHaveFocus());
+
+    await user.tab();
+    const cancelButton = screen.getByRole('button', { name: '取消' });
+    expect(cancelButton).toHaveFocus();
+    await user.keyboard('{Enter}');
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: '删除密钥' })).toHaveFocus());
+    expect(requestCoreMock).toHaveBeenCalledTimes(1);
   });
 
   it('renders Core failures in an alert region', async () => {

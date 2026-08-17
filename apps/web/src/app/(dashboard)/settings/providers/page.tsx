@@ -5,7 +5,7 @@ import {
   type DeepSeekConnectionFailureCode,
   type DeepSeekCredentialMetadata,
 } from '@ev/contracts';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 
 const failureMessages: Record<DeepSeekConnectionFailureCode, string> = {
@@ -40,47 +40,91 @@ export default function ProviderSettingsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const inFlightControllersRef = useRef(new Set<AbortController>());
+  const apiKeyRef = useRef('');
+  const deleteTriggerRef = useRef<HTMLButtonElement>(null);
+  const confirmDeleteRef = useRef<HTMLButtonElement>(null);
+  const restoreDeleteFocusRef = useRef(false);
+
+  function createRequestController(): AbortController {
+    const controller = new AbortController();
+    inFlightControllersRef.current.add(controller);
+    return controller;
+  }
+
+  function releaseRequestController(controller: AbortController): void {
+    inFlightControllersRef.current.delete(controller);
+  }
 
   useEffect(() => {
-    let active = true;
-    void requestCore('providers/deepseek/credential', { method: 'GET' })
+    mountedRef.current = true;
+    const controllers = inFlightControllersRef.current;
+    const controller = createRequestController();
+    void requestCore('providers/deepseek/credential', { method: 'GET', signal: controller.signal })
       .then((payload) => deepSeekCredentialStatusResponseSchema.parse(payload).data)
       .then((loaded) => {
-        if (active) setMetadata(loaded);
+        if (mountedRef.current) setMetadata(loaded);
       })
       .catch((failure: unknown) => {
-        if (active) setError(failureMessage(failure));
+        if (mountedRef.current && !controller.signal.aborted) setError(failureMessage(failure));
       })
       .finally(() => {
-        if (active) setIsLoading(false);
+        releaseRequestController(controller);
+        if (mountedRef.current) setIsLoading(false);
       });
 
     return () => {
-      active = false;
-      setApiKey('');
+      mountedRef.current = false;
+      apiKeyRef.current = '';
+      for (const inFlightController of controllers) {
+        inFlightController.abort();
+      }
+      controllers.clear();
     };
   }, []);
 
+  useEffect(() => {
+    if (confirmDelete) {
+      confirmDeleteRef.current?.focus();
+    } else if (restoreDeleteFocusRef.current) {
+      deleteTriggerRef.current?.focus();
+      restoreDeleteFocusRef.current = false;
+    }
+  }, [confirmDelete]);
+
   async function saveCredential(): Promise<void> {
-    const value = apiKey;
-    if (!value.trim() || isSaving) return;
+    let value = apiKeyRef.current;
+    if (!value.trim() || isSaving) {
+      value = '';
+      return;
+    }
+
+    let body = JSON.stringify({ apiKey: value });
+    value = '';
+    apiKeyRef.current = '';
+    setApiKey('');
 
     setError(null);
     setSuccess(null);
     setIsSaving(true);
+    const controller = createRequestController();
     try {
       const payload = await requestCore('providers/deepseek/credential', {
         method: 'PUT',
-        body: JSON.stringify({ apiKey: value }),
+        body,
+        signal: controller.signal,
       });
+      if (!mountedRef.current) return;
       setMetadata(deepSeekCredentialStatusResponseSchema.parse(payload).data);
-      setApiKey('');
       setConfirmDelete(false);
       setSuccess('密钥已保存。请按需手动测试连接。');
-    } catch (failure) {
-      setError(failureMessage(failure));
+    } catch (failure: unknown) {
+      if (mountedRef.current && !controller.signal.aborted) setError(failureMessage(failure));
     } finally {
-      setIsSaving(false);
+      body = '';
+      releaseRequestController(controller);
+      if (mountedRef.current) setIsSaving(false);
     }
   }
 
@@ -90,14 +134,17 @@ export default function ProviderSettingsPage() {
     setError(null);
     setSuccess(null);
     setIsTesting(true);
+    const controller = createRequestController();
     try {
-      const payload = await requestCore('providers/deepseek/connection-test', { method: 'POST' });
+      const payload = await requestCore('providers/deepseek/connection-test', { method: 'POST', signal: controller.signal });
+      if (!mountedRef.current) return;
       setMetadata(deepSeekCredentialStatusResponseSchema.parse(payload).data);
       setSuccess('连接测试已完成。');
-    } catch (failure) {
-      setError(failureMessage(failure));
+    } catch (failure: unknown) {
+      if (mountedRef.current && !controller.signal.aborted) setError(failureMessage(failure));
     } finally {
-      setIsTesting(false);
+      releaseRequestController(controller);
+      if (mountedRef.current) setIsTesting(false);
     }
   }
 
@@ -107,20 +154,30 @@ export default function ProviderSettingsPage() {
     setError(null);
     setSuccess(null);
     setIsDeleting(true);
+    const controller = createRequestController();
     try {
       const payload = await requestCore('providers/deepseek/credential', {
         method: 'DELETE',
         body: JSON.stringify({ confirmation: 'DELETE' }),
+        signal: controller.signal,
       });
+      if (!mountedRef.current) return;
       setMetadata(deepSeekCredentialStatusResponseSchema.parse(payload).data);
+      apiKeyRef.current = '';
       setApiKey('');
       setConfirmDelete(false);
       setSuccess('密钥已删除。');
-    } catch (failure) {
-      setError(failureMessage(failure));
+    } catch (failure: unknown) {
+      if (mountedRef.current && !controller.signal.aborted) setError(failureMessage(failure));
     } finally {
-      setIsDeleting(false);
+      releaseRequestController(controller);
+      if (mountedRef.current) setIsDeleting(false);
     }
+  }
+
+  function cancelDelete(): void {
+    restoreDeleteFocusRef.current = true;
+    setConfirmDelete(false);
   }
 
   const isBusy = isSaving || isTesting || isDeleting;
@@ -176,7 +233,10 @@ export default function ProviderSettingsPage() {
                 type="password"
                 autoComplete="off"
                 value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
+                onChange={(event) => {
+                  apiKeyRef.current = event.target.value;
+                  setApiKey(event.target.value);
+                }}
                 disabled={isBusy}
               />
             </label>
@@ -189,7 +249,13 @@ export default function ProviderSettingsPage() {
                 {isTesting ? '正在测试…' : '测试连接'}
               </button>
               {isConfigured && !confirmDelete ? (
-                <button type="button" className="provider-credential-actions__delete" disabled={isBusy} onClick={() => setConfirmDelete(true)}>
+                <button
+                  ref={deleteTriggerRef}
+                  type="button"
+                  className="provider-credential-actions__delete"
+                  disabled={isBusy}
+                  onClick={() => setConfirmDelete(true)}
+                >
                   删除密钥
                 </button>
               ) : null}
@@ -197,13 +263,20 @@ export default function ProviderSettingsPage() {
           </form>
 
           {confirmDelete ? (
-            <div className="provider-delete-confirmation">
-              <p>删除后无法恢复，确定继续吗？</p>
+            <div
+              className="provider-delete-confirmation"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="provider-delete-confirmation-title"
+              aria-describedby="provider-delete-confirmation-description"
+            >
+              <h3 id="provider-delete-confirmation-title">确认删除密钥</h3>
+              <p id="provider-delete-confirmation-description">删除后无法恢复，确定继续吗？</p>
               <div className="provider-credential-actions">
-                <button type="button" className="provider-credential-actions__delete" disabled={isBusy} onClick={() => void deleteCredential()}>
+                <button ref={confirmDeleteRef} type="button" className="provider-credential-actions__delete" disabled={isBusy} onClick={() => void deleteCredential()}>
                   {isDeleting ? '正在删除…' : '确认删除'}
                 </button>
-                <button type="button" disabled={isBusy} onClick={() => setConfirmDelete(false)}>
+                <button type="button" disabled={isBusy} onClick={cancelDelete}>
                   取消
                 </button>
               </div>

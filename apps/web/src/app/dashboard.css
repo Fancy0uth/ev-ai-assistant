@@ -3012,7 +3012,9 @@
     grid-template-columns: 1fr;
   }
 
+  .provider-credential-form input,
   .provider-credential-actions button {
+    min-height: 2.75rem;
     width: 100%;
   }
 }
