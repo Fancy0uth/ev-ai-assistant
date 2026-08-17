@@ -37,11 +37,11 @@
 
 ---
 
-## v0.3：Daily AI Control Loop（待规格评审）
+## v0.3：Daily AI Control Loop（实施中）
 
 详细边界与每项验收条件见 [v0.3 规格](../docs/superpowers/specs/2026-08-17-v0.3-daily-ai-control-loop.md) 和 [v0.3 实施计划](../docs/superpowers/plans/2026-08-17-v0.3-daily-ai-control-loop.md)。
 
-- [ ] V3-01：冻结 Provider 密钥、状态、错误码和 Owner 授权契约。
+- [x] V3-01：冻结 Provider 密钥、状态、错误码和 Owner 授权契约。
 - [ ] V3-02：实现 `SecretStorePort` 与 Windows DPAPI 密钥 adapter。
 - [ ] V3-03：实现 DeepSeek adapter、Provider 设置和主动连接测试。
 - [ ] V3-04：冻结 Daily Plan、Proposal Item 与 Context Manifest 契约。
