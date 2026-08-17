@@ -439,6 +439,31 @@ const migrations: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 12,
+    name: 'add_provider_connection_tests',
+    sql: `
+      create table provider_connection_tests (
+        owner_id text not null references owners(id) on delete cascade,
+        provider_key text not null check (provider_key = 'DEEPSEEK'),
+        status text not null check (status in ('SUCCEEDED', 'FAILED')),
+        failure_code text check (failure_code is null or failure_code in (
+          'AUTHENTICATION_FAILED',
+          'RATE_LIMITED',
+          'NETWORK_ERROR',
+          'INVALID_RESPONSE',
+          'PROVIDER_UNAVAILABLE'
+        )),
+        created_at text not null,
+        check (
+          (status = 'SUCCEEDED' and failure_code is null)
+          or (status = 'FAILED' and failure_code is not null)
+        )
+      );
+      create index provider_connection_tests_owner_latest_idx
+        on provider_connection_tests(owner_id, provider_key, created_at desc);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {
