@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest';
+import {
+  deepSeekConnectionTestResultSchema,
+  deepSeekCredentialDeleteInputSchema,
+  deepSeekCredentialStatusResponseSchema,
+  deepSeekCredentialWriteInputSchema,
+} from '../src/index';
+
+const publicCredentialStatus = {
+  data: {
+    providerKey: 'DEEPSEEK',
+    state: 'CONFIGURED',
+    updatedAt: '2026-08-17T05:30:00.000Z',
+    lastConnectionTest: { status: 'SUCCEEDED' },
+  },
+};
+
+describe('DeepSeek credential contracts', () => {
+  it('accepts a trimmed valid key write so usable DeepSeek credentials are not rejected', () => {
+    expect(deepSeekCredentialWriteInputSchema.parse({ apiKey: '  ds-test-key  ' })).toEqual({
+      apiKey: 'ds-test-key',
+    });
+  });
+
+  it('requires the exact delete confirmation so a mistyped request cannot remove a credential', () => {
+    expect(deepSeekCredentialDeleteInputSchema.parse({ confirmation: 'DELETE' })).toEqual({
+      confirmation: 'DELETE',
+    });
+    expect(deepSeekCredentialDeleteInputSchema.safeParse({ confirmation: 'delete' }).success).toBe(
+      false,
+    );
+  });
+
+  it('accepts non-sensitive public status so settings can render credential state without a secret', () => {
+    expect(deepSeekCredentialStatusResponseSchema.parse(publicCredentialStatus)).toEqual(
+      publicCredentialStatus,
+    );
+  });
+
+  it('rejects keys and key-derived fields from public status so a storage DTO cannot leak a credential', () => {
+    const leakedStatuses = [
+      { data: { ...publicCredentialStatus.data, apiKey: 'ds-test-key' } },
+      { data: { ...publicCredentialStatus.data, encryptedApiKey: 'ciphertext' } },
+      { data: { ...publicCredentialStatus.data, apiKeySuffix: '1234' } },
+      { data: { ...publicCredentialStatus.data, apiKeyFingerprint: 'derived-value' } },
+      { ...publicCredentialStatus, apiKey: 'ds-test-key' },
+    ];
+
+    for (const leakedStatus of leakedStatuses) {
+      expect(deepSeekCredentialStatusResponseSchema.safeParse(leakedStatus).success).toBe(false);
+    }
+  });
+
+  it('represents every provider failure category so callers retain actionable recovery guidance', () => {
+    const failureCodes = [
+      'AUTHENTICATION_FAILED',
+      'RATE_LIMITED',
+      'NETWORK_ERROR',
+      'INVALID_RESPONSE',
+      'PROVIDER_UNAVAILABLE',
+    ] as const;
+
+    for (const failureCode of failureCodes) {
+      expect(
+        deepSeekConnectionTestResultSchema.parse({ status: 'FAILED', failureCode }),
+      ).toEqual({ status: 'FAILED', failureCode });
+    }
+  });
+
+  it('rejects a failure code on success so stale errors cannot misrepresent a healthy connection', () => {
+    expect(
+      deepSeekConnectionTestResultSchema.safeParse({
+        status: 'SUCCEEDED',
+        failureCode: 'AUTHENTICATION_FAILED',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a failed connection without its category so recovery guidance is not erased', () => {
+    expect(deepSeekConnectionTestResultSchema.safeParse({ status: 'FAILED' }).success).toBe(false);
+  });
+});
