@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { dailyPlanContextManifestSchema, dailyPlanRunSchema } from '@ev/contracts';
 import { createCalendarRepository } from '../src/modules/calendar/repository';
 import { createDailyPlanningContextService } from '../src/modules/daily-planning/context-service';
-import { createDailyPlanRunRepository } from '../src/modules/daily-planning/repository';
+import {
+  createDailyPlanRunRepository,
+  type DailyPlanRunRepository,
+} from '../src/modules/daily-planning/repository';
 import { openDatabase } from '../src/storage/database';
 
 const ownerId = '00000000-0000-4000-8000-000000000401';
@@ -311,5 +314,43 @@ describe('daily planning context builder', () => {
     ).toEqual([
       { status: 'CONTEXT_READY', proposal_id: null, failure_code: null, completed_at: null },
     ]);
+  });
+
+  it('captures the base version before context reads so an intervening mutation is conservatively stale', () => {
+    const calendar = createCalendarRepository(database);
+    const databaseRepository = createDailyPlanRunRepository(database);
+    const baseScheduleVersion = databaseRepository.readScheduleVersion(ownerId).version;
+    const repository: DailyPlanRunRepository = {
+      ...databaseRepository,
+      readContext(readOwnerId, readLocalDate) {
+        const context = databaseRepository.readContext(readOwnerId, readLocalDate);
+        calendar.createEvent({
+          id: '00000000-0000-4000-8000-000000000451',
+          ownerId,
+          calendarRuleId: null,
+          title: 'Intervening schedule mutation',
+          kind: 'MEETING',
+          localDate,
+          startLocalTime: '10:00',
+          endLocalTime: '11:00',
+          isHard: true,
+          status: 'CONFIRMED',
+          version: 1,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+        });
+        return context;
+      },
+    };
+    const service = createDailyPlanningContextService(repository, {
+      newId: () => '00000000-0000-4000-8000-000000000452',
+    });
+
+    const result = service.prepare(ownerId, localDate, 'MANUAL', now);
+
+    expect(result.packet.baseScheduleVersion).toBe(baseScheduleVersion);
+    expect(databaseRepository.readScheduleVersion(ownerId).version).toBe(baseScheduleVersion + 1);
+    expect(result.packet.timeBlocks).toEqual([]);
+    expect(result.run.contextManifest).not.toHaveProperty('baseScheduleVersion');
   });
 });

@@ -136,8 +136,8 @@ export function createDailyPlanningContextService(
 
   return {
     prepare(ownerId, localDate, trigger, now = new Date()) {
-      const context = repository.readContext(ownerId, localDate);
       const baseScheduleVersion = repository.readScheduleVersion(ownerId).version;
+      const context = repository.readContext(ownerId, localDate);
       const createdAt = now.toISOString();
       const manifest = buildManifest(context, localDate, createdAt);
       const run = repository.createContextReady({
