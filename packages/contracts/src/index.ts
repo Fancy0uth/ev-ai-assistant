@@ -4,6 +4,7 @@ export * from './auth';
 export * from './calendar';
 export * from './course-import';
 export * from './courses';
+export * from './daily-plans';
 export * from './health';
 export * from './memory';
 export * from './nutrition';
