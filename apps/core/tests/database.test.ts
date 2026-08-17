@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 10 });
+    expect(migrations).toEqual({ count: 11 });
     second.close();
   });
 
@@ -113,6 +113,52 @@ describe('SQLite lifecycle', () => {
     expect(database.pragma('busy_timeout', { simple: true })).toBe(5000);
 
     database.close();
+  });
+
+  it('requires a real Owner for an encrypted DeepSeek credential row', () => {
+    const database = openDatabase(':memory:');
+    try {
+      expect(() =>
+        database
+          .prepare(
+            `insert into provider_credentials (
+               owner_id, provider_key, protected_value, version, created_at, updated_at
+             ) values (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            'owner-b',
+            'DEEPSEEK',
+            'not-a-real-key',
+            1,
+            '2026-08-17T05:30:00.000Z',
+            '2026-08-17T05:30:00.000Z',
+          ),
+      ).toThrow();
+
+      database
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run('owner-a', 'owner-a', 'not-used', '2026-08-17T05:30:00.000Z');
+      database
+        .prepare(
+          `insert into provider_credentials (
+             owner_id, provider_key, protected_value, version, created_at, updated_at
+           ) values (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'owner-a',
+          'DEEPSEEK',
+          'not-a-real-key',
+          1,
+          '2026-08-17T05:30:00.000Z',
+          '2026-08-17T05:30:00.000Z',
+        );
+
+      expect(
+        database.prepare('select owner_id, provider_key from provider_credentials').all(),
+      ).toEqual([{ owner_id: 'owner-a', provider_key: 'DEEPSEEK' }]);
+    } finally {
+      database.close();
+    }
   });
 
   it('rejects agent session titles longer than the raw 80-character limit', () => {
@@ -300,6 +346,7 @@ describe('SQLite lifecycle', () => {
         { version: 8, name: 'add_confirmed_meal_records' },
         { version: 9, name: 'add_course_resources' },
         { version: 10, name: 'add_read_only_project_scopes' },
+        { version: 11, name: 'add_provider_credentials' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -557,6 +604,7 @@ describe('SQLite lifecycle', () => {
         { version: 8, name: 'add_confirmed_meal_records' },
         { version: 9, name: 'add_course_resources' },
         { version: 10, name: 'add_read_only_project_scopes' },
+        { version: 11, name: 'add_provider_credentials' },
       ]);
       expect(
         upgraded

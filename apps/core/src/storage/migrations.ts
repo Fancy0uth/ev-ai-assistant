@@ -424,6 +424,21 @@ const migrations: readonly Migration[] = [
       create index project_scopes_owner_created_idx on project_scopes(owner_id, created_at, id);
     `,
   },
+  {
+    version: 11,
+    name: 'add_provider_credentials',
+    sql: `
+      create table provider_credentials (
+        owner_id text not null references owners(id) on delete cascade,
+        provider_key text not null check (provider_key = 'DEEPSEEK'),
+        protected_value text not null,
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        primary key (owner_id, provider_key)
+      );
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {
