@@ -116,6 +116,59 @@ describe('daily plan model output validator', () => {
     expect(() => validateDailyPlanOutput(packet, unknownReference)).toThrow(DailyPlanValidationError);
   });
 
+  it('rejects two scheduled actions for the same context reference', () => {
+    const duplicateScheduledReference: DailyPlanModelOutput = {
+      schemaVersion: 'DAILY_PLAN_MODEL_V1',
+      summary: '同一请求被重复安排。',
+      actions: [
+        {
+          operation: 'SCHEDULE_TIME_REQUEST',
+          contextRef: 'TIME_REQUEST_1',
+          startLocalTime: '10:00',
+          endLocalTime: '11:00',
+          rationale: '第一个有效安排。',
+        },
+        {
+          operation: 'SCHEDULE_TIME_REQUEST',
+          contextRef: 'TIME_REQUEST_1',
+          startLocalTime: '11:00',
+          endLocalTime: '12:00',
+          rationale: '同一请求的第二个有效安排。',
+        },
+      ],
+    };
+
+    expect(() => validateDailyPlanOutput(packet, duplicateScheduledReference)).toThrow(
+      DailyPlanValidationError,
+    );
+  });
+
+  it('rejects a scheduled action and unschedulable action for the same context reference', () => {
+    const scheduledAndUnschedulableReference: DailyPlanModelOutput = {
+      schemaVersion: 'DAILY_PLAN_MODEL_V1',
+      summary: '同一请求同时被安排和标记为无法安排。',
+      actions: [
+        {
+          operation: 'SCHEDULE_TIME_REQUEST',
+          contextRef: 'TIME_REQUEST_1',
+          startLocalTime: '10:00',
+          endLocalTime: '11:00',
+          rationale: '有效安排。',
+        },
+        {
+          operation: 'MARK_TIME_REQUEST_UNSCHEDULABLE',
+          contextRef: 'TIME_REQUEST_1',
+          reasonCode: 'INSUFFICIENT_TIME',
+          rationale: '同一请求的冲突标记。',
+        },
+      ],
+    };
+
+    expect(() => validateDailyPlanOutput(packet, scheduledAndUnschedulableReference)).toThrow(
+      DailyPlanValidationError,
+    );
+  });
+
   it('rejects a scheduled duration that differs from the matched request', () => {
     const wrongDuration = modelOutput([
       {

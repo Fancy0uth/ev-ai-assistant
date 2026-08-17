@@ -55,6 +55,7 @@ export function validateDailyPlanOutput(
       start: toMinutes(block.startLocalTime),
       end: toMinutes(block.endLocalTime),
     }));
+  const consumedContextRefs = new Set<string>();
   const scheduledIntervals: ScheduledInterval[] = [];
   let scheduledMinutes = 0;
 
@@ -63,6 +64,10 @@ export function validateDailyPlanOutput(
     if (!request) {
       return invalid(`unknown daily planning context reference: ${action.contextRef}`);
     }
+    if (consumedContextRefs.has(action.contextRef)) {
+      return invalid(`duplicate daily planning context reference: ${action.contextRef}`);
+    }
+    consumedContextRefs.add(action.contextRef);
 
     if (action.operation === 'MARK_TIME_REQUEST_UNSCHEDULABLE') {
       return {
