@@ -557,7 +557,7 @@ const migrations: readonly Migration[] = [
         update schedule_versions
         set version = version + 1,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        where owner_id = new.owner_id;
+        where owner_id in (old.owner_id, new.owner_id);
       end;
 
       create trigger schedule_versions_after_event_delete
@@ -581,7 +581,7 @@ const migrations: readonly Migration[] = [
         update schedule_versions
         set version = version + 1,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        where owner_id = new.owner_id;
+        where owner_id in (old.owner_id, new.owner_id);
       end;
 
       create trigger schedule_versions_after_time_request_delete
@@ -607,7 +607,7 @@ const migrations: readonly Migration[] = [
         update schedule_versions
         set version = version + 1,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        where owner_id = new.owner_id;
+        where owner_id in (old.owner_id, new.owner_id);
       end;
 
       create trigger schedule_versions_after_recovery_signal_delete

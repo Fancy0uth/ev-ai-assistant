@@ -217,6 +217,140 @@ describe('migration 14 daily-plan storage', () => {
     }
   });
 
+  it('invalidates both owners on Event, TimeRequest, and RECOVERY Signal transfers', () => {
+    const database = openDatabase(':memory:');
+    const timestamp = '2026-08-17T00:00:00.000Z';
+    const sourceOwnerId = 'source-owner';
+    const targetOwnerId = 'target-owner';
+    const version = (ownerId: string) =>
+      database.prepare('select version from schedule_versions where owner_id = ?').get(ownerId) as {
+        version: number;
+      };
+
+    try {
+      database
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run(sourceOwnerId, sourceOwnerId, 'hash', timestamp);
+      database.pragma('ignore_check_constraints = ON');
+      database
+        .prepare(
+          `insert into owners (singleton_key, id, username, password_hash, created_at)
+           values (?, ?, ?, ?, ?)`,
+        )
+        .run(2, targetOwnerId, targetOwnerId, 'hash', timestamp);
+      database.pragma('ignore_check_constraints = OFF');
+      expect(version(sourceOwnerId)).toEqual({ version: 1 });
+      expect(version(targetOwnerId)).toEqual({ version: 1 });
+
+      database
+        .prepare(
+          `insert into events (
+            id, owner_id, calendar_rule_id, title, kind, local_date, start_local_time,
+            end_local_time, is_hard, status, version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'transferred-event',
+          sourceOwnerId,
+          null,
+          'Transferred event',
+          'MEETING',
+          '2026-08-18',
+          '09:00',
+          '10:00',
+          1,
+          'CONFIRMED',
+          1,
+          timestamp,
+          timestamp,
+        );
+      database.prepare('update events set owner_id = ? where id = ?').run(targetOwnerId, 'transferred-event');
+      expect(version(sourceOwnerId)).toEqual({ version: 3 });
+      expect(version(targetOwnerId)).toEqual({ version: 2 });
+      database.prepare('update events set title = ? where id = ?').run('Moved event', 'transferred-event');
+      expect(version(targetOwnerId)).toEqual({ version: 3 });
+      database.prepare('delete from events where id = ?').run('transferred-event');
+      expect(version(targetOwnerId)).toEqual({ version: 4 });
+
+      database
+        .prepare(
+          `insert into time_requests (
+            id, owner_id, source, title, target_date, duration_minutes, priority,
+            earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'transferred-request',
+          sourceOwnerId,
+          'SCHEDULE_COORDINATOR',
+          'Transferred request',
+          '2026-08-18',
+          30,
+          'HIGH',
+          null,
+          null,
+          0,
+          1,
+          timestamp,
+          timestamp,
+        );
+      database
+        .prepare('update time_requests set owner_id = ? where id = ?')
+        .run(targetOwnerId, 'transferred-request');
+      expect(version(sourceOwnerId)).toEqual({ version: 5 });
+      expect(version(targetOwnerId)).toEqual({ version: 5 });
+      database.prepare('update time_requests set title = ? where id = ?').run('Moved request', 'transferred-request');
+      expect(version(targetOwnerId)).toEqual({ version: 6 });
+      database.prepare('delete from time_requests where id = ?').run('transferred-request');
+      expect(version(targetOwnerId)).toEqual({ version: 7 });
+
+      const insertSignal = database.prepare(
+        `insert into signals (
+          id, owner_id, local_date, kind, value, source, version, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      insertSignal.run(
+        'transferred-recovery-signal',
+        sourceOwnerId,
+        '2026-08-18',
+        'RECOVERY',
+        50,
+        'CHECK_IN',
+        1,
+        timestamp,
+        timestamp,
+      );
+      database
+        .prepare('update signals set owner_id = ? where id = ?')
+        .run(targetOwnerId, 'transferred-recovery-signal');
+      expect(version(sourceOwnerId)).toEqual({ version: 7 });
+      expect(version(targetOwnerId)).toEqual({ version: 8 });
+      database.prepare('update signals set value = ? where id = ?').run(60, 'transferred-recovery-signal');
+      expect(version(targetOwnerId)).toEqual({ version: 9 });
+      database.prepare('delete from signals where id = ?').run('transferred-recovery-signal');
+      expect(version(targetOwnerId)).toEqual({ version: 10 });
+
+      insertSignal.run(
+        'transferred-energy-signal',
+        sourceOwnerId,
+        '2026-08-18',
+        'ENERGY',
+        70,
+        'CHECK_IN',
+        1,
+        timestamp,
+        timestamp,
+      );
+      database
+        .prepare('update signals set owner_id = ? where id = ?')
+        .run(targetOwnerId, 'transferred-energy-signal');
+      expect(version(sourceOwnerId)).toEqual({ version: 7 });
+      expect(version(targetOwnerId)).toEqual({ version: 10 });
+    } finally {
+      database.close();
+    }
+  });
+
   it('enforces daily-plan proposal data integrity and matching run ownership', () => {
     const database = openDatabase(':memory:');
     const timestamp = '2026-08-17T00:00:00.000Z';
