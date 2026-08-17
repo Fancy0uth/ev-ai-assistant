@@ -1,33 +1,27 @@
-# EV AI Dashboard：MVP 实施总览
+# EV AI Dashboard：v0.3 Daily AI Control Loop 实施总览
 
 | 字段 | 内容 |
 | --- | --- |
-| 状态 | 已获目标模式授权，待执行 |
-| 权威输入 | [PRD](../docs/product/PRD.md)、[MVP](../docs/product/MVP-SCOPE.md)、[TECH_SPEC](../docs/technical/TECH_SPEC.md)、[ARCHITECTURE](../docs/technical/ARCHITECTURE.md) |
-| 历史计划 | v0.2 Dashboard 稳定化历史保留在 `docs/superpowers/plans/2026-08-10-v0.2.0-dashboard-stabilization.md` |
+| 状态 | Proposed — 产品方向已确认，等待规格评审后实施 |
+| 权威输入 | [v0.3 规格](../docs/superpowers/specs/2026-08-17-v0.3-daily-ai-control-loop.md)、[v0.3 计划](../docs/superpowers/plans/2026-08-17-v0.3-daily-ai-control-loop.md)、[ADR-012](../docs/decisions/ADR-012-dpapi-secrets-and-proposal-only-daily-ai.md) |
+| 历史计划 | v0.2 和本地基础 MVP 计划保留在 `docs/superpowers/plans/`；当前文件只跟踪下一条真实 AI 闭环。 |
 
 ## 实施顺序
 
-1. **基线恢复**：先使 workspace 安装、Core 契约和 Web 测试恢复可信。
-2. **日程核心闭环**：Contracts/Domain、SQLite 加法迁移、Event/Action/Signal、Proposal 事务与 Today 聚合。
-3. **课表输入与每日协调**：上传、Provider Port、候选/周次展开、确认、07:00 Job。
-4. **专业模块**：本地记忆、项目快照、课程、健身、饮食；每个模块只完成 MVP 最小纵向链路。
-5. **Web 控制台**：真实路由、首页、日程与详情页、设置/记忆/Agent 状态；桌面和 iPhone 响应式。
-6. **验证与交付**：最小自动化、浏览器流程、缺陷记录和修复、质量/验收文档。
+1. **安全 Provider**：DPAPI SecretStore、DeepSeek adapter、连接测试与错误状态。
+2. **可确认计划**：最小 Context Manifest、Daily Plan Run、结构化 Proposal、确定性校验与部分确认。
+3. **首页产品化**：日程优先 Today、计划审阅、桌面/iPhone 响应式。
+4. **调度与验收**：07:00 幂等触发、首访补偿、独立 E2E、缺陷和验收文档。
 
 ## 依赖图
 
 ```text
-Baseline
-  └─ Contracts + Domain
-       └─ Migration + Repositories
-            └─ Proposal + Day View
-                 ├─ Course import + daily scheduler
-                 ├─ Memory + Provider configuration
-                 ├─ Project snapshot / Learning
-                 └─ Fitness / Nutrition
-                      └─ Web pages + iPhone layout
-                           └─ E2E, bug fixes, acceptance
+SecretStore + Provider profile
+  └─ DeepSeek connection test
+       └─ Daily plan contracts + migration
+            └─ Context builder + deterministic validator
+                 └─ Proposal review / partial apply
+                      └─ Today redesign + 07:00 + E2E
 ```
 
 ## 质量门
@@ -41,5 +35,5 @@ Baseline
 
 - 不让 Agent 写项目、日程或外部系统；日程只由确认 Proposal 应用。
 - 不在仓库/日志中存密钥，不上传本地记忆/完整项目/健康历史。
-- 不实现 Apple 日历、手环、学校登录、多用户、Docker、公开 Core 或原生 App。
-- 新依赖、外部 Provider、不可逆迁移与远程部署按 TECH_SPEC 的安全门审查。
+- v0.3 不实现 OCR、公开搜索、Project Agent、健身/饮食智能链路、多 Agent、Apple 日历、手环、学校登录、多用户、Docker、公开 Core 或原生 App。
+- 新依赖、SecretStore 实现、不可逆迁移与远程部署按 ADR-012 的安全门审查。
