@@ -247,6 +247,18 @@ export const dailyPlanProposalSchema = z
     }
   });
 
+export const dailyPlanGenerationInputSchema = z
+  .object({
+    localDate: z.iso.date(),
+  })
+  .strict();
+
+export const dailyPlanProposalResponseSchema = z
+  .object({
+    data: dailyPlanProposalSchema,
+  })
+  .strict();
+
 export const dailyPlanRunSchema = z
   .object({
     id: z.uuid(),
@@ -311,4 +323,6 @@ export type DailyPlanModelAction = z.infer<typeof dailyPlanModelActionSchema>;
 export type DailyPlanModelOutput = z.infer<typeof dailyPlanModelOutputSchema>;
 export type DailyPlanProposalItem = z.infer<typeof dailyPlanProposalItemSchema>;
 export type DailyPlanProposal = z.infer<typeof dailyPlanProposalSchema>;
+export type DailyPlanGenerationInput = z.input<typeof dailyPlanGenerationInputSchema>;
+export type DailyPlanProposalResponse = z.infer<typeof dailyPlanProposalResponseSchema>;
 export type DailyPlanRun = z.infer<typeof dailyPlanRunSchema>;

@@ -47,7 +47,7 @@
 - [x] V3-03b：实现 Owner Provider API、设置页和主动连接测试入口。
 - [x] V3-04：冻结 Daily Plan、Proposal Item 与 Context Manifest 契约。
 - [x] V3-05：完成加法迁移与最小每日计划 Context Builder。
-- [ ] V3-06：实现生成、确定性校验和保存 Daily Plan Proposal。
+- [x] V3-06：实现生成、确定性校验和保存 Daily Plan Proposal。
 - [ ] V3-07：实现草案编辑、部分确认、拒绝与日程版本冲突处理。
 - [ ] V3-08：重构 Today 为日程优先的 Daily Control Console。
 - [ ] V3-09：实现可见 Context、Plan Review 与确认 UI。

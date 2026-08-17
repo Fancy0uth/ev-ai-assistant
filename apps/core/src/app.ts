@@ -46,6 +46,12 @@ import { openDatabase } from './storage/database';
 import type { AgentProvider } from './modules/agent/provider';
 import type { CourseScheduleVisionProvider } from './modules/agents/provider';
 import type { DomainAgentProvider } from './modules/agents/provider';
+import { createDailyPlanningContextService } from './modules/daily-planning/context-service';
+import { createDeepSeekDailyPlanningProvider } from './modules/daily-planning/deepseek-provider';
+import type { DailyPlanningProvider } from './modules/daily-planning/provider';
+import { createDailyPlanRunRepository } from './modules/daily-planning/repository';
+import { createDailyPlanningService } from './modules/daily-planning/service';
+import { registerDailyPlanningRoutes } from './routes/daily-planning';
 
 export interface AppOptions {
   agentProvider?: AgentProvider;
@@ -54,6 +60,7 @@ export interface AppOptions {
   domainAgentProviders?: Partial<Record<ProviderKey, DomainAgentProvider>>;
   secretStore?: SecretStorePort;
   deepSeekConnectionTester?: DeepSeekConnectionTester;
+  dailyPlanningProvider?: DailyPlanningProvider;
   databasePath?: string;
   memoryProjectionRoot?: string;
   enableDailyPlanner?: boolean;
@@ -121,6 +128,16 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.secretStore ?? createWindowsDpapiSecretStore(),
     options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
   );
+  const dailyPlanRepository = createDailyPlanRunRepository(database);
+  const dailyPlanningService = createDailyPlanningService({
+    contextService: createDailyPlanningContextService(dailyPlanRepository, {
+      newId: () => crypto.randomUUID(),
+    }),
+    repository: dailyPlanRepository,
+    credentialService: providerCredentialService,
+    provider: options.dailyPlanningProvider ?? createDeepSeekDailyPlanningProvider(),
+    newId: () => crypto.randomUUID(),
+  });
   const nutritionService = createNutritionService(database);
   const memoryService = createMemoryService(
     database,
@@ -158,6 +175,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerProjectScopeRoutes(app, { authService, projectScopeService });
   await registerProposalRoutes(app, { authService, proposalService });
   await registerProviderRoutes(app, { authService, providerService, providerCredentialService });
+  await registerDailyPlanningRoutes(app, { authService, dailyPlanningService });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });
   await registerTodayRoutes(app, {
     authService,
