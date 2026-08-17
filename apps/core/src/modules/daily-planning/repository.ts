@@ -1,6 +1,9 @@
 import {
+  dailyPlanProposalSchema,
   dailyPlanRunSchema,
   type DailyPlanContextManifest,
+  type DailyPlanFailureCode,
+  type DailyPlanProposal,
   type DailyPlanRun,
   type DailyPlanTrigger,
   type LocalTime,
@@ -49,6 +52,36 @@ export interface DailyPlanRunRepository {
   readContext(ownerId: string, localDate: string): DailyPlanningReadContext;
   readScheduleVersion(ownerId: string): { version: number };
   createContextReady(input: NewContextReadyDailyPlanRun): DailyPlanRun;
+  getRun(ownerId: string, runId: string): DailyPlanRun | undefined;
+  findProposalByRun(ownerId: string, runId: string): DailyPlanProposal | undefined;
+  completeWithProposal(
+    ownerId: string,
+    runId: string,
+    baseScheduleVersion: number,
+    proposal: DailyPlanProposal,
+  ): DailyPlanProposal;
+  failRun(ownerId: string, runId: string, code: DailyPlanFailureCode): DailyPlanRun;
+}
+
+export class DailyPlanBaseVersionStaleError extends Error {
+  constructor() {
+    super('DAILY_PLAN_BASE_VERSION_STALE');
+    this.name = 'DailyPlanBaseVersionStaleError';
+  }
+}
+
+class DailyPlanRunStateConflictError extends Error {
+  constructor() {
+    super('DAILY_PLAN_RUN_STATE_CONFLICT');
+    this.name = 'DailyPlanRunStateConflictError';
+  }
+}
+
+class DailyPlanProposalNotReviewableError extends Error {
+  constructor() {
+    super('DAILY_PLAN_PROPOSAL_NOT_REVIEWABLE');
+    this.name = 'DailyPlanProposalNotReviewableError';
+  }
 }
 
 interface EventContextRow {
@@ -82,12 +115,26 @@ interface DailyPlanRunRow {
   contract_version: 'DAILY_PLAN_V1';
   local_date: string;
   trigger: DailyPlanTrigger;
-  status: 'CONTEXT_READY';
+  status: DailyPlanRun['status'];
   context_manifest_json: string;
-  proposal_id: null;
-  failure_code: null;
+  proposal_id: string | null;
+  failure_code: DailyPlanFailureCode | null;
   created_at: string;
-  completed_at: null;
+  completed_at: string | null;
+}
+
+interface DailyPlanProposalRow {
+  id: string;
+  contract_version: 'DAILY_PLAN_V1';
+  run_id: string;
+  local_date: string;
+  status: DailyPlanProposal['status'];
+  base_schedule_version: number;
+  summary: string;
+  items_json: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
 }
 
 function toDailyPlanRun(row: DailyPlanRunRow): DailyPlanRun {
@@ -103,6 +150,27 @@ function toDailyPlanRun(row: DailyPlanRunRow): DailyPlanRun {
     createdAt: row.created_at,
     completedAt: row.completed_at,
   });
+}
+
+function toDailyPlanProposal(row: DailyPlanProposalRow): DailyPlanProposal {
+  return dailyPlanProposalSchema.parse({
+    id: row.id,
+    contractVersion: row.contract_version,
+    runId: row.run_id,
+    localDate: row.local_date,
+    status: row.status,
+    baseScheduleVersion: row.base_schedule_version,
+    summary: row.summary,
+    items: JSON.parse(row.items_json) as unknown,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function completionTimestamp(createdAt: string): string {
+  const now = new Date().toISOString();
+  return now >= createdAt ? now : createdAt;
 }
 
 export function createDailyPlanRunRepository(database: Database.Database): DailyPlanRunRepository {
@@ -134,11 +202,116 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      from schedule_versions
      where owner_id = ?`,
   );
-  const findContextReadyRun = database.prepare(
+  const findRun = database.prepare(
     `select id, contract_version, local_date, trigger, status, context_manifest_json,
             proposal_id, failure_code, created_at, completed_at
      from daily_plan_runs
      where id = ? and owner_id = ?`,
+  );
+  const findProposalByRun = database.prepare(
+    `select id, contract_version, run_id, local_date, status, base_schedule_version, summary,
+            items_json, version, created_at, updated_at
+     from daily_plan_proposals
+     where run_id = ? and owner_id = ?`,
+  );
+  const insertProposal = database.prepare(
+    `insert into daily_plan_proposals (
+       id, owner_id, run_id, contract_version, local_date, status, base_schedule_version,
+       summary, items_json, version, created_at, updated_at
+     ) values (?, ?, ?, 'DAILY_PLAN_V1', ?, 'PENDING_REVIEW', ?, ?, ?, ?, ?, ?)`,
+  );
+  const completeRun = database.prepare(
+    `update daily_plan_runs
+     set status = 'SUCCEEDED', proposal_id = ?, failure_code = null, completed_at = ?
+     where id = ? and owner_id = ? and status = 'CONTEXT_READY'`,
+  );
+  const failContextReadyRun = database.prepare(
+    `update daily_plan_runs
+     set status = 'FAILED', proposal_id = null, failure_code = ?, completed_at = ?
+     where id = ? and owner_id = ? and status = 'CONTEXT_READY'`,
+  );
+  const failActiveRun = database.prepare(
+    `update daily_plan_runs
+     set status = 'FAILED', proposal_id = null, failure_code = ?, completed_at = ?
+     where id = ? and owner_id = ? and status in ('CREATED', 'CONTEXT_READY', 'GENERATING')`,
+  );
+
+  const completeWithProposalTransaction = database.transaction(
+    (
+      ownerId: string,
+      runId: string,
+      baseScheduleVersion: number,
+      proposal: DailyPlanProposal,
+    ): { proposal: DailyPlanProposal } | { stale: true } => {
+      const run = findRun.get(runId, ownerId) as DailyPlanRunRow | undefined;
+      if (!run || run.status !== 'CONTEXT_READY') {
+        throw new DailyPlanRunStateConflictError();
+      }
+      if (proposal.status !== 'PENDING_REVIEW') {
+        throw new DailyPlanProposalNotReviewableError();
+      }
+
+      const scheduleVersion = readScheduleVersion.get(ownerId) as ScheduleVersionRow | undefined;
+      if (!scheduleVersion || scheduleVersion.version !== baseScheduleVersion) {
+        failContextReadyRun.run(
+          'DAILY_PLAN_BASE_VERSION_STALE',
+          completionTimestamp(run.created_at),
+          runId,
+          ownerId,
+        );
+        return { stale: true };
+      }
+
+      insertProposal.run(
+        proposal.id,
+        ownerId,
+        runId,
+        proposal.localDate,
+        baseScheduleVersion,
+        proposal.summary,
+        JSON.stringify(proposal.items),
+        proposal.version,
+        proposal.createdAt,
+        proposal.updatedAt,
+      );
+      completeRun.run(proposal.id, completionTimestamp(run.created_at), runId, ownerId);
+
+      return {
+        proposal: toDailyPlanProposal(
+          findProposalByRun.get(runId, ownerId) as DailyPlanProposalRow,
+        ),
+      };
+    },
+  );
+
+  function completeWithProposal(
+    ownerId: string,
+    runId: string,
+    baseScheduleVersion: number,
+    proposal: DailyPlanProposal,
+  ): DailyPlanProposal {
+    const result = completeWithProposalTransaction(
+      ownerId,
+      runId,
+      baseScheduleVersion,
+      proposal,
+    );
+    if ('stale' in result) {
+      throw new DailyPlanBaseVersionStaleError();
+    }
+    return result.proposal;
+  }
+
+  const failRun = database.transaction(
+    (ownerId: string, runId: string, code: DailyPlanFailureCode): DailyPlanRun => {
+      const run = findRun.get(runId, ownerId) as DailyPlanRunRow | undefined;
+      if (!run || !['CREATED', 'CONTEXT_READY', 'GENERATING'].includes(run.status)) {
+        throw new DailyPlanRunStateConflictError();
+      }
+
+      failActiveRun.run(code, completionTimestamp(run.created_at), runId, ownerId);
+      return toDailyPlanRun(findRun.get(runId, ownerId) as DailyPlanRunRow);
+    },
   );
 
   return {
@@ -198,8 +371,22 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         );
 
       return toDailyPlanRun(
-        findContextReadyRun.get(input.id, input.ownerId) as DailyPlanRunRow,
+        findRun.get(input.id, input.ownerId) as DailyPlanRunRow,
       );
     },
+
+    getRun(ownerId, runId) {
+      const row = findRun.get(runId, ownerId) as DailyPlanRunRow | undefined;
+      return row ? toDailyPlanRun(row) : undefined;
+    },
+
+    findProposalByRun(ownerId, runId) {
+      const row = findProposalByRun.get(runId, ownerId) as DailyPlanProposalRow | undefined;
+      return row ? toDailyPlanProposal(row) : undefined;
+    },
+
+    completeWithProposal,
+
+    failRun,
   };
 }
