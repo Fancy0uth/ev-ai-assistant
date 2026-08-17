@@ -152,6 +152,11 @@ describe('daily planning context builder', () => {
     const service = prepare();
     const first = service.prepare(ownerId, localDate, 'MANUAL', now);
     const second = service.prepare(ownerId, localDate, 'MANUAL', now);
+    const baseScheduleVersion = (
+      database.prepare('select version from schedule_versions where owner_id = ?').get(ownerId) as {
+        version: number;
+      }
+    ).version;
 
     expect(dailyPlanContextManifestSchema.parse(first.run.contextManifest)).toEqual(
       first.run.contextManifest,
@@ -177,7 +182,11 @@ describe('daily planning context builder', () => {
         { category: 'RECOVERY_CONSTRAINTS', entityCount: 1 },
       ],
     });
+    expect(first.packet.baseScheduleVersion).toBe(baseScheduleVersion);
+    expect(Number.isInteger(first.packet.baseScheduleVersion)).toBe(true);
+    expect(first.run.contextManifest).not.toHaveProperty('baseScheduleVersion');
     expect(first.packet).toEqual({
+      baseScheduleVersion,
       timeBlocks: [
         { startLocalTime: '09:00', endLocalTime: '10:30', isHard: true },
         { startLocalTime: '18:00', endLocalTime: '19:00', isHard: false },
@@ -274,6 +283,11 @@ describe('daily planning context builder', () => {
       )
       .get();
     const result = prepare().prepare(ownerId, localDate, 'SCHEDULED_0700', now);
+    const baseScheduleVersion = (
+      database.prepare('select version from schedule_versions where owner_id = ?').get(ownerId) as {
+        version: number;
+      }
+    ).version;
     const after = database
       .prepare(
         `select
@@ -284,7 +298,13 @@ describe('daily planning context builder', () => {
       )
       .get();
 
-    expect(result.packet).toEqual({ timeBlocks: [], timeRequests: [], recoveryLevel: 'NONE' });
+    expect(result.packet).toEqual({
+      baseScheduleVersion,
+      timeBlocks: [],
+      timeRequests: [],
+      recoveryLevel: 'NONE',
+    });
+    expect(result.run.contextManifest).not.toHaveProperty('baseScheduleVersion');
     expect(after).toEqual(before);
     expect(
       database.prepare('select status, proposal_id, failure_code, completed_at from daily_plan_runs').all(),

@@ -47,6 +47,7 @@ export interface NewContextReadyDailyPlanRun {
 
 export interface DailyPlanRunRepository {
   readContext(ownerId: string, localDate: string): DailyPlanningReadContext;
+  readScheduleVersion(ownerId: string): { version: number };
   createContextReady(input: NewContextReadyDailyPlanRun): DailyPlanRun;
 }
 
@@ -70,6 +71,10 @@ interface TimeRequestContextRow {
 
 interface RecoveryContextRow {
   value: number;
+}
+
+interface ScheduleVersionRow {
+  version: number;
 }
 
 interface DailyPlanRunRow {
@@ -124,6 +129,11 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      order by created_at desc, id desc
      limit 1`,
   );
+  const readScheduleVersion = database.prepare(
+    `select version
+     from schedule_versions
+     where owner_id = ?`,
+  );
   const findContextReadyRun = database.prepare(
     `select id, contract_version, local_date, trigger, status, context_manifest_json,
             proposal_id, failure_code, created_at, completed_at
@@ -160,6 +170,14 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         timeRequests,
         latestRecovery: latestRecovery ? { value: latestRecovery.value } : undefined,
       };
+    },
+
+    readScheduleVersion(ownerId) {
+      const row = readScheduleVersion.get(ownerId) as ScheduleVersionRow | undefined;
+      if (!row) {
+        throw new Error('daily planning schedule version is missing');
+      }
+      return { version: row.version };
     },
 
     createContextReady(input) {

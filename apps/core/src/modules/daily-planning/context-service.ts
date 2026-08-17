@@ -12,7 +12,8 @@ import type {
 
 type RecoveryLevel = 'NONE' | 'READY' | 'MODERATE' | 'LIMITED';
 
-interface DailyPlanningPacket {
+export interface DailyPlanningPacket {
+  baseScheduleVersion: number;
   timeBlocks: Array<{
     startLocalTime: LocalTime;
     endLocalTime: LocalTime;
@@ -102,8 +103,12 @@ function buildManifest(
   });
 }
 
-function buildPacket(context: DailyPlanningReadContext): DailyPlanningPacket {
+function buildPacket(
+  context: DailyPlanningReadContext,
+  baseScheduleVersion: number,
+): DailyPlanningPacket {
   return {
+    baseScheduleVersion,
     timeBlocks: context.events.map((event) => ({
       startLocalTime: event.startLocalTime,
       endLocalTime: event.endLocalTime,
@@ -132,6 +137,7 @@ export function createDailyPlanningContextService(
   return {
     prepare(ownerId, localDate, trigger, now = new Date()) {
       const context = repository.readContext(ownerId, localDate);
+      const baseScheduleVersion = repository.readScheduleVersion(ownerId).version;
       const createdAt = now.toISOString();
       const manifest = buildManifest(context, localDate, createdAt);
       const run = repository.createContextReady({
@@ -143,7 +149,7 @@ export function createDailyPlanningContextService(
         createdAt,
       });
 
-      return { run, packet: buildPacket(context) };
+      return { run, packet: buildPacket(context, baseScheduleVersion) };
     },
   };
 }
