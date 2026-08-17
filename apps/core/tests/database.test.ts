@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 12 });
+    expect(migrations).toEqual({ count: 13 });
     second.close();
   });
 
@@ -156,6 +156,139 @@ describe('SQLite lifecycle', () => {
       expect(
         database.prepare('select owner_id, provider_key from provider_credentials').all(),
       ).toEqual([{ owner_id: 'owner-a', provider_key: 'DEEPSEEK' }]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('enforces daily plan run lifecycle, JSON and owner constraints', () => {
+    const database = openDatabase(':memory:');
+    const createdAt = '2026-08-18T00:00:00.000Z';
+    try {
+      database
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run('daily-plan-owner', 'daily-plan-owner', 'not-used', createdAt);
+      const insert = database.prepare(
+        `insert into daily_plan_runs (
+           id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
+           proposal_id, failure_code, created_at, completed_at
+         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const valid = [
+        'daily-plan-run-ready',
+        'daily-plan-owner',
+        'DAILY_PLAN_V1',
+        '2026-08-18',
+        'MANUAL',
+        'CONTEXT_READY',
+        '{"purpose":"DAILY_PLAN_GENERATION"}',
+        null,
+        null,
+        createdAt,
+        null,
+      ];
+
+      insert.run(...valid);
+      expect(() => insert.run('bad-json', ...valid.slice(1, 6), '{not-json}', ...valid.slice(7))).toThrow();
+      expect(() =>
+        insert.run('bad-contract-version', ...valid.slice(1, 2), 'DAILY_PLAN_V2', ...valid.slice(3)),
+      ).toThrow();
+      expect(() =>
+        insert.run('bad-trigger', ...valid.slice(1, 4), 'AUTOMATIC', ...valid.slice(5)),
+      ).toThrow();
+      expect(() =>
+        insert.run('bad-status', ...valid.slice(1, 5), 'PENDING', ...valid.slice(6)),
+      ).toThrow();
+      expect(() =>
+        insert.run(
+          'missing-proposal',
+          ...valid.slice(1, 5),
+          'SUCCEEDED',
+          valid[6],
+          null,
+          null,
+          createdAt,
+          '2026-08-18T01:00:00.000Z',
+        ),
+      ).toThrow();
+      expect(() =>
+        insert.run(
+          'success-with-failure',
+          ...valid.slice(1, 5),
+          'SUCCEEDED',
+          valid[6],
+          'reserved-proposal-id',
+          'DAILY_PLAN_PROVIDER_UNAVAILABLE',
+          createdAt,
+          '2026-08-18T01:00:00.000Z',
+        ),
+      ).toThrow();
+      expect(() =>
+        insert.run(
+          'failed-with-unknown-code',
+          ...valid.slice(1, 5),
+          'FAILED',
+          valid[6],
+          null,
+          'UNKNOWN',
+          createdAt,
+          '2026-08-18T01:00:00.000Z',
+        ),
+      ).toThrow();
+      expect(() =>
+        insert.run(
+          'non-terminal-completed',
+          ...valid.slice(1, 6),
+          valid[6],
+          null,
+          null,
+          createdAt,
+          '2026-08-18T01:00:00.000Z',
+        ),
+      ).toThrow();
+      expect(() =>
+        insert.run(
+          'completed-before-created',
+          ...valid.slice(1, 5),
+          'FAILED',
+          valid[6],
+          null,
+          'DAILY_PLAN_PROVIDER_UNAVAILABLE',
+          createdAt,
+          '2026-08-17T23:59:59.000Z',
+        ),
+      ).toThrow();
+      expect(() =>
+        insert.run(
+          'missing-owner',
+          'no-owner',
+          ...valid.slice(2),
+        ),
+      ).toThrow();
+
+      insert.run(
+        'succeeded-run',
+        ...valid.slice(1, 5),
+        'SUCCEEDED',
+        valid[6],
+        'reserved-proposal-id',
+        null,
+        createdAt,
+        '2026-08-18T01:00:00.000Z',
+      );
+      insert.run(
+        'failed-run',
+        ...valid.slice(1, 5),
+        'FAILED',
+        valid[6],
+        null,
+        'DAILY_PLAN_PROVIDER_UNAVAILABLE',
+        createdAt,
+        '2026-08-18T01:00:00.000Z',
+      );
+
+      database.prepare('delete from owners where id = ?').run('daily-plan-owner');
+      expect(database.prepare('select count(*) as count from daily_plan_runs').get()).toEqual({ count: 0 });
     } finally {
       database.close();
     }
@@ -448,6 +581,7 @@ describe('SQLite lifecycle', () => {
         { version: 10, name: 'add_read_only_project_scopes' },
         { version: 11, name: 'add_provider_credentials' },
         { version: 12, name: 'add_provider_connection_tests' },
+        { version: 13, name: 'add_daily_plan_runs' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -707,6 +841,7 @@ describe('SQLite lifecycle', () => {
         { version: 10, name: 'add_read_only_project_scopes' },
         { version: 11, name: 'add_provider_credentials' },
         { version: 12, name: 'add_provider_connection_tests' },
+        { version: 13, name: 'add_daily_plan_runs' },
       ]);
       expect(
         upgraded

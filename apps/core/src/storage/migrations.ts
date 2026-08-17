@@ -464,6 +464,67 @@ const migrations: readonly Migration[] = [
         on provider_connection_tests(owner_id, provider_key, created_at desc);
     `,
   },
+  {
+    version: 13,
+    name: 'add_daily_plan_runs',
+    sql: `
+      create table daily_plan_runs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        contract_version text not null check (contract_version = 'DAILY_PLAN_V1'),
+        local_date text not null,
+        trigger text not null check (trigger in (
+          'MANUAL',
+          'SCHEDULED_0700',
+          'FIRST_VISIT_RECOVERY'
+        )),
+        status text not null check (status in (
+          'CREATED',
+          'CONTEXT_READY',
+          'GENERATING',
+          'SUCCEEDED',
+          'FAILED'
+        )),
+        context_manifest_json text not null check (json_valid(context_manifest_json)),
+        proposal_id text,
+        failure_code text check (failure_code is null or failure_code in (
+          'DAILY_PLAN_PROVIDER_NOT_CONFIGURED',
+          'DAILY_PLAN_PROVIDER_UNAVAILABLE',
+          'DAILY_PLAN_CONTEXT_INVALID',
+          'DAILY_PLAN_MODEL_OUTPUT_INVALID',
+          'DAILY_PLAN_UNSUPPORTED_ACTION',
+          'DAILY_PLAN_CONTEXT_REFERENCE_UNKNOWN',
+          'DAILY_PLAN_VALIDATION_FAILED',
+          'DAILY_PLAN_BASE_VERSION_STALE',
+          'DAILY_PLAN_RUN_STATE_CONFLICT',
+          'DAILY_PLAN_PROPOSAL_NOT_REVIEWABLE'
+        )),
+        created_at text not null,
+        completed_at text,
+        check (
+          (status = 'SUCCEEDED'
+            and proposal_id is not null
+            and failure_code is null
+            and completed_at is not null
+            and completed_at >= created_at)
+          or (status = 'FAILED'
+            and proposal_id is null
+            and failure_code is not null
+            and completed_at is not null
+            and completed_at >= created_at)
+          or (status in ('CREATED', 'CONTEXT_READY', 'GENERATING')
+            and proposal_id is null
+            and failure_code is null
+            and completed_at is null)
+        )
+      );
+
+      create index daily_plan_runs_owner_date_status_idx
+        on daily_plan_runs(owner_id, local_date, status, id);
+      create index daily_plan_runs_owner_created_at_idx
+        on daily_plan_runs(owner_id, created_at desc, id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {
