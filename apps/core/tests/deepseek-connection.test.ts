@@ -1,5 +1,5 @@
 import type { DeepSeekConnectionTestResult } from '@ev/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDeepSeekConnectionTester,
   type DeepSeekConnectionTester,
@@ -34,7 +34,7 @@ function response(status: number, json: unknown): Awaited<ReturnType<DeepSeekFet
 
 function successfulResponse(): Awaited<ReturnType<DeepSeekFetch>> {
   return response(200, {
-    choices: [{ message: { content: '{"status":"ok"}' } }],
+    choices: [{ finish_reason: 'stop', message: { content: '{"status":"ok"}' } }],
   });
 }
 
@@ -60,7 +60,7 @@ describe('DeepSeek connection tester', () => {
       },
     });
     expect(JSON.parse(String(capturedInit?.body))).toEqual({
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-flash',
       messages: [
         {
           role: 'user',
@@ -68,12 +68,33 @@ describe('DeepSeek connection tester', () => {
         },
       ],
       response_format: { type: 'json_object' },
+      thinking: { type: 'disabled' },
       max_tokens: 16,
     });
     expect(String(capturedInit?.body)).not.toContain(apiKey);
     expect(String(capturedInit?.body)).not.toMatch(
       /schedule|task|course|health|memory|personal/i,
     );
+  });
+
+  it('keeps the five-second deadline active while the response body is stalled', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch: DeepSeekFetch = async (_url, init) => ({
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => reject(new DOMException('', 'AbortError')));
+          }),
+      });
+      const result = createDeepSeekConnectionTester({ fetch }).test(apiKey);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(result).resolves.toEqual({ status: 'FAILED', failureCode: 'NETWORK_ERROR' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
@@ -120,6 +141,14 @@ describe('DeepSeek connection tester', () => {
     [
       'contract-invalid successful response content',
       async () => response(200, { choices: [{ message: { content: '{"status":"nope"}' } }] }),
+      { status: 'FAILED', failureCode: 'INVALID_RESPONSE' },
+    ],
+    [
+      'successful responses without a stop completion',
+      async () =>
+        response(200, {
+          choices: [{ finish_reason: 'length', message: { content: '{"status":"ok"}' } }],
+        }),
       { status: 'FAILED', failureCode: 'INVALID_RESPONSE' },
     ],
   ] satisfies ReadonlyArray<
@@ -239,5 +268,30 @@ describe('ProviderCredentialService connection tests', () => {
       { name: 'failure_code' },
       { name: 'created_at' },
     ]);
+  });
+
+  it('enforces migration 12 connection-result constraints and cascades owner deletion', () => {
+    const insert = database.prepare(
+      `insert into provider_connection_tests
+       (owner_id, provider_key, status, failure_code, created_at)
+       values (?, ?, ?, ?, ?)`,
+    );
+    const createdAt = '2026-08-17T09:00:00.000Z';
+
+    expect(() => insert.run('missing-owner', 'DEEPSEEK', 'SUCCEEDED', null, createdAt)).toThrow();
+    expect(() => insert.run(ownerId, 'OTHER', 'SUCCEEDED', null, createdAt)).toThrow();
+    expect(() => insert.run(ownerId, 'DEEPSEEK', 'UNKNOWN', null, createdAt)).toThrow();
+    expect(() => insert.run(ownerId, 'DEEPSEEK', 'FAILED', 'OTHER_FAILURE', createdAt)).toThrow();
+    expect(() => insert.run(ownerId, 'DEEPSEEK', 'SUCCEEDED', 'NETWORK_ERROR', createdAt)).toThrow();
+    expect(() => insert.run(ownerId, 'DEEPSEEK', 'FAILED', null, createdAt)).toThrow();
+
+    insert.run(ownerId, 'DEEPSEEK', 'SUCCEEDED', null, createdAt);
+    database.prepare('delete from owners where id = ?').run(ownerId);
+
+    expect(
+      database
+        .prepare('select count(*) as count from provider_connection_tests where owner_id = ?')
+        .get(ownerId),
+    ).toEqual({ count: 0 });
   });
 });

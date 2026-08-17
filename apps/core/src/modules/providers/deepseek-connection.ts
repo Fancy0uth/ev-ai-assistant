@@ -3,9 +3,10 @@ import type { DeepSeekConnectionTestResult } from '@ev/contracts';
 const DEEPSEEK_CHAT_COMPLETIONS_URL = 'https://api.deepseek.com/chat/completions';
 const CONNECTION_TIMEOUT_MS = 5_000;
 const HEALTH_PROBE_BODY = JSON.stringify({
-  model: 'deepseek-chat',
+  model: 'deepseek-v4-flash',
   messages: [{ role: 'user', content: 'Reply only with JSON: {"status":"ok"}.' }],
   response_format: { type: 'json_object' },
+  thinking: { type: 'disabled' },
   max_tokens: 16,
 });
 
@@ -63,6 +64,7 @@ function hasSuccessfulProbeContract(value: unknown): boolean {
 
   const choice = response.choices[0];
   if (!choice || typeof choice !== 'object' || Array.isArray(choice)) return false;
+  if ((choice as { finish_reason?: unknown }).finish_reason !== 'stop') return false;
   const message = (choice as { message?: unknown }).message;
   if (!message || typeof message !== 'object' || Array.isArray(message)) return false;
   const content = (message as { content?: unknown }).content;
@@ -92,10 +94,9 @@ export function createDeepSeekConnectionTester(
     async test(apiKey) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      let response: DeepSeekFetchResponse;
 
       try {
-        response = await fetchRequest(DEEPSEEK_CHAT_COMPLETIONS_URL, {
+        const response = await fetchRequest(DEEPSEEK_CHAT_COMPLETIONS_URL, {
           method: 'POST',
           headers: {
             authorization: `Bearer ${apiKey}`,
@@ -104,21 +105,23 @@ export function createDeepSeekConnectionTester(
           body: HEALTH_PROBE_BODY,
           signal: controller.signal,
         });
+
+        const statusFailure = failureForStatus(response.status);
+        if (statusFailure) return statusFailure;
+
+        try {
+          const responseBody = await response.json();
+          if (controller.signal.aborted) return failed('NETWORK_ERROR');
+          return hasSuccessfulProbeContract(responseBody)
+            ? { status: 'SUCCEEDED' }
+            : failed('INVALID_RESPONSE');
+        } catch {
+          return failed(controller.signal.aborted ? 'NETWORK_ERROR' : 'INVALID_RESPONSE');
+        }
       } catch {
         return failed('NETWORK_ERROR');
       } finally {
         clearTimeout(timeout);
-      }
-
-      const statusFailure = failureForStatus(response.status);
-      if (statusFailure) return statusFailure;
-
-      try {
-        return hasSuccessfulProbeContract(await response.json())
-          ? { status: 'SUCCEEDED' }
-          : failed('INVALID_RESPONSE');
-      } catch {
-        return failed('INVALID_RESPONSE');
       }
     },
   };
