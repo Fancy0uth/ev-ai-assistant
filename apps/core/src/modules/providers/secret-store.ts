@@ -92,7 +92,7 @@ function runDpapi(script: string, inputBase64: string, spawnProcess: DpapiSpawn)
   return new Promise((resolve, reject) => {
     let child: DpapiChild | undefined;
     let settled = false;
-    let timeout: NodeJS.Timeout | undefined;
+    let timeout: NodeJS.Timeout | undefined = undefined;
 
     const cleanup = () => {
       if (timeout) clearTimeout(timeout);
