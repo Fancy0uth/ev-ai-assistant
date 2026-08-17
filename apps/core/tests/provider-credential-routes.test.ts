@@ -124,6 +124,56 @@ describe('DeepSeek provider credential routes', () => {
     }
   });
 
+  it('authenticates malformed credential requests before JSON parsing', async () => {
+    app = await buildApp({
+      databasePath,
+      logger: false,
+      secretStore: new FakeSecretStore(),
+      deepSeekConnectionTester: new FakeDeepSeekConnectionTester([]),
+    });
+    const malformedJson = '{"apiKey":"test-only-malformed-secret"';
+    const requests = [
+      { method: 'PUT', url: '/v1/providers/deepseek/credential' },
+      { method: 'DELETE', url: '/v1/providers/deepseek/credential' },
+      { method: 'POST', url: '/v1/providers/deepseek/connection-test' },
+    ] as const;
+
+    for (const request of requests) {
+      const response = await app.inject({
+        ...request,
+        headers: { 'content-type': 'application/json' },
+        payload: malformedJson,
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(apiErrorSchema.parse(response.json()).error.code).toBe('AUTHENTICATION_REQUIRED');
+      expect(response.body).not.toContain('test-only-malformed-secret');
+    }
+  });
+
+  it('returns safe client errors for authenticated malformed credential requests', async () => {
+    const token = await createAuthenticatedApp();
+    const malformedJson = '{"apiKey":"test-only-malformed-secret"';
+    const requests = [
+      { method: 'PUT', url: '/v1/providers/deepseek/credential' },
+      { method: 'DELETE', url: '/v1/providers/deepseek/credential' },
+      { method: 'POST', url: '/v1/providers/deepseek/connection-test' },
+    ] as const;
+
+    for (const request of requests) {
+      const response = await app!.inject({
+        ...request,
+        cookies: { ev_session: token },
+        headers: { 'content-type': 'application/json' },
+        payload: malformedJson,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(apiErrorSchema.parse(response.json()).error.code).toBe('INVALID_REQUEST');
+      expect(response.body).not.toContain('test-only-malformed-secret');
+    }
+  });
+
   it('returns non-sensitive not-configured metadata to the authenticated owner', async () => {
     const token = await createAuthenticatedApp();
 

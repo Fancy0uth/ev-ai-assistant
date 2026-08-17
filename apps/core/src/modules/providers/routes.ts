@@ -1,13 +1,14 @@
 import {
   agentRunListResponseSchema,
   agentRunResponseSchema,
+  apiErrorSchema,
   createAgentRunSchema,
   deepSeekCredentialDeleteInputSchema,
   deepSeekCredentialStatusResponseSchema,
   deepSeekCredentialWriteInputSchema,
   providerListResponseSchema,
 } from '@ev/contracts';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, RouteShorthandOptions } from 'fastify';
 import { ApiError } from '../../http/api-error';
 import { parseRequestInput } from '../../http/validation';
 import { authenticatedOwnerId, createAuthGuard } from '../auth/guard';
@@ -40,15 +41,31 @@ export async function registerProviderRoutes(
   options: ProviderRouteOptions,
 ): Promise<void> {
   const authGuard = createAuthGuard(options.authService);
+  const credentialRouteOptions: Pick<RouteShorthandOptions, 'errorHandler' | 'onRequest'> = {
+    onRequest: authGuard,
+    errorHandler(error, _request, reply) {
+      if (error.code === 'FST_ERR_CTP_INVALID_JSON_BODY') {
+        return reply.status(400).send(
+          apiErrorSchema.parse({
+            error: {
+              code: 'INVALID_REQUEST',
+              message: '请求 JSON 格式不正确',
+            },
+          }),
+        );
+      }
+      throw error;
+    },
+  };
   app.get('/v1/providers', { preHandler: authGuard }, async () => {
     return providerListResponseSchema.parse({ data: options.providerService.listProfiles() });
   });
-  app.get('/v1/providers/deepseek/credential', { preHandler: authGuard }, async (request) => {
+  app.get('/v1/providers/deepseek/credential', credentialRouteOptions, async (request) => {
     return deepSeekCredentialStatusResponseSchema.parse({
       data: options.providerCredentialService.getMetadata(authenticatedOwnerId(request)),
     });
   });
-  app.put('/v1/providers/deepseek/credential', { preHandler: authGuard }, async (request) => {
+  app.put('/v1/providers/deepseek/credential', credentialRouteOptions, async (request) => {
     const ownerId = authenticatedOwnerId(request);
     const input = parseRequestInput(
       deepSeekCredentialWriteInputSchema,
@@ -63,7 +80,7 @@ export async function registerProviderRoutes(
       return rethrowCredentialError(error);
     }
   });
-  app.delete('/v1/providers/deepseek/credential', { preHandler: authGuard }, async (request) => {
+  app.delete('/v1/providers/deepseek/credential', credentialRouteOptions, async (request) => {
     const ownerId = authenticatedOwnerId(request);
     parseRequestInput(
       deepSeekCredentialDeleteInputSchema,
@@ -75,7 +92,7 @@ export async function registerProviderRoutes(
       data: options.providerCredentialService.getMetadata(ownerId),
     });
   });
-  app.post('/v1/providers/deepseek/connection-test', { preHandler: authGuard }, async (request) => {
+  app.post('/v1/providers/deepseek/connection-test', credentialRouteOptions, async (request) => {
     const ownerId = authenticatedOwnerId(request);
     try {
       await options.providerCredentialService.testConnection(ownerId);
