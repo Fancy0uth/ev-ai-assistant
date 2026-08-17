@@ -189,6 +189,25 @@ describe('daily planning generation route', () => {
     expectSafeResponse(response.body);
   });
 
+  it('authenticates an invalid body before request validation', async () => {
+    app = await buildApp({
+      databasePath,
+      dailyPlanningProvider: provider,
+      logger: false,
+      secretStore: new FakeSecretStore(),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      payload: { localDate: 'not-a-date', extra: true },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(apiErrorSchema.parse(response.json()).error.code).toBe('AUTHENTICATION_REQUIRED');
+    expectSafeResponse(response.body);
+  });
+
   it('rejects request bodies that are not exactly a local date', async () => {
     const { token } = await createAuthenticatedApp();
 

@@ -49,6 +49,7 @@ export async function registerDailyPlanningRoutes(
   const authGuard = createAuthGuard(options.authService);
 
   app.post('/v1/daily-plans/generate', { preHandler: authGuard }, async (request, reply) => {
+    const ownerId = authenticatedOwnerId(request);
     const input = parseRequestInput(
       dailyPlanGenerationInputSchema,
       request.body,
@@ -57,7 +58,7 @@ export async function registerDailyPlanningRoutes(
 
     try {
       const proposal = await options.dailyPlanningService.generateDailyPlan({
-        ownerId: authenticatedOwnerId(request),
+        ownerId,
         localDate: input.localDate,
         trigger: 'MANUAL',
       });
