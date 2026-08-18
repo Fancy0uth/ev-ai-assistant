@@ -650,6 +650,31 @@ const migrations: readonly Migration[] = [
       create index daily_plan_proposals_run_id_idx on daily_plan_proposals(run_id);
     `,
   },
+  {
+    version: 15,
+    name: 'add_daily_plan_decisions',
+    sql: `
+      create table proposal_decisions (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        proposal_id text not null references daily_plan_proposals(id) on delete cascade,
+        proposal_item_id text not null,
+        time_request_id text not null references time_requests(id) on delete cascade,
+        decision text not null check (decision in ('APPLY', 'REJECT')),
+        scheduled_event_id text references events(id) on delete set null,
+        actual_start_local_time text,
+        actual_end_local_time text,
+        rejection_reason text,
+        created_at text not null,
+        unique (proposal_id, proposal_item_id)
+      );
+
+      create index proposal_decisions_owner_proposal_idx
+        on proposal_decisions(owner_id, proposal_id);
+      create index proposal_decisions_owner_time_request_idx
+        on proposal_decisions(owner_id, time_request_id);
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

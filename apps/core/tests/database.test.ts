@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 14 });
+    expect(migrations).toEqual({ count: 15 });
     second.close();
   });
 
@@ -583,6 +583,7 @@ describe('SQLite lifecycle', () => {
         { version: 12, name: 'add_provider_connection_tests' },
         { version: 13, name: 'add_daily_plan_runs' },
         { version: 14, name: 'add_daily_plan_proposals' },
+        { version: 15, name: 'add_daily_plan_decisions' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -844,6 +845,7 @@ describe('SQLite lifecycle', () => {
         { version: 12, name: 'add_provider_connection_tests' },
         { version: 13, name: 'add_daily_plan_runs' },
         { version: 14, name: 'add_daily_plan_proposals' },
+        { version: 15, name: 'add_daily_plan_decisions' },
       ]);
       expect(
         upgraded
