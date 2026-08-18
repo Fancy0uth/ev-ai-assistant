@@ -656,12 +656,12 @@ const migrations: readonly Migration[] = [
     sql: `
       create table proposal_decisions (
         id text primary key,
-        owner_id text not null references owners(id) on delete cascade,
-        proposal_id text not null references daily_plan_proposals(id) on delete cascade,
+        owner_id text not null references owners(id) on delete restrict,
+        proposal_id text not null references daily_plan_proposals(id) on delete restrict,
         proposal_item_id text not null,
-        time_request_id text not null references time_requests(id) on delete cascade,
+        time_request_id text not null references time_requests(id) on delete restrict,
         decision text not null check (decision in ('APPLY', 'REJECT')),
-        scheduled_event_id text references events(id) on delete set null,
+        scheduled_event_id text references events(id) on delete restrict,
         actual_start_local_time text,
         actual_end_local_time text,
         rejection_reason text,
@@ -673,6 +673,16 @@ const migrations: readonly Migration[] = [
         on proposal_decisions(owner_id, proposal_id);
       create index proposal_decisions_owner_time_request_idx
         on proposal_decisions(owner_id, time_request_id);
+
+      create trigger proposal_decisions_before_update
+      before update on proposal_decisions begin
+        select raise(abort, 'proposal decisions are immutable');
+      end;
+
+      create trigger proposal_decisions_before_delete
+      before delete on proposal_decisions begin
+        select raise(abort, 'proposal decisions are immutable');
+      end;
     `,
   },
 ];

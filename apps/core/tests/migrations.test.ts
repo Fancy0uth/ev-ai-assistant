@@ -283,6 +283,61 @@ describe('migration 15 daily-plan decision storage', () => {
           decisionTimestamp,
         ),
       ).toThrow();
+      const rejectedDecision = [
+        'rejected-decision',
+        owner.id,
+        proposalId,
+        'rejected-proposal-item',
+        timeRequestId,
+        'REJECT',
+        null,
+        null,
+        null,
+        'Keep the existing plan',
+        decisionTimestamp,
+      ];
+      insertDecision.run(...rejectedDecision);
+      expect(
+        database.prepare('select decision, rejection_reason from proposal_decisions where id = ?').get(rejectedDecision[0]),
+      ).toEqual({ decision: 'REJECT', rejection_reason: 'Keep the existing plan' });
+      expect(() =>
+        insertDecision.run(
+          'invalid-decision',
+          owner.id,
+          proposalId,
+          'invalid-decision-item',
+          timeRequestId,
+          'INVALID',
+          null,
+          null,
+          null,
+          null,
+          decisionTimestamp,
+        ),
+      ).toThrow();
+      expect(() =>
+        database.prepare('update proposal_decisions set decision = ? where id = ?').run('REJECT', decision[0]),
+      ).toThrow('proposal decisions are immutable');
+      expect(() => database.prepare('delete from proposal_decisions where id = ?').run(decision[0])).toThrow(
+        'proposal decisions are immutable',
+      );
+      expect(() => database.prepare('delete from events where id = ?').run(scheduledEventId)).toThrow();
+      expect(() => database.prepare('delete from time_requests where id = ?').run(timeRequestId)).toThrow();
+      expect(() => database.prepare('delete from daily_plan_proposals where id = ?').run(proposalId)).toThrow();
+      expect(() => database.prepare('delete from owners where id = ?').run(owner.id)).toThrow();
+      expect(database.prepare('select * from proposal_decisions where id = ?').get(decision[0])).toEqual({
+        id: decision[0],
+        owner_id: owner.id,
+        proposal_id: proposalId,
+        proposal_item_id: 'legacy-proposal-item',
+        time_request_id: timeRequestId,
+        decision: 'APPLY',
+        scheduled_event_id: scheduledEventId,
+        actual_start_local_time: '09:00',
+        actual_end_local_time: '09:30',
+        rejection_reason: null,
+        created_at: decisionTimestamp,
+      });
       expect(
         database.prepare('select version, name from schema_migrations where version = 14').get(),
       ).toEqual({ version: 14, name: 'add_daily_plan_proposals' });
