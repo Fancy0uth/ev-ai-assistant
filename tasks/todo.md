@@ -48,7 +48,7 @@
 - [x] V3-04：冻结 Daily Plan、Proposal Item 与 Context Manifest 契约。
 - [x] V3-05：完成加法迁移与最小每日计划 Context Builder。
 - [x] V3-06：实现生成、确定性校验和保存 Daily Plan Proposal。
-- [ ] V3-07：实现草案编辑、部分确认、拒绝与日程版本冲突处理。
+- [x] V3-07：实现草案编辑、部分确认、拒绝与日程版本冲突处理。
 - [ ] V3-08：重构 Today 为日程优先的 Daily Control Console。
 - [ ] V3-09：实现可见 Context、Plan Review 与确认 UI。
 - [ ] V3-10：实现 07:00 幂等触发/首访补偿、端到端验收与发布文档。
