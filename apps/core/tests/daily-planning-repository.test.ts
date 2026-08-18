@@ -45,6 +45,8 @@ describe('daily plan proposal repository', () => {
     runId: string,
     baseScheduleVersion: number,
     id = '00000000-0000-4000-8000-000000000521',
+    items: DailyPlanProposal['items'] = [],
+    updatedAt = timestamp,
   ): DailyPlanProposal {
     return {
       id,
@@ -54,10 +56,102 @@ describe('daily plan proposal repository', () => {
       status: 'PENDING_REVIEW',
       baseScheduleVersion,
       summary: 'Prioritize the available study block.',
-      items: [],
+      items,
+      version: 1,
+      createdAt: timestamp,
+      updatedAt,
+    };
+  }
+
+  function createTimeRequest(
+    id: string,
+    owner = ownerId,
+    targetDate = localDate,
+    title = 'A request to schedule',
+  ): void {
+    createCalendarRepository(database).createTimeRequest({
+      id,
+      ownerId: owner,
+      source: 'PROJECT_AGENT',
+      title,
+      targetDate,
+      durationMinutes: 60,
+      priority: 'HIGH',
+      earliestStartLocalTime: '09:00',
+      latestEndLocalTime: '18:00',
+      isFixed: false,
       version: 1,
       createdAt: timestamp,
       updatedAt: timestamp,
+    });
+  }
+
+  function scheduledItem(
+    id: string,
+    timeRequestId: string,
+    ordinal = 1,
+  ): DailyPlanProposal['items'][number] {
+    return {
+      id,
+      ordinal,
+      status: 'PENDING_REVIEW',
+      operation: 'SCHEDULE_TIME_REQUEST',
+      timeRequestId,
+      timeRequestVersion: 1,
+      startLocalTime: '10:00',
+      endLocalTime: '11:00',
+      reasonCode: null,
+      rationale: 'The requested hour fits within the available window.',
+    };
+  }
+
+  function unschedulableItem(
+    id: string,
+    timeRequestId: string,
+    ordinal = 1,
+  ): DailyPlanProposal['items'][number] {
+    return {
+      id,
+      ordinal,
+      status: 'PENDING_REVIEW',
+      operation: 'MARK_TIME_REQUEST_UNSCHEDULABLE',
+      timeRequestId,
+      timeRequestVersion: 1,
+      startLocalTime: null,
+      endLocalTime: null,
+      reasonCode: 'HARD_EVENT_CONFLICT',
+      rationale: 'No available block remains after hard commitments.',
+    };
+  }
+
+  function preparedSoftEvent(id: string, startLocalTime = '10:00', endLocalTime = '11:00') {
+    return {
+      id,
+      kind: 'WORK_BLOCK' as const,
+      startLocalTime,
+      endLocalTime,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  }
+
+  function completeProposal(
+    owner: string,
+    runId: string,
+    proposalId: string,
+    items: DailyPlanProposal['items'],
+    updatedAt = timestamp,
+  ) {
+    const { repository, run, packet } = prepareContext(owner, runId);
+    expect(run.id).toBe(runId);
+    return {
+      repository,
+      proposal: repository.completeWithProposal(
+        owner,
+        run.id,
+        packet.baseScheduleVersion,
+        pendingProposal(run.id, packet.baseScheduleVersion, proposalId, items, updatedAt),
+      ),
     };
   }
 
@@ -184,5 +278,261 @@ describe('daily plan proposal repository', () => {
     ).toThrow('DAILY_PLAN_RUN_STATE_CONFLICT');
     expect(repository.findProposalByRun(ownerId, failedRun.id)).toBeUndefined();
     expect(repository.getRun(ownerId, failedRun.id)?.status).toBe('FAILED');
+  });
+
+  it('lists owner-scoped reviews in stable updated-at pages and hides them from other owners', () => {
+    const firstProposalId = '00000000-0000-4000-8000-000000000541';
+    const secondProposalId = '00000000-0000-4000-8000-000000000542';
+    const { repository } = completeProposal(
+      ownerId,
+      '00000000-0000-4000-8000-000000000543',
+      firstProposalId,
+      [],
+      '2026-08-18T07:00:00.000Z',
+    );
+    completeProposal(
+      ownerId,
+      '00000000-0000-4000-8000-000000000544',
+      secondProposalId,
+      [],
+      '2026-08-18T08:00:00.000Z',
+    );
+
+    expect(repository.listProposals(ownerId, { localDate, page: 1, pageSize: 1 })).toEqual({
+      items: [
+        expect.objectContaining({
+          proposal: expect.objectContaining({ id: secondProposalId }),
+          decisions: [],
+        }),
+      ],
+      pagination: { page: 1, pageSize: 1, total: 2, totalPages: 2 },
+    });
+    expect(repository.listProposals(ownerId, { localDate, page: 2, pageSize: 1 })).toEqual({
+      items: [expect.objectContaining({ proposal: expect.objectContaining({ id: firstProposalId }) })],
+      pagination: { page: 2, pageSize: 1, total: 2, totalPages: 2 },
+    });
+    expect(repository.getReview(otherOwnerId, firstProposalId)).toBeUndefined();
+    expect(repository.getReviewExecutionContext(otherOwnerId, firstProposalId)).toBeUndefined();
+    expect(repository.getReviewExecutionContext(ownerId, secondProposalId)).toEqual(
+      expect.objectContaining({
+        review: expect.objectContaining({ proposal: expect.objectContaining({ id: secondProposalId }) }),
+        events: [],
+        timeRequests: [],
+      }),
+    );
+    expect(repository.getReview(ownerId, secondProposalId)).toEqual(
+      expect.objectContaining({ proposal: expect.objectContaining({ id: secondProposalId }) }),
+    );
+  });
+
+  it('commits a partial batch atomically without changing source task or action rows', () => {
+    const firstRequestId = '00000000-0000-4000-8000-000000000551';
+    const secondRequestId = '00000000-0000-4000-8000-000000000552';
+    const firstItemId = '00000000-0000-4000-8000-000000000553';
+    const secondItemId = '00000000-0000-4000-8000-000000000554';
+    const proposalId = '00000000-0000-4000-8000-000000000555';
+    createTimeRequest(firstRequestId);
+    createTimeRequest(secondRequestId);
+    const { repository } = completeProposal(
+      ownerId,
+      '00000000-0000-4000-8000-000000000556',
+      proposalId,
+      [scheduledItem(firstItemId, firstRequestId), scheduledItem(secondItemId, secondRequestId, 2)],
+    );
+    const unchanged = database
+      .prepare('select (select count(*) from tasks) as tasks, (select count(*) from actions) as actions')
+      .get();
+
+    const review = repository.commitReviewDecisions(ownerId, proposalId, {
+      expectedProposalVersion: 1,
+      decisions: [
+        {
+          id: '00000000-0000-4000-8000-000000000557',
+          input: { itemId: firstItemId, decision: 'APPLY' },
+          scheduledEvent: preparedSoftEvent('00000000-0000-4000-8000-000000000558'),
+        },
+      ],
+    });
+
+    expect(review).toEqual({
+      proposal: expect.objectContaining({ status: 'PARTIALLY_APPLIED', version: 2 }),
+      decisions: [
+        {
+          itemId: firstItemId,
+          decision: 'APPLY',
+          startLocalTime: '10:00',
+          endLocalTime: '11:00',
+        },
+      ],
+    });
+    expect(review.proposal.items).toEqual([
+      expect.objectContaining({ id: firstItemId, status: 'APPLIED', startLocalTime: '10:00' }),
+      expect.objectContaining({ id: secondItemId, status: 'PENDING_REVIEW' }),
+    ]);
+    expect(
+      database
+        .prepare('select is_hard, status, start_local_time, end_local_time from events where id = ?')
+        .get('00000000-0000-4000-8000-000000000558'),
+    ).toEqual({ is_hard: 0, status: 'CONFIRMED', start_local_time: '10:00', end_local_time: '11:00' });
+    expect(
+      database
+        .prepare('select decision, scheduled_event_id from proposal_decisions where proposal_id = ?')
+        .all(proposalId),
+    ).toEqual([{ decision: 'APPLY', scheduled_event_id: '00000000-0000-4000-8000-000000000558' }]);
+    expect(
+      database
+        .prepare('select (select count(*) from tasks) as tasks, (select count(*) from actions) as actions')
+        .get(),
+    ).toEqual(unchanged);
+  });
+
+  it('marks all-rejected proposals terminal without creating events', () => {
+    const scheduledRequestId = '00000000-0000-4000-8000-000000000561';
+    const unschedulableRequestId = '00000000-0000-4000-8000-000000000562';
+    const scheduledItemId = '00000000-0000-4000-8000-000000000563';
+    const unschedulableItemId = '00000000-0000-4000-8000-000000000564';
+    const proposalId = '00000000-0000-4000-8000-000000000565';
+    createTimeRequest(scheduledRequestId);
+    createTimeRequest(unschedulableRequestId);
+    const { repository } = completeProposal(
+      ownerId,
+      '00000000-0000-4000-8000-000000000566',
+      proposalId,
+      [
+        scheduledItem(scheduledItemId, scheduledRequestId),
+        unschedulableItem(unschedulableItemId, unschedulableRequestId, 2),
+      ],
+    );
+
+    const review = repository.commitReviewDecisions(ownerId, proposalId, {
+      expectedProposalVersion: 1,
+      decisions: [
+        {
+          id: '00000000-0000-4000-8000-000000000567',
+          input: { itemId: scheduledItemId, decision: 'REJECT', reason: 'Keep the existing plan.' },
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000568',
+          input: { itemId: unschedulableItemId, decision: 'REJECT' },
+        },
+      ],
+    });
+
+    expect(review).toEqual({
+      proposal: expect.objectContaining({ status: 'REJECTED', version: 2 }),
+      decisions: [
+        { itemId: scheduledItemId, decision: 'REJECT', reason: 'Keep the existing plan.' },
+        { itemId: unschedulableItemId, decision: 'REJECT' },
+      ],
+    });
+    expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 0 });
+  });
+
+  it('marks a changed base schedule stale without persisting any decisions', () => {
+    const requestId = '00000000-0000-4000-8000-000000000569';
+    const itemId = '00000000-0000-4000-8000-000000000570';
+    const proposalId = '00000000-0000-4000-8000-000000000581';
+    createTimeRequest(requestId);
+    const { repository } = completeProposal(
+      ownerId,
+      '00000000-0000-4000-8000-000000000582',
+      proposalId,
+      [scheduledItem(itemId, requestId)],
+    );
+    createCalendarRepository(database).createEvent({
+      id: '00000000-0000-4000-8000-000000000583',
+      ownerId,
+      calendarRuleId: null,
+      title: 'A change after proposal generation',
+      kind: 'MEETING',
+      localDate,
+      startLocalTime: '15:00',
+      endLocalTime: '16:00',
+      isHard: true,
+      status: 'CONFIRMED',
+      version: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    expect(() =>
+      repository.commitReviewDecisions(ownerId, proposalId, {
+        expectedProposalVersion: 1,
+        decisions: [
+          {
+            id: '00000000-0000-4000-8000-000000000584',
+            input: { itemId, decision: 'APPLY' },
+            scheduledEvent: preparedSoftEvent('00000000-0000-4000-8000-000000000585'),
+          },
+        ],
+      }),
+    ).toThrow('DAILY_PLAN_BASE_VERSION_STALE');
+
+    expect(repository.getReview(ownerId, proposalId)).toEqual({
+      proposal: expect.objectContaining({ status: 'STALE', version: 2 }),
+      decisions: [],
+    });
+    expect(
+      database.prepare('select count(*) as count from events where id = ?').get('00000000-0000-4000-8000-000000000585'),
+    ).toEqual({ count: 0 });
+  });
+
+  it('rolls back every decision and event when one prepared event cannot persist', () => {
+    const firstRequestId = '00000000-0000-4000-8000-000000000571';
+    const secondRequestId = '00000000-0000-4000-8000-000000000572';
+    const firstItemId = '00000000-0000-4000-8000-000000000573';
+    const secondItemId = '00000000-0000-4000-8000-000000000574';
+    const proposalId = '00000000-0000-4000-8000-000000000575';
+    const conflictingEventId = '00000000-0000-4000-8000-000000000576';
+    createTimeRequest(firstRequestId);
+    createTimeRequest(secondRequestId);
+    createCalendarRepository(database).createEvent({
+      id: conflictingEventId,
+      ownerId,
+      calendarRuleId: null,
+      title: 'Already occupied identity',
+      kind: 'MEETING',
+      localDate,
+      startLocalTime: '16:00',
+      endLocalTime: '17:00',
+      isHard: false,
+      status: 'CONFIRMED',
+      version: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const { repository } = completeProposal(
+      ownerId,
+      '00000000-0000-4000-8000-000000000577',
+      proposalId,
+      [scheduledItem(firstItemId, firstRequestId), scheduledItem(secondItemId, secondRequestId, 2)],
+    );
+
+    expect(() =>
+      repository.commitReviewDecisions(ownerId, proposalId, {
+        expectedProposalVersion: 1,
+        decisions: [
+          {
+            id: '00000000-0000-4000-8000-000000000578',
+            input: { itemId: firstItemId, decision: 'APPLY' },
+            scheduledEvent: preparedSoftEvent('00000000-0000-4000-8000-000000000579'),
+          },
+          {
+            id: '00000000-0000-4000-8000-000000000580',
+            input: { itemId: secondItemId, decision: 'APPLY' },
+            scheduledEvent: preparedSoftEvent(conflictingEventId),
+          },
+        ],
+      }),
+    ).toThrow();
+
+    expect(database.prepare('select count(*) as count from proposal_decisions').get()).toEqual({ count: 0 });
+    expect(
+      database.prepare('select count(*) as count from events where id = ?').get('00000000-0000-4000-8000-000000000579'),
+    ).toEqual({ count: 0 });
+    expect(repository.getReview(ownerId, proposalId)).toEqual({
+      proposal: expect.objectContaining({ status: 'PENDING_REVIEW', version: 1 }),
+      decisions: [],
+    });
   });
 });

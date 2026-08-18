@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { dailyPlanContextManifestSchema, dailyPlanRunSchema } from '@ev/contracts';
+import {
+  dailyPlanContextManifestSchema,
+  dailyPlanRunSchema,
+  type DailyPlanProposal,
+} from '@ev/contracts';
 import { createCalendarRepository } from '../src/modules/calendar/repository';
 import { createDailyPlanningContextService } from '../src/modules/daily-planning/context-service';
 import {
@@ -39,6 +43,48 @@ describe('daily planning context builder', () => {
     return createDailyPlanningContextService(createDailyPlanRunRepository(database), {
       newId: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`,
     });
+  }
+
+  function createTimeRequest(id: string, targetDate = localDate): void {
+    createCalendarRepository(database).createTimeRequest({
+      id,
+      ownerId,
+      source: 'PROJECT_AGENT',
+      title: 'A context request',
+      targetDate,
+      durationMinutes: 60,
+      priority: 'HIGH',
+      earliestStartLocalTime: '09:00',
+      latestEndLocalTime: '18:00',
+      isFixed: false,
+      version: 1,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
+  }
+
+  function completeProposal(
+    proposalId: string,
+    runId: string,
+    items: DailyPlanProposal['items'],
+  ) {
+    const repository = createDailyPlanRunRepository(database);
+    const service = createDailyPlanningContextService(repository, { newId: () => runId });
+    const { run, packet } = service.prepare(ownerId, localDate, 'MANUAL', now);
+    const proposal = repository.completeWithProposal(ownerId, run.id, packet.baseScheduleVersion, {
+      id: proposalId,
+      contractVersion: 'DAILY_PLAN_V1',
+      runId: run.id,
+      localDate,
+      status: 'PENDING_REVIEW',
+      baseScheduleVersion: packet.baseScheduleVersion,
+      summary: 'A proposal for the current daily context.',
+      items,
+      version: 1,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
+    return { repository, proposal };
   }
 
   it('creates a redacted, stable context packet from only confirmed daily inputs', () => {
@@ -352,5 +398,106 @@ describe('daily planning context builder', () => {
     expect(databaseRepository.readScheduleVersion(ownerId).version).toBe(baseScheduleVersion + 1);
     expect(result.packet.timeBlocks).toEqual([]);
     expect(result.run.contextManifest).not.toHaveProperty('baseScheduleVersion');
+  });
+
+  it('excludes adopted requests only while their evidence remains active and never changes tasks or actions', () => {
+    const scheduledRequestId = '00000000-0000-4000-8000-000000000461';
+    const unschedulableRequestId = '00000000-0000-4000-8000-000000000462';
+    const rejectedRequestId = '00000000-0000-4000-8000-000000000463';
+    const scheduledItemId = '00000000-0000-4000-8000-000000000464';
+    const unschedulableItemId = '00000000-0000-4000-8000-000000000465';
+    const rejectedItemId = '00000000-0000-4000-8000-000000000466';
+    const proposalId = '00000000-0000-4000-8000-000000000467';
+    const scheduledEventId = '00000000-0000-4000-8000-000000000468';
+    createTimeRequest(scheduledRequestId);
+    createTimeRequest(unschedulableRequestId);
+    createTimeRequest(rejectedRequestId);
+    const { repository } = completeProposal(proposalId, '00000000-0000-4000-8000-000000000469', [
+      {
+        id: scheduledItemId,
+        ordinal: 1,
+        status: 'PENDING_REVIEW',
+        operation: 'SCHEDULE_TIME_REQUEST',
+        timeRequestId: scheduledRequestId,
+        timeRequestVersion: 1,
+        startLocalTime: '10:00',
+        endLocalTime: '11:00',
+        reasonCode: null,
+        rationale: 'The request fits the available window.',
+      },
+      {
+        id: unschedulableItemId,
+        ordinal: 2,
+        status: 'PENDING_REVIEW',
+        operation: 'MARK_TIME_REQUEST_UNSCHEDULABLE',
+        timeRequestId: unschedulableRequestId,
+        timeRequestVersion: 1,
+        startLocalTime: null,
+        endLocalTime: null,
+        reasonCode: 'HARD_EVENT_CONFLICT',
+        rationale: 'No capacity remains after hard events.',
+      },
+      {
+        id: rejectedItemId,
+        ordinal: 3,
+        status: 'PENDING_REVIEW',
+        operation: 'SCHEDULE_TIME_REQUEST',
+        timeRequestId: rejectedRequestId,
+        timeRequestVersion: 1,
+        startLocalTime: '10:00',
+        endLocalTime: '11:00',
+        reasonCode: null,
+        rationale: 'This will stay open after rejection.',
+      },
+    ]);
+    const unchanged = database
+      .prepare('select (select count(*) from tasks) as tasks, (select count(*) from actions) as actions')
+      .get();
+
+    repository.commitReviewDecisions(ownerId, proposalId, {
+      expectedProposalVersion: 1,
+      decisions: [
+        {
+          id: '00000000-0000-4000-8000-000000000470',
+          input: { itemId: scheduledItemId, decision: 'APPLY' },
+          scheduledEvent: {
+            id: scheduledEventId,
+            kind: 'WORK_BLOCK',
+            startLocalTime: '10:00',
+            endLocalTime: '11:00',
+            createdAt: now.toISOString(),
+            updatedAt: now.toISOString(),
+          },
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000471',
+          input: { itemId: unschedulableItemId, decision: 'APPLY' },
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000472',
+          input: { itemId: rejectedItemId, decision: 'REJECT', reason: 'Not today.' },
+        },
+      ],
+    });
+
+    const contextService = prepare();
+    const packet = contextService.prepare(ownerId, localDate, 'MANUAL', now).packet;
+    expect(packet.timeRequests.map((request) => request.timeRequestId)).toEqual([rejectedRequestId]);
+    expect(
+      database
+        .prepare('select (select count(*) from tasks) as tasks, (select count(*) from actions) as actions')
+        .get(),
+    ).toEqual(unchanged);
+    expect(() => database.prepare('delete from events where id = ?').run(scheduledEventId)).toThrow();
+
+    database
+      .prepare("update events set status = 'CANCELLED' where id = ? and owner_id = ?")
+      .run(scheduledEventId, ownerId);
+
+    const afterCancellation = contextService.prepare(ownerId, localDate, 'MANUAL', now).packet;
+    expect(afterCancellation.timeRequests.map((request) => request.timeRequestId)).toEqual([
+      scheduledRequestId,
+      rejectedRequestId,
+    ]);
   });
 });
