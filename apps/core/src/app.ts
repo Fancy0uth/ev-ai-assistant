@@ -50,6 +50,7 @@ import { createDailyPlanningContextService } from './modules/daily-planning/cont
 import { createDeepSeekDailyPlanningProvider } from './modules/daily-planning/deepseek-provider';
 import type { DailyPlanningProvider } from './modules/daily-planning/provider';
 import { createDailyPlanRunRepository } from './modules/daily-planning/repository';
+import { createDailyPlanReviewService } from './modules/daily-planning/review-service';
 import { createDailyPlanningService } from './modules/daily-planning/service';
 import { registerDailyPlanningRoutes } from './routes/daily-planning';
 
@@ -129,6 +130,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
   );
   const dailyPlanRepository = createDailyPlanRunRepository(database);
+  const dailyPlanReviewService = createDailyPlanReviewService({
+    repository: dailyPlanRepository,
+    newId: () => crypto.randomUUID(),
+  });
   const dailyPlanningService = createDailyPlanningService({
     contextService: createDailyPlanningContextService(dailyPlanRepository, {
       newId: () => crypto.randomUUID(),
@@ -175,7 +180,11 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerProjectScopeRoutes(app, { authService, projectScopeService });
   await registerProposalRoutes(app, { authService, proposalService });
   await registerProviderRoutes(app, { authService, providerService, providerCredentialService });
-  await registerDailyPlanningRoutes(app, { authService, dailyPlanningService });
+  await registerDailyPlanningRoutes(app, {
+    authService,
+    dailyPlanningService,
+    dailyPlanReviewService,
+  });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });
   await registerTodayRoutes(app, {
     authService,
