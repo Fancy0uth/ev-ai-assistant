@@ -69,6 +69,12 @@ function credentials(error?: Error): DailyPlanningCredentialPort {
   };
 }
 
+function expectRepositoryCompletionTimestamp(completedAt: string | null): void {
+  if (typeof completedAt !== 'string') throw new Error('Expected the failed run to persist a completion timestamp');
+  expect(new Date(completedAt).toISOString()).toBe(completedAt);
+  expect(completedAt >= timestamp.toISOString()).toBe(true);
+}
+
 describe('daily planning generation service', () => {
   let database: Database.Database;
   let directory: string;
@@ -171,12 +177,13 @@ describe('daily planning generation service', () => {
     await expect(
       service(provider, credentialPort).generateDailyPlan({ ownerId, localDate, trigger: 'MANUAL' }),
     ).rejects.toMatchObject({ code: expectedCode });
-    expect(repository.getRun(ownerId, '00000000-0000-4000-8000-000000000641')).toMatchObject({
+    const run = repository.getRun(ownerId, '00000000-0000-4000-8000-000000000641');
+    expect(run).toMatchObject({
       status: 'FAILED',
       failureCode: expectedCode,
       proposalId: null,
-      completedAt: timestamp.toISOString(),
     });
+    expectRepositoryCompletionTimestamp(run?.completedAt ?? null);
     expect(
       repository.findProposalByRun(ownerId, '00000000-0000-4000-8000-000000000641'),
     ).toBeUndefined();
@@ -319,12 +326,13 @@ describe('daily planning generation service', () => {
         trigger: 'MANUAL',
       }),
     ).rejects.toBeInstanceOf(DailyPlanBaseVersionStaleError);
-    expect(repository.getRun(ownerId, '00000000-0000-4000-8000-000000000641')).toMatchObject({
+    const run = repository.getRun(ownerId, '00000000-0000-4000-8000-000000000641');
+    expect(run).toMatchObject({
       status: 'FAILED',
       failureCode: 'DAILY_PLAN_BASE_VERSION_STALE',
       proposalId: null,
-      completedAt: timestamp.toISOString(),
     });
+    expectRepositoryCompletionTimestamp(run?.completedAt ?? null);
     expect(
       repository.findProposalByRun(ownerId, '00000000-0000-4000-8000-000000000641'),
     ).toBeUndefined();

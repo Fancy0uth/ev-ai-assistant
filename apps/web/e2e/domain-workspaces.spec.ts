@@ -70,8 +70,12 @@ test('local domain workspaces keep day actions concrete and persist only reviewe
 
   await page.goto('/memory');
   await expect(page.getByRole('heading', { name: 'Agent 本地记忆' })).toBeVisible();
-  await page.getByLabel('GENERAL 记忆内容').fill('# 稳定偏好\n\n晚间安排优先复盘。');
-  await page.getByRole('button', { name: '保存新版本' }).click();
+  const memoryContent = page.getByLabel('GENERAL 记忆内容');
+  const saveMemory = page.getByRole('button', { name: '保存新版本' });
+  await expect(memoryContent).toBeEditable();
+  await memoryContent.fill('# 稳定偏好\n\n晚间安排优先复盘。');
+  await expect(saveMemory).toBeEnabled();
+  await saveMemory.click();
   await expect(page.getByRole('heading', { name: 'GENERAL · v1' })).toBeVisible();
   await page.getByRole('button', { name: '查看历史版本' }).click();
   await expect(page.getByRole('heading', { name: '历史版本' })).toBeVisible();
