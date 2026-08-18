@@ -294,6 +294,7 @@ function DailyPlanReviewCard({
             <DailyPlanItemCard
               item={item}
               isMutating={mutationKey === `${proposal.id}:${item.id}`}
+              isProposalStale={proposal.status === 'STALE'}
               key={item.id}
               onDecision={(decision) => onDecision(review, decision)}
             />
@@ -307,10 +308,12 @@ function DailyPlanReviewCard({
 function DailyPlanItemCard({
   item,
   isMutating,
+  isProposalStale,
   onDecision,
 }: {
   item: DailyPlanProposalItem;
   isMutating: boolean;
+  isProposalStale: boolean;
   onDecision: (
     decision:
       | { itemId: string; decision: 'APPLY'; startLocalTime?: string; endLocalTime?: string }
@@ -360,24 +363,24 @@ function DailyPlanItemCard({
             <div className="daily-plan-item-card__time-inputs">
               <label>
                 开始时间（{itemLabel}）
-                <input type="time" value={startLocalTime} onChange={(event) => setStartLocalTime(event.target.value)} />
+                <input disabled={isProposalStale} type="time" value={startLocalTime} onChange={(event) => setStartLocalTime(event.target.value)} />
               </label>
               <label>
                 结束时间（{itemLabel}）
-                <input type="time" value={endLocalTime} onChange={(event) => setEndLocalTime(event.target.value)} />
+                <input disabled={isProposalStale} type="time" value={endLocalTime} onChange={(event) => setEndLocalTime(event.target.value)} />
               </label>
             </div>
           ) : null}
           <label className="daily-plan-item-card__reason">
             拒绝原因（{itemLabel}）
-            <input value={reason} onChange={(event) => setReason(event.target.value)} />
+            <input disabled={isProposalStale} value={reason} onChange={(event) => setReason(event.target.value)} />
           </label>
           <div className="daily-plan-item-card__actions">
-            <button disabled={isMutating} type="button" onClick={() => void apply()}>
+            <button disabled={isProposalStale || isMutating} type="button" onClick={() => void apply()}>
               <Check aria-hidden="true" size={16} />
               {isMutating ? '正在提交…' : isScheduled ? '采用安排' : '确认无法安排'}
             </button>
-            <button disabled={isMutating} type="button" onClick={() => void reject()}>
+            <button disabled={isProposalStale || isMutating} type="button" onClick={() => void reject()}>
               <X aria-hidden="true" size={16} />
               拒绝安排
             </button>

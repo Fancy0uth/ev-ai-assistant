@@ -90,10 +90,12 @@ await assertPortAvailable(3217);
 let core;
 let web;
 try {
-  core = start(process.execPath, ['--import', 'tsx', join(root, 'apps', 'core', 'src', 'server.ts')], {
+  core = start(process.execPath, ['--import', 'tsx', join(root, 'apps', 'core', 'e2e', 'daily-plan-test-bootstrap.ts')], {
     EV_CORE_HOST: '127.0.0.1',
     EV_CORE_PORT: '4327',
     EV_DATA_DIR: dataDirectory,
+    EV_E2E_DAILY_PLAN_TEST_BOOTSTRAP: '1',
+    EV_E2E_RUN_DIR: dataDirectory,
     EV_SECURE_COOKIES: 'false',
     NODE_ENV: 'test',
   }, root, 'ignore');
