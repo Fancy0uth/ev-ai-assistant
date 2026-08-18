@@ -1,4 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { DailyPlanWorkspace } from '@/components/daily-plan/daily-plan-workspace';
@@ -79,6 +81,14 @@ function requestBody(fetchMock: ReturnType<typeof vi.fn>, call: number): unknown
   return JSON.parse(String(init?.body));
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve: (value: T) => resolve(value) };
+}
+
 describe('DailyPlanWorkspace', () => {
   it('loads the selected ISO date and only generates a plan after explicit confirmation', async () => {
     const generatedProposal = reviewPayload().proposal;
@@ -140,6 +150,62 @@ describe('DailyPlanWorkspace', () => {
       'href',
       '/settings/providers',
     );
+
+    const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
+    const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileControlRule = mobileCss.match(
+      /\.daily-plan-workspace__date-control input,[\s\S]*?\.daily-plan-workspace__failure a\s*\{[\s\S]*?\n\}/,
+    )?.[0];
+    const providerLinkRule = dashboardCss.match(
+      /\.daily-plan-workspace__failure a\s*\{[\s\S]*?\n\}/,
+    )?.[0];
+
+    expect(mobileControlRule).toBeDefined();
+    expect(providerLinkRule).toContain('display: inline-flex;');
+    expect(mobileControlRule).toContain('.daily-plan-workspace__date-control input');
+    expect(mobileControlRule).toContain('.daily-plan-item-card__actions button');
+    expect(mobileControlRule).toContain('.daily-plan-workspace__failure a');
+    expect(mobileControlRule).toContain('min-height: 2.75rem;');
+  });
+
+  it('keeps date B visible after a delayed date A generation list resolves', async () => {
+    const dateAReview = reviewPayload();
+    const dateBReview = {
+      ...reviewPayload(),
+      proposal: {
+        ...reviewPayload().proposal,
+        localDate: '2026-08-19',
+        summary: '日期 B 的每日计划必须保留。',
+      },
+    };
+    const delayedDateAList = deferred<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(reviewList([])))
+      .mockResolvedValueOnce(jsonResponse({ data: dateAReview.proposal }, 201))
+      .mockImplementationOnce(() => delayedDateAList.promise)
+      .mockResolvedValueOnce(jsonResponse(reviewList([dateBReview])));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<DailyPlanWorkspace initialDate="2026-08-18" />);
+    await screen.findByText('还没有该日期的每日计划');
+    await user.click(screen.getByRole('button', { name: '生成每日计划' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    fireEvent.change(screen.getByLabelText('计划日期'), { target: { value: '2026-08-19' } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(await screen.findByText('日期 B 的每日计划必须保留。')).toBeInTheDocument();
+
+    await act(async () => {
+      delayedDateAList.resolve(jsonResponse(reviewList([dateAReview])));
+      await delayedDateAList.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('日期 B 的每日计划必须保留。')).toBeInTheDocument();
+      expect(screen.queryByText(dateAReview.proposal.summary)).not.toBeInTheDocument();
+    });
   });
 
   it('posts an edited APPLY decision with both times and focuses the updated review state', async () => {

@@ -77,6 +77,7 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
   const [failure, setFailure] = useState<FailureState | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const updateStatusRef = useRef<HTMLParagraphElement>(null);
+  const selectedDateRef = useRef(initialDate);
 
   const loadReviews = useCallback(async (date: string): Promise<DailyPlanReview[]> => {
     const payload = await requestCore(
@@ -119,6 +120,7 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
   }
 
   function changeDate(nextDate: string): void {
+    selectedDateRef.current = nextDate;
     setLocalDate(nextDate);
     setIsLoading(true);
     setReviews([]);
@@ -138,7 +140,7 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
       });
       dailyPlanProposalResponseSchema.parse(payload);
       const nextReviews = await loadReviews(date);
-      if (date === localDate) {
+      if (date === selectedDateRef.current) {
         setReviews(nextReviews);
         setUpdateMessage('每日计划已生成，等待你的审核。');
       }

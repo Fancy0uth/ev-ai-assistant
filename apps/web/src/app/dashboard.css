@@ -3177,6 +3177,8 @@
 }
 
 .daily-plan-workspace__failure a {
+  display: inline-flex;
+  align-items: center;
   color: #762a26;
   font-size: 0.75rem;
   font-weight: 800;
@@ -3424,7 +3426,8 @@
   .daily-plan-item-card__time-inputs input,
   .daily-plan-item-card__reason input,
   .daily-plan-workspace__actions button,
-  .daily-plan-item-card__actions button {
+  .daily-plan-item-card__actions button,
+  .daily-plan-workspace__failure a {
     min-height: 2.75rem;
     font-size: 1rem;
   }
