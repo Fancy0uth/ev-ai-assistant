@@ -26,6 +26,24 @@ interface ScheduledInterval {
   end: number;
 }
 
+export interface DailyPlanPlacement {
+  timeRequestId: string;
+  durationMinutes: number;
+  earliestStartLocalTime: LocalTime | null;
+  latestEndLocalTime: LocalTime | null;
+  startLocalTime: LocalTime;
+  endLocalTime: LocalTime;
+}
+
+export interface DailyPlanPlacementValidationInput {
+  placements: DailyPlanPlacement[];
+  occupiedIntervals: Array<{
+    startLocalTime: LocalTime;
+    endLocalTime: LocalTime;
+  }>;
+  existingPlannedMinutes?: number;
+}
+
 const earliestScheduleMinute = 5 * 60;
 const latestScheduleMinute = 23 * 60;
 const maximumScheduledMinutes = 16 * 60;
@@ -42,6 +60,56 @@ function invalid(message: string): never {
   throw new DailyPlanValidationError(message);
 }
 
+export function validateDailyPlanPlacements(input: DailyPlanPlacementValidationInput): void {
+  const consumedTimeRequestIds = new Set<string>();
+  const occupiedIntervals = input.occupiedIntervals.map((interval) => ({
+    start: toMinutes(interval.startLocalTime),
+    end: toMinutes(interval.endLocalTime),
+  }));
+  const scheduledIntervals: ScheduledInterval[] = [];
+  let scheduledMinutes = input.existingPlannedMinutes ?? 0;
+
+  for (const placement of input.placements) {
+    if (consumedTimeRequestIds.has(placement.timeRequestId)) {
+      invalid('duplicate daily planning time request reference');
+    }
+    consumedTimeRequestIds.add(placement.timeRequestId);
+
+    const interval = {
+      start: toMinutes(placement.startLocalTime),
+      end: toMinutes(placement.endLocalTime),
+    };
+    const durationMinutes = interval.end - interval.start;
+
+    if (interval.start < earliestScheduleMinute || interval.end > latestScheduleMinute) {
+      invalid('scheduled item is outside the supported daily planning window');
+    }
+    if (durationMinutes !== placement.durationMinutes) {
+      invalid('scheduled item duration differs from its time request');
+    }
+    if (
+      (placement.earliestStartLocalTime !== null &&
+        interval.start < toMinutes(placement.earliestStartLocalTime)) ||
+      (placement.latestEndLocalTime !== null &&
+        interval.end > toMinutes(placement.latestEndLocalTime))
+    ) {
+      invalid('scheduled item is outside its availability window');
+    }
+    if (occupiedIntervals.some((occupied) => overlaps(interval, occupied))) {
+      invalid('scheduled item overlaps an existing confirmed event');
+    }
+    if (scheduledIntervals.some((scheduled) => overlaps(interval, scheduled))) {
+      invalid('scheduled proposal items overlap');
+    }
+
+    scheduledMinutes += durationMinutes;
+    if (scheduledMinutes > maximumScheduledMinutes) {
+      invalid('scheduled proposal items exceed the daily capacity limit');
+    }
+    scheduledIntervals.push(interval);
+  }
+}
+
 export function validateDailyPlanOutput(
   packet: DailyPlanningPacket,
   output: DailyPlanModelOutput,
@@ -49,17 +117,9 @@ export function validateDailyPlanOutput(
   const requestsByContextRef = new Map(
     packet.timeRequests.map((request) => [request.contextRef, request]),
   );
-  const hardBlocks = packet.timeBlocks
-    .filter((block) => block.isHard)
-    .map((block) => ({
-      start: toMinutes(block.startLocalTime),
-      end: toMinutes(block.endLocalTime),
-    }));
   const consumedContextRefs = new Set<string>();
-  const scheduledIntervals: ScheduledInterval[] = [];
-  let scheduledMinutes = 0;
 
-  return output.actions.map((action, index): ValidatedDailyPlanItem => {
+  const items = output.actions.map((action, index): ValidatedDailyPlanItem => {
     const request = requestsByContextRef.get(action.contextRef);
     if (!request) {
       return invalid(`unknown daily planning context reference: ${action.contextRef}`);
@@ -83,38 +143,6 @@ export function validateDailyPlanOutput(
       };
     }
 
-    const interval = {
-      start: toMinutes(action.startLocalTime),
-      end: toMinutes(action.endLocalTime),
-    };
-    const durationMinutes = interval.end - interval.start;
-
-    if (interval.start < earliestScheduleMinute || interval.end > latestScheduleMinute) {
-      return invalid('scheduled item is outside the supported daily planning window');
-    }
-    if (durationMinutes !== request.durationMinutes) {
-      return invalid('scheduled item duration differs from its time request');
-    }
-    if (
-      (request.earliestStartLocalTime !== null &&
-        interval.start < toMinutes(request.earliestStartLocalTime)) ||
-      (request.latestEndLocalTime !== null && interval.end > toMinutes(request.latestEndLocalTime))
-    ) {
-      return invalid('scheduled item is outside its availability window');
-    }
-    if (hardBlocks.some((block) => overlaps(interval, block))) {
-      return invalid('scheduled item overlaps a hard fixed block');
-    }
-    if (scheduledIntervals.some((scheduled) => overlaps(interval, scheduled))) {
-      return invalid('scheduled proposal items overlap');
-    }
-
-    scheduledMinutes += durationMinutes;
-    if (scheduledMinutes > maximumScheduledMinutes) {
-      return invalid('scheduled proposal items exceed the daily capacity limit');
-    }
-    scheduledIntervals.push(interval);
-
     return {
       ordinal: index + 1,
       status: 'PENDING_REVIEW',
@@ -127,4 +155,31 @@ export function validateDailyPlanOutput(
       rationale: action.rationale,
     };
   });
+
+  validateDailyPlanPlacements({
+    placements: items
+      .filter(
+        (item): item is Extract<ValidatedDailyPlanItem, { operation: 'SCHEDULE_TIME_REQUEST' }> =>
+          item.operation === 'SCHEDULE_TIME_REQUEST',
+      )
+      .map((item) => {
+        const request = packet.timeRequests.find((candidate) => candidate.timeRequestId === item.timeRequestId);
+        if (!request) {
+          return invalid(`unknown daily planning time request: ${item.timeRequestId}`);
+        }
+        return {
+          timeRequestId: item.timeRequestId,
+          durationMinutes: request.durationMinutes,
+          earliestStartLocalTime: request.earliestStartLocalTime,
+          latestEndLocalTime: request.latestEndLocalTime,
+          startLocalTime: item.startLocalTime,
+          endLocalTime: item.endLocalTime,
+        };
+      }),
+    occupiedIntervals: packet.timeBlocks
+      .filter((block) => block.isHard)
+      .map(({ startLocalTime, endLocalTime }) => ({ startLocalTime, endLocalTime })),
+  });
+
+  return items;
 }
