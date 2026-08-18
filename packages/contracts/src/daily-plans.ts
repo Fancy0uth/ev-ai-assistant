@@ -275,6 +275,18 @@ const dailyPlanApplyDecisionInputSchema = z
         message: '调整时间必须同时提供开始和结束时间',
       });
     }
+
+    if (
+      decision.startLocalTime !== undefined &&
+      decision.endLocalTime !== undefined &&
+      decision.endLocalTime <= decision.startLocalTime
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endLocalTime'],
+        message: '结束时间必须晚于开始时间',
+      });
+    }
   });
 
 const dailyPlanRejectDecisionInputSchema = z
@@ -314,9 +326,23 @@ export const dailyPlanDecisionBatchInputSchema = z
 export const dailyPlanReviewSchema = z
   .object({
     proposal: dailyPlanProposalSchema,
-    decisions: z.array(dailyPlanDecisionInputSchema),
+    decisions: z.array(dailyPlanDecisionInputSchema).max(24),
   })
-  .strict();
+  .strict()
+  .superRefine((review, context) => {
+    const itemIds = new Set<string>();
+
+    for (const [index, decision] of review.decisions.entries()) {
+      if (itemIds.has(decision.itemId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['decisions', index, 'itemId'],
+          message: '同一草案项只能决定一次',
+        });
+      }
+      itemIds.add(decision.itemId);
+    }
+  });
 
 export const dailyPlanProposalListQuerySchema = z
   .object({

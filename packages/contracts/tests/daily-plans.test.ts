@@ -5,6 +5,7 @@ import {
   dailyPlanModelOutputSchema,
   dailyPlanProposalItemSchema,
   dailyPlanProposalListQuerySchema,
+  dailyPlanProposalResponseSchema,
   dailyPlanProposalSchema,
   dailyPlanReviewListResponseSchema,
   dailyPlanReviewResponseSchema,
@@ -348,6 +349,20 @@ describe('daily plan contracts', () => {
     }
   });
 
+  it('rejects equal and reverse APPLY time overrides', () => {
+    const results = [
+      { startLocalTime: '10:00', endLocalTime: '10:00' },
+      { startLocalTime: '11:00', endLocalTime: '10:00' },
+    ].map((timeOverride) =>
+      dailyPlanDecisionBatchInputSchema.safeParse({
+        expectedProposalVersion: 1,
+        decisions: [{ itemId: firstId, decision: 'APPLY', ...timeOverride }],
+      }).success,
+    );
+
+    expect(results).toEqual([false, false]);
+  });
+
   it('uses bounded date-filtered pages for daily-plan reviews', () => {
     expect(dailyPlanProposalListQuerySchema.parse({})).toEqual({ page: 1, pageSize: 20 });
     expect(dailyPlanProposalListQuerySchema.parse({ localDate: '2026-08-17', page: '2' })).toEqual({
@@ -437,5 +452,64 @@ describe('daily plan contracts', () => {
     expect(dailyPlanReviewResponseSchema.safeParse({ data: { ...latestReview, extra: true } }).success).toBe(
       false,
     );
+  });
+
+  it('keeps pending reviews empty while rejecting duplicate or unbounded response decisions', () => {
+    const pendingReview = {
+      proposal: {
+        id: firstId,
+        contractVersion: 'DAILY_PLAN_V1',
+        runId: secondId,
+        localDate: '2026-08-17',
+        status: 'PENDING_REVIEW',
+        baseScheduleVersion: 1,
+        summary: '等待用户审阅。',
+        items: [],
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      decisions: [],
+    };
+    const decisions = Array.from({ length: 25 }, (_, index) => ({
+      itemId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      decision: 'APPLY' as const,
+    }));
+
+    expect(dailyPlanReviewResponseSchema.parse({ data: pendingReview })).toEqual({ data: pendingReview });
+    expect([
+      dailyPlanReviewResponseSchema.safeParse({
+        data: {
+          ...pendingReview,
+          decisions: [
+            { itemId: thirdId, decision: 'APPLY' },
+            { itemId: thirdId, decision: 'REJECT' },
+          ],
+        },
+      }).success,
+      dailyPlanReviewResponseSchema.safeParse({
+        data: { ...pendingReview, decisions },
+      }).success,
+    ]).toEqual([false, false]);
+  });
+
+  it('keeps the exact daily-plan generation response contract parseable', () => {
+    const generationResponse = {
+      data: {
+        id: firstId,
+        contractVersion: 'DAILY_PLAN_V1',
+        runId: secondId,
+        localDate: '2026-08-17',
+        status: 'PENDING_REVIEW',
+        baseScheduleVersion: 1,
+        summary: '已生成待审阅安排。',
+        items: [],
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    };
+
+    expect(dailyPlanProposalResponseSchema.parse(generationResponse)).toEqual(generationResponse);
   });
 });
