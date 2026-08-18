@@ -259,6 +259,127 @@ export const dailyPlanProposalResponseSchema = z
   })
   .strict();
 
+const dailyPlanApplyDecisionInputSchema = z
+  .object({
+    itemId: z.uuid(),
+    decision: z.literal('APPLY'),
+    startLocalTime: localTimeSchema.optional(),
+    endLocalTime: localTimeSchema.optional(),
+  })
+  .strict()
+  .superRefine((decision, context) => {
+    if ((decision.startLocalTime === undefined) !== (decision.endLocalTime === undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [decision.startLocalTime === undefined ? 'startLocalTime' : 'endLocalTime'],
+        message: '调整时间必须同时提供开始和结束时间',
+      });
+    }
+  });
+
+const dailyPlanRejectDecisionInputSchema = z
+  .object({
+    itemId: z.uuid(),
+    decision: z.literal('REJECT'),
+    reason: nonBlankText(240).optional(),
+  })
+  .strict();
+
+export const dailyPlanDecisionInputSchema = z.discriminatedUnion('decision', [
+  dailyPlanApplyDecisionInputSchema,
+  dailyPlanRejectDecisionInputSchema,
+]);
+
+export const dailyPlanDecisionBatchInputSchema = z
+  .object({
+    expectedProposalVersion: positiveVersionSchema,
+    decisions: z.array(dailyPlanDecisionInputSchema).min(1).max(24),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const itemIds = new Set<string>();
+
+    for (const [index, decision] of input.decisions.entries()) {
+      if (itemIds.has(decision.itemId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['decisions', index, 'itemId'],
+          message: '同一草案项只能决定一次',
+        });
+      }
+      itemIds.add(decision.itemId);
+    }
+  });
+
+export const dailyPlanReviewSchema = z
+  .object({
+    proposal: dailyPlanProposalSchema,
+    decisions: z.array(dailyPlanDecisionInputSchema),
+  })
+  .strict();
+
+export const dailyPlanProposalListQuerySchema = z
+  .object({
+    localDate: z.iso.date().optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  })
+  .strict();
+
+const dailyPlanProposalListPaginationSchema = z
+  .object({
+    page: z.number().int().min(1),
+    pageSize: z.number().int().min(1).max(100),
+    total: z.number().int().nonnegative(),
+    totalPages: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const dailyPlanReviewResponseSchema = z
+  .object({
+    data: dailyPlanReviewSchema,
+  })
+  .strict();
+
+export const dailyPlanReviewListResponseSchema = z
+  .object({
+    data: z
+      .object({
+        items: z.array(dailyPlanReviewSchema),
+        pagination: dailyPlanProposalListPaginationSchema,
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((response, context) => {
+    for (let index = 1; index < response.data.items.length; index += 1) {
+      const previousReview = response.data.items[index - 1];
+      const currentReview = response.data.items[index];
+
+      if (previousReview === undefined || currentReview === undefined) {
+        continue;
+      }
+
+      const previousProposal = previousReview.proposal;
+      const currentProposal = currentReview.proposal;
+      const previousUpdatedAt = Date.parse(previousProposal.updatedAt);
+      const currentUpdatedAt = Date.parse(currentProposal.updatedAt);
+      const isOutOfOrder =
+        previousUpdatedAt < currentUpdatedAt ||
+        (previousUpdatedAt === currentUpdatedAt && previousProposal.id > currentProposal.id);
+
+      if (isOutOfOrder) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['data', 'items', index, 'proposal'],
+          message: '草案列表必须按 updatedAt 降序、id 升序排序',
+        });
+      }
+    }
+  });
+
+export const dailyPlanDecisionBatchResponseSchema = dailyPlanReviewResponseSchema;
+
 export const dailyPlanRunSchema = z
   .object({
     id: z.uuid(),
@@ -325,4 +446,7 @@ export type DailyPlanProposalItem = z.infer<typeof dailyPlanProposalItemSchema>;
 export type DailyPlanProposal = z.infer<typeof dailyPlanProposalSchema>;
 export type DailyPlanGenerationInput = z.input<typeof dailyPlanGenerationInputSchema>;
 export type DailyPlanProposalResponse = z.infer<typeof dailyPlanProposalResponseSchema>;
+export type DailyPlanDecisionInput = z.input<typeof dailyPlanDecisionInputSchema>;
+export type DailyPlanDecisionRecord = z.infer<typeof dailyPlanDecisionInputSchema>;
+export type DailyPlanReview = z.infer<typeof dailyPlanReviewSchema>;
 export type DailyPlanRun = z.infer<typeof dailyPlanRunSchema>;

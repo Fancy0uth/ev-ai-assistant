@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   dailyPlanContextManifestSchema,
+  dailyPlanDecisionBatchInputSchema,
   dailyPlanModelOutputSchema,
   dailyPlanProposalItemSchema,
+  dailyPlanProposalListQuerySchema,
   dailyPlanProposalSchema,
+  dailyPlanReviewListResponseSchema,
+  dailyPlanReviewResponseSchema,
   dailyPlanRunSchema,
   proposalSchema,
 } from '../src/index';
@@ -266,5 +270,172 @@ describe('daily plan contracts', () => {
     };
 
     expect(proposalSchema.parse(legacyProposal)).toEqual(legacyProposal);
+  });
+
+  it('accepts unedited and edited APPLY decisions, unschedulable APPLY decisions, and concise rejections', () => {
+    const validDecisionBatches = [
+      {
+        expectedProposalVersion: 1,
+        decisions: [{ itemId: firstId, decision: 'APPLY' }],
+      },
+      {
+        expectedProposalVersion: 1,
+        decisions: [
+          {
+            itemId: firstId,
+            decision: 'APPLY',
+            startLocalTime: '10:00',
+            endLocalTime: '11:00',
+          },
+        ],
+      },
+      {
+        expectedProposalVersion: 1,
+        decisions: [{ itemId: secondId, decision: 'APPLY' }],
+      },
+      {
+        expectedProposalVersion: 1,
+        decisions: [{ itemId: thirdId, decision: 'REJECT', reason: '今天不安排这项任务。' }],
+      },
+    ];
+
+    for (const batch of validDecisionBatches) {
+      expect(dailyPlanDecisionBatchInputSchema.parse(batch)).toEqual(batch);
+    }
+
+    expect(
+      dailyPlanDecisionBatchInputSchema.parse({
+        expectedProposalVersion: 1,
+        decisions: [{ itemId: thirdId, decision: 'REJECT', reason: '  今天不安排这项任务。  ' }],
+      }).decisions[0],
+    ).toEqual({ itemId: thirdId, decision: 'REJECT', reason: '今天不安排这项任务。' });
+  });
+
+  it('rejects duplicate, incomplete, expanded, or empty daily-plan decision batches', () => {
+    const invalidDecisionBatches = [
+      {
+        expectedProposalVersion: 1,
+        decisions: [
+          { itemId: firstId, decision: 'APPLY' },
+          { itemId: firstId, decision: 'REJECT' },
+        ],
+      },
+      {
+        expectedProposalVersion: 1,
+        decisions: [{ itemId: firstId, decision: 'APPLY', startLocalTime: '10:00' }],
+      },
+      {
+        expectedProposalVersion: 1,
+        decisions: [
+          {
+            itemId: firstId,
+            decision: 'REJECT',
+            startLocalTime: '10:00',
+            endLocalTime: '11:00',
+          },
+        ],
+      },
+      { expectedProposalVersion: 1, decisions: [] },
+      { expectedProposalVersion: 1, decisions: [{ itemId: firstId, decision: 'APPLY', extra: true }] },
+      {
+        expectedProposalVersion: 1,
+        decisions: [{ itemId: firstId, decision: 'REJECT', reason: ' '.repeat(241) }],
+      },
+    ];
+
+    for (const batch of invalidDecisionBatches) {
+      expect(dailyPlanDecisionBatchInputSchema.safeParse(batch).success).toBe(false);
+    }
+  });
+
+  it('uses bounded date-filtered pages for daily-plan reviews', () => {
+    expect(dailyPlanProposalListQuerySchema.parse({})).toEqual({ page: 1, pageSize: 20 });
+    expect(dailyPlanProposalListQuerySchema.parse({ localDate: '2026-08-17', page: '2' })).toEqual({
+      localDate: '2026-08-17',
+      page: 2,
+      pageSize: 20,
+    });
+
+    for (const query of [
+      { localDate: '2026-08-35' },
+      { localDate: '2026/08/17' },
+      { page: '0' },
+      { pageSize: '101' },
+      { extra: 'not allowed' },
+    ]) {
+      expect(dailyPlanProposalListQuerySchema.safeParse(query).success).toBe(false);
+    }
+  });
+
+  it('returns strict, stably ordered paginated daily-plan reviews without changing generation responses', () => {
+    const scheduledItem = {
+      id: thirdId,
+      ordinal: 1,
+      status: 'PENDING_REVIEW',
+      operation: 'SCHEDULE_TIME_REQUEST',
+      timeRequestId: secondId,
+      timeRequestVersion: 1,
+      startLocalTime: '09:00',
+      endLocalTime: '10:00',
+      reasonCode: null,
+      rationale: '优先完成课程预习。',
+    };
+    const latestReview = {
+      proposal: {
+        id: firstId,
+        contractVersion: 'DAILY_PLAN_V1',
+        runId: secondId,
+        localDate: '2026-08-17',
+        status: 'PENDING_REVIEW',
+        baseScheduleVersion: 1,
+        summary: '已生成待审阅安排。',
+        items: [scheduledItem],
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      decisions: [{ itemId: thirdId, decision: 'APPLY' }],
+    };
+    const earlierReview = {
+      proposal: {
+        ...latestReview.proposal,
+        id: thirdId,
+        runId: thirdId,
+        updatedAt: '2026-08-16T00:00:00.000Z',
+      },
+      decisions: [],
+    };
+    const sameTimeLaterIdReview = {
+      proposal: {
+        ...latestReview.proposal,
+        id: secondId,
+        runId: thirdId,
+      },
+      decisions: [],
+    };
+    const listResponse = {
+      data: {
+        items: [latestReview, sameTimeLaterIdReview, earlierReview],
+        pagination: { page: 1, pageSize: 20, total: 3, totalPages: 1 },
+      },
+    };
+
+    expect(dailyPlanReviewResponseSchema.parse({ data: latestReview })).toEqual({ data: latestReview });
+    expect(dailyPlanReviewListResponseSchema.parse(listResponse)).toEqual(listResponse);
+    expect(
+      dailyPlanReviewListResponseSchema.safeParse({
+        ...listResponse,
+        data: { ...listResponse.data, items: [earlierReview, latestReview, sameTimeLaterIdReview] },
+      }).success,
+    ).toBe(false);
+    expect(
+      dailyPlanReviewListResponseSchema.safeParse({
+        ...listResponse,
+        data: { ...listResponse.data, items: [sameTimeLaterIdReview, latestReview, earlierReview] },
+      }).success,
+    ).toBe(false);
+    expect(dailyPlanReviewResponseSchema.safeParse({ data: { ...latestReview, extra: true } }).success).toBe(
+      false,
+    );
   });
 });
