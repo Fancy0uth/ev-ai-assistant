@@ -302,6 +302,56 @@ export const dailyPlanDecisionInputSchema = z.discriminatedUnion('decision', [
   dailyPlanRejectDecisionInputSchema,
 ]);
 
+const dailyPlanApplyDecisionRecordSchema = z
+  .object({
+    itemId: z.uuid(),
+    decision: z.literal('APPLY'),
+    scheduledEventId: z.uuid().nullable().default(null),
+    startLocalTime: localTimeSchema.nullable().default(null),
+    endLocalTime: localTimeSchema.nullable().default(null),
+    reason: z.null().default(null),
+  })
+  .strict()
+  .superRefine((decision, context) => {
+    const startLocalTime = decision.startLocalTime;
+    const endLocalTime = decision.endLocalTime;
+    const hasStartTime = startLocalTime !== null;
+    const hasEndTime = endLocalTime !== null;
+
+    if (hasStartTime !== hasEndTime) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [hasStartTime ? 'endLocalTime' : 'startLocalTime'],
+        message: '实际采用时间必须同时提供开始和结束时间',
+      });
+    }
+
+    if (startLocalTime !== null && endLocalTime !== null && endLocalTime <= startLocalTime) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endLocalTime'],
+        message: '实际结束时间必须晚于开始时间',
+      });
+    }
+
+  });
+
+const dailyPlanRejectDecisionRecordSchema = z
+  .object({
+    itemId: z.uuid(),
+    decision: z.literal('REJECT'),
+    scheduledEventId: z.null().default(null),
+    startLocalTime: z.null().default(null),
+    endLocalTime: z.null().default(null),
+    reason: nonBlankText(240).nullable().default(null),
+  })
+  .strict();
+
+export const dailyPlanDecisionRecordSchema = z.discriminatedUnion('decision', [
+  dailyPlanApplyDecisionRecordSchema,
+  dailyPlanRejectDecisionRecordSchema,
+]);
+
 export const dailyPlanDecisionBatchInputSchema = z
   .object({
     expectedProposalVersion: positiveVersionSchema,
@@ -326,7 +376,7 @@ export const dailyPlanDecisionBatchInputSchema = z
 export const dailyPlanReviewSchema = z
   .object({
     proposal: dailyPlanProposalSchema,
-    decisions: z.array(dailyPlanDecisionInputSchema).max(24),
+    decisions: z.array(dailyPlanDecisionRecordSchema).max(24),
   })
   .strict()
   .superRefine((review, context) => {
@@ -473,6 +523,6 @@ export type DailyPlanProposal = z.infer<typeof dailyPlanProposalSchema>;
 export type DailyPlanGenerationInput = z.input<typeof dailyPlanGenerationInputSchema>;
 export type DailyPlanProposalResponse = z.infer<typeof dailyPlanProposalResponseSchema>;
 export type DailyPlanDecisionInput = z.input<typeof dailyPlanDecisionInputSchema>;
-export type DailyPlanDecisionRecord = z.infer<typeof dailyPlanDecisionInputSchema>;
+export type DailyPlanDecisionRecord = z.infer<typeof dailyPlanDecisionRecordSchema>;
 export type DailyPlanReview = z.infer<typeof dailyPlanReviewSchema>;
 export type DailyPlanRun = z.infer<typeof dailyPlanRunSchema>;

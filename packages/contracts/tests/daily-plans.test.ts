@@ -16,6 +16,7 @@ import {
 const firstId = '11111111-1111-4111-8111-111111111111';
 const secondId = '22222222-2222-4222-8222-222222222222';
 const thirdId = '33333333-3333-4333-8333-333333333333';
+const fourthId = '44444444-4444-4444-8444-444444444444';
 const now = '2026-08-17T00:00:00.000Z';
 
 const contextManifest = {
@@ -409,7 +410,16 @@ describe('daily plan contracts', () => {
         createdAt: now,
         updatedAt: now,
       },
-      decisions: [{ itemId: thirdId, decision: 'APPLY' }],
+      decisions: [
+        {
+          itemId: thirdId,
+          decision: 'APPLY',
+          scheduledEventId: fourthId,
+          startLocalTime: '09:00',
+          endLocalTime: '10:00',
+          reason: null,
+        },
+      ],
     };
     const earlierReview = {
       proposal: {
@@ -437,6 +447,14 @@ describe('daily plan contracts', () => {
 
     expect(dailyPlanReviewResponseSchema.parse({ data: latestReview })).toEqual({ data: latestReview });
     expect(dailyPlanReviewListResponseSchema.parse(listResponse)).toEqual(listResponse);
+    expect(
+      dailyPlanReviewResponseSchema.safeParse({
+        data: {
+          ...latestReview,
+          decisions: [{ ...latestReview.decisions[0]!, providerText: 'must not be disclosed' }],
+        },
+      }).success,
+    ).toBe(false);
     expect(
       dailyPlanReviewListResponseSchema.safeParse({
         ...listResponse,
@@ -474,6 +492,10 @@ describe('daily plan contracts', () => {
     const decisions = Array.from({ length: 25 }, (_, index) => ({
       itemId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
       decision: 'APPLY' as const,
+      scheduledEventId: null,
+      startLocalTime: null,
+      endLocalTime: null,
+      reason: null,
     }));
 
     expect(dailyPlanReviewResponseSchema.parse({ data: pendingReview })).toEqual({ data: pendingReview });
@@ -482,8 +504,22 @@ describe('daily plan contracts', () => {
         data: {
           ...pendingReview,
           decisions: [
-            { itemId: thirdId, decision: 'APPLY' },
-            { itemId: thirdId, decision: 'REJECT' },
+            {
+              itemId: thirdId,
+              decision: 'APPLY',
+              scheduledEventId: null,
+              startLocalTime: null,
+              endLocalTime: null,
+              reason: null,
+            },
+            {
+              itemId: thirdId,
+              decision: 'REJECT',
+              scheduledEventId: null,
+              startLocalTime: null,
+              endLocalTime: null,
+              reason: null,
+            },
           ],
         },
       }).success,

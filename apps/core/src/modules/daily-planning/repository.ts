@@ -4,6 +4,7 @@ import {
   dailyPlanRunSchema,
   type DailyPlanContextManifest,
   type DailyPlanDecisionInput,
+  type DailyPlanDecisionRecord,
   type DailyPlanFailureCode,
   type DailyPlanProposalItem,
   type DailyPlanProposal,
@@ -230,6 +231,7 @@ interface DailyPlanProposalRow {
 interface ProposalDecisionRow {
   proposal_item_id: string;
   decision: 'APPLY' | 'REJECT';
+  scheduled_event_id: string | null;
   actual_start_local_time: LocalTime | null;
   actual_end_local_time: LocalTime | null;
   rejection_reason: string | null;
@@ -278,25 +280,24 @@ function toDailyPlanProposal(row: DailyPlanProposalRow): DailyPlanProposal {
   });
 }
 
-function toDailyPlanDecision(row: ProposalDecisionRow): DailyPlanDecisionInput {
+function toDailyPlanDecision(row: ProposalDecisionRow): DailyPlanDecisionRecord {
   if (row.decision === 'APPLY') {
-    if (row.actual_start_local_time === null || row.actual_end_local_time === null) {
-      return { itemId: row.proposal_item_id, decision: 'APPLY' };
-    }
     return {
       itemId: row.proposal_item_id,
       decision: 'APPLY',
+      scheduledEventId: row.scheduled_event_id,
       startLocalTime: row.actual_start_local_time,
       endLocalTime: row.actual_end_local_time,
+      reason: null,
     };
   }
 
-  if (row.rejection_reason === null) {
-    return { itemId: row.proposal_item_id, decision: 'REJECT' };
-  }
   return {
     itemId: row.proposal_item_id,
     decision: 'REJECT',
+    scheduledEventId: null,
+    startLocalTime: null,
+    endLocalTime: null,
     reason: row.rejection_reason,
   };
 }
@@ -387,7 +388,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      where id = ? and owner_id = ?`,
   );
   const findProposalDecisions = database.prepare(
-    `select proposal_item_id, decision, actual_start_local_time, actual_end_local_time,
+    `select proposal_item_id, decision, scheduled_event_id, actual_start_local_time, actual_end_local_time,
             rejection_reason
      from proposal_decisions
      where proposal_id = ? and owner_id = ?
@@ -464,7 +465,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
     const rows = database
       .prepare(
         `select proposal_id, proposal_item_id, decision, actual_start_local_time,
-                actual_end_local_time, rejection_reason
+                scheduled_event_id, actual_end_local_time, rejection_reason
          from proposal_decisions
          where owner_id = ? and proposal_id in (${placeholders})
          order by proposal_id asc, created_at asc, id asc`,

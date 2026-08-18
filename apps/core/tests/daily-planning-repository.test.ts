@@ -360,8 +360,10 @@ describe('daily plan proposal repository', () => {
         {
           itemId: firstItemId,
           decision: 'APPLY',
+          scheduledEventId: '00000000-0000-4000-8000-000000000558',
           startLocalTime: '10:00',
           endLocalTime: '11:00',
+          reason: null,
         },
       ],
     });
@@ -371,9 +373,15 @@ describe('daily plan proposal repository', () => {
     ]);
     expect(
       database
-        .prepare('select is_hard, status, start_local_time, end_local_time from events where id = ?')
+        .prepare('select id, is_hard, status, start_local_time, end_local_time from events where id = ?')
         .get('00000000-0000-4000-8000-000000000558'),
-    ).toEqual({ is_hard: 0, status: 'CONFIRMED', start_local_time: '10:00', end_local_time: '11:00' });
+    ).toEqual({
+      id: '00000000-0000-4000-8000-000000000558',
+      is_hard: 0,
+      status: 'CONFIRMED',
+      start_local_time: '10:00',
+      end_local_time: '11:00',
+    });
     expect(
       database
         .prepare('select decision, scheduled_event_id from proposal_decisions where proposal_id = ?')
@@ -421,8 +429,60 @@ describe('daily plan proposal repository', () => {
     expect(review).toEqual({
       proposal: expect.objectContaining({ status: 'REJECTED', version: 2 }),
       decisions: [
-        { itemId: scheduledItemId, decision: 'REJECT', reason: 'Keep the existing plan.' },
-        { itemId: unschedulableItemId, decision: 'REJECT' },
+        {
+          itemId: scheduledItemId,
+          decision: 'REJECT',
+          scheduledEventId: null,
+          startLocalTime: null,
+          endLocalTime: null,
+          reason: 'Keep the existing plan.',
+        },
+        {
+          itemId: unschedulableItemId,
+          decision: 'REJECT',
+          scheduledEventId: null,
+          startLocalTime: null,
+          endLocalTime: null,
+          reason: null,
+        },
+      ],
+    });
+    expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 0 });
+  });
+
+  it('returns a null scheduled Event ID for an applied unschedulable decision', () => {
+    const requestId = '00000000-0000-4000-8000-000000000586';
+    const itemId = '00000000-0000-4000-8000-000000000587';
+    const proposalId = '00000000-0000-4000-8000-000000000588';
+    createTimeRequest(requestId);
+    const { repository } = completeProposal(
+      ownerId,
+      '00000000-0000-4000-8000-000000000589',
+      proposalId,
+      [unschedulableItem(itemId, requestId)],
+    );
+
+    const review = repository.commitReviewDecisions(ownerId, proposalId, {
+      expectedProposalVersion: 1,
+      decisions: [
+        {
+          id: '00000000-0000-4000-8000-000000000590',
+          input: { itemId, decision: 'APPLY' },
+        },
+      ],
+    });
+
+    expect(review).toEqual({
+      proposal: expect.objectContaining({ status: 'APPLIED', version: 2 }),
+      decisions: [
+        {
+          itemId,
+          decision: 'APPLY',
+          scheduledEventId: null,
+          startLocalTime: null,
+          endLocalTime: null,
+          reason: null,
+        },
       ],
     });
     expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 0 });

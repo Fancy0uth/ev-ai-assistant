@@ -259,7 +259,22 @@ describe('daily plan review routes', () => {
       },
     });
     expect(decision.statusCode).toBe(200);
-    expect(dailyPlanReviewResponseSchema.parse(decision.json()).data.proposal.status).toBe('APPLIED');
+    const appliedReview = dailyPlanReviewResponseSchema.parse(decision.json()).data;
+    expect(appliedReview.proposal.status).toBe('APPLIED');
+    const createdEvent = controlDatabase!
+      .prepare("select id, is_hard, status from events where owner_id = ? and status = 'CONFIRMED'")
+      .get(ownerId);
+    expect(createdEvent).toEqual({ id: expect.any(String), is_hard: 0, status: 'CONFIRMED' });
+    expect(appliedReview.decisions).toContainEqual(
+      expect.objectContaining({
+        itemId: proposal.items[0]!.id,
+        decision: 'APPLY',
+        scheduledEventId: (createdEvent as { id: string }).id,
+        startLocalTime: '10:00',
+        endLocalTime: '11:00',
+        reason: null,
+      }),
+    );
   });
 
   it('does not disclose another owner\'s proposal', async () => {
