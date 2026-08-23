@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { todaySnapshotSchema } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app';
 import type { DailyPlanningProvider } from '../src/modules/daily-planning/provider';
 import type { SecretStorePort } from '../src/modules/providers/secret-store';
@@ -48,6 +48,14 @@ function readSessionToken(setCookieHeader: string | string[] | undefined): strin
   const match = header?.match(/(?:^|;\s*)ev_session=([^;]+)/);
   if (!match?.[1]) throw new Error('ev_session cookie was not set');
   return match[1];
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve: (value: T) => resolve(value) };
 }
 
 describe('Today snapshot API', () => {
@@ -203,6 +211,61 @@ describe('Today snapshot API', () => {
       proposalId: generated.json().data.id,
       pendingItemCount: 0,
     });
+  });
+
+  it('starts one post-07:00 local recovery run for today and reports its real lifecycle state', async () => {
+    const date = '2026-08-18';
+    const generation = deferred<unknown>();
+    const provider: DailyPlanningProvider = {
+      generate: vi.fn(async () => generation.promise),
+    };
+    app = await buildApp({
+      logger: false,
+      secretStore: new InMemorySecretStore(),
+      dailyPlanningProvider: provider,
+      enableDailyPlanAutomation: true,
+      dailyPlanAutomationNow: () => new Date('2026-08-17T23:05:00.000Z'),
+    });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/providers/deepseek/credential',
+      cookies: { ev_session: token },
+      payload: { apiKey: testApiKey },
+    });
+
+    const generating = await app.inject({
+      method: 'GET',
+      url: `/v1/today?date=${date}`,
+      cookies: { ev_session: token },
+    });
+    expect(generating.statusCode).toBe(200);
+    expect(todaySnapshotSchema.parse(generating.json()).data.dailyPlan).toEqual({
+      status: 'GENERATING',
+      proposalId: null,
+      pendingItemCount: 0,
+    });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+
+    generation.resolve({
+      schemaVersion: 'DAILY_PLAN_MODEL_V1',
+      summary: '自动生成的计划仍等待审核。',
+      actions: [],
+    });
+    await generation.promise;
+    await vi.waitFor(async () => {
+      const completed = await app!.inject({
+        method: 'GET',
+        url: `/v1/today?date=${date}`,
+        cookies: { ev_session: token },
+      });
+      expect(todaySnapshotSchema.parse(completed.json()).data.dailyPlan).toMatchObject({
+        status: 'PENDING_REVIEW',
+        pendingItemCount: 0,
+      });
+    });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
   });
 
   it('calculates Today from every task for the signed-in owner and date', async () => {

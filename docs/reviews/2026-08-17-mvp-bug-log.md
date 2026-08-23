@@ -16,6 +16,7 @@
 | BUG-008 | P1（架构契约） | Provider 配置页展示 DeepSeek 与本地 Codex，但服务只能持有一个 Provider。 | Provider service 用单个可选字段建模。 | 改为按 `ProviderKey` 的 registry 路由；两种 adapter 可以同时 READY，未配置 key 仍保持 503。 |
 | BUG-009 | P1 | 记忆页初始异步读取未返回时可编辑；稍后返回的空数据会覆盖输入，令保存按钮重新禁用。 | 初始 load 和用户输入没有建立就绪边界。 | 初始读取完成前禁用 scope 切换、编辑、保存、历史和删除；组件测试和真实 E2E 覆盖。 |
 | BUG-010 | P1（测试可靠性） | E2E 使用独立 Next 构建目录后，Next 会把受版本控制的 `next-env.d.ts` 改写为临时相对路径；测试目录也会持续累积。 | Next 在启动时生成类型引用，runner 未将该副作用视为需清理的测试资源。 | runner 记录并在 `finally` 复原原文件；成功时删除唯一的 `managed-run-*` 目录，失败才保留现场。 |
+| BUG-011 | P1（响应式） | 在 390×844 首页创建 200 字符、无空格的任务标题后，页面出现横向滚动。预期移动端仍保持单列、无横向溢出。 | 日程控制台的行动项使用弹性内容列，但未明确允许该列收缩；无空格长标题可扩大其固有宽度。 | 将行动内容列设为可收缩的弹性列，标题/元数据允许安全断词；保留 200 字符任务的真实 Playwright 回归断言。 |
 
 ## 已知限制
 
@@ -26,7 +27,7 @@
 | LIMIT-003 | P2 | Sentrux 从基线的质量信号 9671 降至 9608，耦合 36.09 升至 40.31；无循环、无 God file。 | 不更新 baseline 掩盖变化。下个结构切片拆分 Core 组合根和 Dashboard 样式边界，并在新模块加入前评估依赖边。 |
 | LIMIT-004 | P2 | 长期自动记忆尚未启用 revision 分页、压缩/保留策略；当前只有人工规模的本地文本。 | 在允许后台长期写入前，增加分页、摘要压缩、空间上限和可见保留策略。 |
 | LIMIT-005 | P2 | 低置信度课表识别会显示 `REVIEW_REQUIRED` 候选，但页面尚不能逐项修订候选并转成 Proposal。 | 在视觉 Provider 接入切片中补齐“候选编辑 → 重新校验 → 待确认 Proposal”；高置信度 Proposal 的确认边界不受影响。 |
-| LIMIT-006 | P3 | 设置页面尚不能安全录入/持久化 API Key，因此真实 DeepSeek/Codex 调用均不可用。 | 先实现 Windows Credential Store adapter、最小连接测试和 context manifest；禁止 `.env`、LocalStorage 或日志保存密钥。 |
+| LIMIT-006 | P3 | 真实本地 Codex adapter 仍未接入，项目分析也不会执行 Shell、Git 或文件写入。 | DeepSeek 每日计划已可由 Owner 经 DPAPI 配置；本地 Codex 需在独立、只读权限设计后接入。 |
 | LIMIT-007 | P3 | 课程截图、公开检索、动作 RAG、自然语言食物解析、穿戴设备和外部日历均未实现。 | 依照 PRD 的模块路线逐项独立设计和测试；未配置 Provider 时保持阻断状态。 |
 
 ## 验收判定

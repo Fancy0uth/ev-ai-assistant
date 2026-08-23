@@ -32,7 +32,7 @@ const migration001FixtureSql = `
   );
 `;
 
-describe('migration 15 daily-plan decision storage', () => {
+describe('daily-plan storage migrations', () => {
   let testDirectory: string;
 
   beforeEach(() => {
@@ -344,6 +344,42 @@ describe('migration 15 daily-plan decision storage', () => {
       expect(
         database.prepare('select version, name from schema_migrations where version = 15').get(),
       ).toEqual({ version: 15, name: 'add_daily_plan_decisions' });
+      expect(
+        database.prepare('select version, name from schema_migrations where version = 16').get(),
+      ).toEqual({ version: 16, name: 'add_daily_plan_automatic_run_guard' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('allows manual history but prevents two automatic runs for the same Owner and date', () => {
+    const database = openDatabase(':memory:');
+    const timestamp = '2026-08-18T00:00:00.000Z';
+    const ownerId = 'automatic-run-owner';
+    const insertRun = database.prepare(
+      `insert into daily_plan_runs (
+        id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
+        proposal_id, failure_code, created_at, completed_at
+      ) values (?, ?, 'DAILY_PLAN_V1', '2026-08-18', ?, 'CONTEXT_READY', '{}', null, null, ?, null)`,
+    );
+
+    try {
+      database
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run(ownerId, ownerId, 'hash', timestamp);
+      insertRun.run('manual-run-one', ownerId, 'MANUAL', timestamp);
+      insertRun.run('manual-run-two', ownerId, 'MANUAL', timestamp);
+      insertRun.run('scheduled-run', ownerId, 'SCHEDULED_0700', timestamp);
+
+      expect(() =>
+        insertRun.run('recovery-run', ownerId, 'FIRST_VISIT_RECOVERY', timestamp),
+      ).toThrow();
+      expect(
+        database.prepare('select count(*) as count from daily_plan_runs where owner_id = ?').get(ownerId),
+      ).toEqual({ count: 3 });
+      expect(
+        database.prepare('select version, name from schema_migrations where version = 16').get(),
+      ).toEqual({ version: 16, name: 'add_daily_plan_automatic_run_guard' });
     } finally {
       database.close();
     }

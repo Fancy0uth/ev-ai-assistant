@@ -64,7 +64,7 @@ test('four isolated contexts for one owner cover dashboard links, direct routes,
     try {
       if (storageState) {
         await page.goto('/today');
-        await expect(page.getByRole('heading', { name: '今天，从最重要的事开始。' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
       } else {
         await authenticate(page, owner);
         storageState = await context.storageState();
@@ -83,9 +83,9 @@ test('four isolated contexts for one owner cover dashboard links, direct routes,
 
       await page.goto('/today');
       await expect(page).toHaveURL(/\/today$/);
-      await expect(page.getByRole('heading', { name: '今天，从最重要的事开始。' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
       await page.reload();
-      await expect(page.getByRole('heading', { name: '今天，从最重要的事开始。' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
       await todayLink.click();
       await expect(page).toHaveURL(/\/today$/);
 

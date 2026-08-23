@@ -8,7 +8,7 @@ const app = await buildApp({
   memoryProjectionRoot: join(config.dataDir, 'memory'),
   logger: true,
   secureCookies: config.secureCookies,
-  enableDailyPlanner: true,
+  enableDailyPlanAutomation: true,
 });
 let isShuttingDown = false;
 

@@ -69,7 +69,7 @@ const app = await buildApp({
   memoryProjectionRoot: join(config.dataDir, 'memory'),
   logger: true,
   secureCookies: config.secureCookies,
-  enableDailyPlanner: true,
+  enableDailyPlanAutomation: true,
   dailyPlanningProvider: new TestOnlyDailyPlanningProvider(),
   secretStore: new TestOnlyDailyPlanCredentialPort(),
 });

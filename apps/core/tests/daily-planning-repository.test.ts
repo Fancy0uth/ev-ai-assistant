@@ -198,6 +198,34 @@ describe('daily plan proposal repository', () => {
     expect(repository.findProposalByRun(ownerId, run.id)).toEqual(completed);
   });
 
+  it('marks a prepared run as generating, completes it, and finds it by local date', () => {
+    const { repository, run, packet } = prepareContext();
+
+    expect(repository.markRunGenerating(ownerId, run.id)).toMatchObject({
+      id: run.id,
+      status: 'GENERATING',
+      proposalId: null,
+      failureCode: null,
+    });
+    expect(repository.findLatestRunForDate(ownerId, localDate)).toMatchObject({
+      id: run.id,
+      status: 'GENERATING',
+    });
+
+    const completed = repository.completeWithProposal(
+      ownerId,
+      run.id,
+      packet.baseScheduleVersion,
+      pendingProposal(run.id, packet.baseScheduleVersion),
+    );
+
+    expect(repository.findLatestRunForDate(ownerId, localDate)).toMatchObject({
+      id: run.id,
+      status: 'SUCCEEDED',
+      proposalId: completed.id,
+    });
+  });
+
   it('fails only the stale context-ready run and writes no proposal', () => {
     const { repository, run: staleRun, packet: stalePacket } = prepareContext();
     const { run: untouchedRun } = prepareContext(

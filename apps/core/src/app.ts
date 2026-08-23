@@ -27,7 +27,6 @@ import { registerMemoryRoutes } from './modules/memory/routes';
 import { createMemoryService } from './modules/memory/service';
 import { registerProjectScopeRoutes } from './modules/projects/routes';
 import { createProjectScopeService } from './modules/projects/scope-service';
-import { createDailyPlannerJobService } from './modules/jobs/service';
 import { createProposalRepository } from './modules/proposals/repository';
 import { registerProposalRoutes } from './modules/proposals/routes';
 import { createProposalService } from './modules/proposals/service';
@@ -47,6 +46,7 @@ import type { AgentProvider } from './modules/agent/provider';
 import type { CourseScheduleVisionProvider } from './modules/agents/provider';
 import type { DomainAgentProvider } from './modules/agents/provider';
 import { createDailyPlanningContextService } from './modules/daily-planning/context-service';
+import { createDailyPlanAutomationService } from './modules/daily-planning/automation-service';
 import { createDeepSeekDailyPlanningProvider } from './modules/daily-planning/deepseek-provider';
 import type { DailyPlanningProvider } from './modules/daily-planning/provider';
 import { createDailyPlanRunRepository } from './modules/daily-planning/repository';
@@ -64,7 +64,8 @@ export interface AppOptions {
   dailyPlanningProvider?: DailyPlanningProvider;
   databasePath?: string;
   memoryProjectionRoot?: string;
-  enableDailyPlanner?: boolean;
+  enableDailyPlanAutomation?: boolean;
+  dailyPlanAutomationNow?: () => Date;
   logger?: boolean;
   secureCookies?: boolean;
 }
@@ -112,12 +113,6 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       ? { provider: options.courseScheduleVisionProvider }
       : {},
   );
-  const dailyPlannerJobService = createDailyPlannerJobService(
-    database,
-    calendarRepository,
-    createProposalRepository(database),
-    () => authRepository.findOwnerId(),
-  );
   const providerService = createProviderService(database, {
     providers: {
       ...(options.domainAgentProvider ? { [options.domainAgentProvider.key]: options.domainAgentProvider } : {}),
@@ -143,21 +138,29 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     provider: options.dailyPlanningProvider ?? createDeepSeekDailyPlanningProvider(),
     newId: () => crypto.randomUUID(),
   });
+  const dailyPlanAutomationService = createDailyPlanAutomationService({
+    dailyPlanningService,
+    dailyPlanRunRepository: dailyPlanRepository,
+    providerCredentialService,
+    findOwnerId: () => authRepository.findOwnerId(),
+    ...(options.dailyPlanAutomationNow ? { now: options.dailyPlanAutomationNow } : {}),
+    onEvent(event) {
+      if (event.event === 'daily_plan_automation_failed') {
+        app.log.warn(event, 'daily plan automation failed');
+        return;
+      }
+      app.log.info(event, 'daily plan automation updated');
+    },
+  });
   const nutritionService = createNutritionService(database);
   const memoryService = createMemoryService(
     database,
     options.memoryProjectionRoot ?? (databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant-memory') : join(dirname(databasePath), 'memory')),
   );
   const projectScopeService = createProjectScopeService(database);
-  let dailyPlannerTimer: NodeJS.Timeout | undefined;
-  if (options.enableDailyPlanner) {
-    void Promise.resolve().then(() => dailyPlannerJobService.runStartupCatchUp());
-    dailyPlannerTimer = setInterval(() => {
-      dailyPlannerJobService.runStartupCatchUp();
-    }, 60_000);
-  }
+  if (options.enableDailyPlanAutomation) dailyPlanAutomationService.scheduleNextRun();
   app.addHook('onClose', async () => {
-    if (dailyPlannerTimer) clearInterval(dailyPlannerTimer);
+    dailyPlanAutomationService.stop();
     if (database.open) database.close();
   });
   await registerHealthRoutes(app, database);
@@ -193,6 +196,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     proposalService,
     dailyPlanReviewService,
     providerCredentialService,
+    dailyPlanRepository,
+    dailyPlanAutomationService,
   });
 
   return app;

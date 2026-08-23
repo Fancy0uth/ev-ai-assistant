@@ -685,6 +685,15 @@ const migrations: readonly Migration[] = [
       end;
     `,
   },
+  {
+    version: 16,
+    name: 'add_daily_plan_automatic_run_guard',
+    sql: `
+      create unique index daily_plan_runs_owner_automatic_date_idx
+        on daily_plan_runs(owner_id, local_date)
+        where trigger in ('SCHEDULED_0700', 'FIRST_VISIT_RECOVERY');
+    `,
+  },
 ];
 
 export function runMigrations(database: Database.Database): void {

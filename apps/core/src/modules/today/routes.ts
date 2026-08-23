@@ -10,6 +10,8 @@ import { authenticatedOwnerId, createAuthGuard } from '../auth/guard';
 import type { AuthService } from '../auth/service';
 import type { CalendarRepository } from '../calendar/repository';
 import type { DailyPlanReviewService } from '../daily-planning/review-service';
+import type { DailyPlanRunRepository } from '../daily-planning/repository';
+import type { DailyPlanAutomationService } from '../daily-planning/automation-service';
 import type { ProposalService } from '../proposals/service';
 import type { ProviderCredentialService } from '../providers/credential-service';
 import type { TaskService } from '../tasks/service';
@@ -21,6 +23,8 @@ interface TodayRouteOptions {
   proposalService: ProposalService;
   dailyPlanReviewService: DailyPlanReviewService;
   providerCredentialService: ProviderCredentialService;
+  dailyPlanRepository: DailyPlanRunRepository;
+  dailyPlanAutomationService: DailyPlanAutomationService;
 }
 
 function dailyPlanSummary(
@@ -28,7 +32,12 @@ function dailyPlanSummary(
   date: string,
   dailyPlanReviewService: DailyPlanReviewService,
   providerCredentialService: ProviderCredentialService,
+  dailyPlanRepository: DailyPlanRunRepository,
+  dailyPlanAutomationService: DailyPlanAutomationService,
 ): TodayDailyPlanSummary {
+  if (dailyPlanAutomationService.isGenerating(ownerId, date)) {
+    return { status: 'GENERATING', proposalId: null, pendingItemCount: 0 };
+  }
   const latest = dailyPlanReviewService.listProposals(ownerId, {
     localDate: date,
     page: 1,
@@ -36,6 +45,13 @@ function dailyPlanSummary(
   }).items[0];
 
   if (!latest) {
+    const latestRun = dailyPlanRepository.findLatestRunForDate(ownerId, date);
+    if (latestRun?.status === 'FAILED') {
+      return { status: 'FAILED', proposalId: null, pendingItemCount: 0 };
+    }
+    if (latestRun && ['CREATED', 'CONTEXT_READY', 'GENERATING'].includes(latestRun.status)) {
+      return { status: 'GENERATING', proposalId: null, pendingItemCount: 0 };
+    }
     return providerCredentialService.getMetadata(ownerId).state === 'CONFIGURED'
       ? { status: 'READY_TO_GENERATE', proposalId: null, pendingItemCount: 0 }
       : { status: 'NOT_CONFIGURED', proposalId: null, pendingItemCount: 0 };
@@ -71,6 +87,8 @@ export async function registerTodayRoutes(
     proposalService,
     dailyPlanReviewService,
     providerCredentialService,
+    dailyPlanRepository,
+    dailyPlanAutomationService,
   } = options;
   const authGuard = createAuthGuard(authService);
 
@@ -81,6 +99,7 @@ export async function registerTodayRoutes(
       'Today 查询日期不符合要求',
     );
     const ownerId = authenticatedOwnerId(request);
+    dailyPlanAutomationService.ensureForFirstVisit(ownerId, date);
     const tasks = taskService.listForDate(ownerId, date);
     const yesterday = null;
     const status = calculateDailyStatus({ tasks, yesterday });
@@ -99,6 +118,8 @@ export async function registerTodayRoutes(
           date,
           dailyPlanReviewService,
           providerCredentialService,
+          dailyPlanRepository,
+          dailyPlanAutomationService,
         ),
         agents: {
           deepSeek: 'NOT_CONFIGURED',

@@ -2,9 +2,9 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 版本 | 0.2.0 候选 |
-| 状态 | 已实现并进入验收；不是生产发布声明 |
-| 日期 | 2026-08-17 |
+| 版本 | 0.3.0 候选 |
+| 状态 | Daily AI Control Loop 已实现，待独立浏览器验收；不是生产发布声明 |
+| 日期 | 2026-08-23 |
 | 产品依据 | [PRD](../product/PRD.md)、[MVP 范围](../product/MVP-SCOPE.md) |
 | 长期蓝图 | [TECH_SPEC](TECH_SPEC.md)、[ARCHITECTURE](ARCHITECTURE.md) |
 
@@ -38,6 +38,7 @@ flowchart LR
 | 饮食 | 记录用户已经确认的餐食和营养数值；计算并保存当餐合计 | `meal_records` |
 | 本地记忆 | 按 GENERAL/FITNESS/LEARNING/PROJECT 分域查看、保存、查看历史、恢复、删除；生成 Markdown 投影 | `memory_documents`、`memory_revisions` + 本地文件 |
 | 项目与工作流 | Owner 主动登记本机目录；只读取白名单规划文件并显示过滤快照 | `project_scopes` |
+| 每日计划 | Owner 配置的 DeepSeek 只接收最小排程 Context，产生结构化待审核草案；Today 可见解释、冲突与运行状态 | `daily_plan_runs`、`daily_plan_proposals`、`proposal_decisions` |
 | Agent 框架 | Provider-neutral 能力/会话/Run 契约；没有实际 Provider 时返回明确的阻断状态 | `agent_*`、`agent_runs` |
 | 浏览器体验 | `/today`、`/schedule`、`/learning`、`/fitness`、`/nutrition`、`/memory`、`/projects`、`/tasks`、`/agent` 均为真实路由 | Web 仅保留展示状态 |
 
@@ -45,8 +46,8 @@ flowchart LR
 
 以下是产品方向，不是本版本承诺；界面和接口不得假装它们已经工作：
 
-- API 密钥的 OS Credential Store 适配器，以及真实 DeepSeek/本地 Codex 调用；
 - 课表截图的视觉识别、课程公开资料搜索与预习讲解；
+- 本地 Codex 调用与受限项目执行；
 - 动作数据库/RAG、Workout Proposal、医学诊断或可穿戴设备同步；
 - 自然语言食物解析和权威营养 Provider；
 - Apple 日历、学校登录、小米手环、Tailscale/公网 HTTPS、Docker、原生 iOS/Android、多 Owner；
@@ -65,7 +66,7 @@ flowchart LR
 
 每日排程遵循固定优先顺序：硬 Event → 已生效的健康限制 → 明确截止日期 → 课程学习 → 训练目标 → 日常习惯。任何 AI 只能提出 `TimeRequest` 或 `Proposal`，不能直接改写日程。用户确认之后，Core 才在事务中落库；冲突则返回 `409`，不会静默覆盖。
 
-日计划 Job 运行在 Core 内，按本地日期去重并执行 07:00 补偿检查。它当前只会基于已存在的本地事实创建/维护日计划候选；完整多 Agent 协商要等各领域 Agent 能真正输出结构化 `TimeRequest` 后启用。
+日计划自动化运行在 Core 内，时区固定为 `Asia/Shanghai`。一次性 timer 只安排下一个 07:00；若错过，Owner 当天首次请求 Today 时补偿一次。自动运行以数据库唯一索引按 Owner/日期去重，失败状态可见但同日不自动重试。它只会基于已存在的本地事实创建待审核草案；完整多 Agent 协商要等各领域 Agent 能真正输出结构化 `TimeRequest` 后启用。旧 `daily_plan_jobs` 兼容数据保留，但不再由应用启动。
 
 ## 4. 模块、接口与安全边界
 
@@ -135,7 +136,7 @@ Provider Port 是唯一允许接入模型的地方。后续会配置如下职责
 | 健身 | DeepSeek + 动作目录检索 | Fitness scope、check-in、动作资料 | Workout Proposal、Signal 建议 | 诊断、直接排程 |
 | 饮食 | DeepSeek + Nutrition Provider | 食物描述、份量、用户目标 | Meal Candidate | 用猜测营养值直接落库 |
 
-每次实际调用需生成 `ContextManifest`，记录输出到哪个 Provider 的最小数据包，并遵循超时、额度、结构化输出校验和失败状态。Provider registry 能同时登记 DeepSeek 与本地 Codex 的 adapter，并按 `ProviderKey` 分派；真正的 API Key 只能由未来的 Windows Credential Store adapter 引用。在该适配器完成前，设置页只显示安全边界和未配置状态，不能收集或明文保存密钥。
+每次实际调用生成 `ContextManifest`，记录最小数据类别，并遵循超时、额度、结构化输出校验和失败状态。Windows MVP 已通过 DPAPI `SecretStorePort` 保存 DeepSeek Key；Web 只能读取非敏感 metadata，不能读取明文。Provider registry 仍可同时登记 DeepSeek 与本地 Codex adapter，并按 `ProviderKey` 分派；本地 Codex 的真实项目执行不在本轮范围。
 
 ## 7. 运行、测试与数据隔离
 
@@ -143,7 +144,7 @@ Provider Port 是唯一允许接入模型的地方。后续会配置如下职责
 
 浏览器 E2E 使用 `scripts/run-e2e.mjs` 启动其自己拥有的 Core/Web 子进程、唯一 `data/e2e-runs/run-*` 数据目录和独立的 Next 构建目录。它会先拒绝被占用的测试端口；Windows 上 Playwright `webServer` 的嵌套 npm 子进程可能残留，因此 runner 在 `finally` 中只终止自己创建的进程树，绝不按端口杀掉用户正在使用的预览服务。它还会复原 Next 自动改写的 `next-env.d.ts`，并在成功时清理唯一测试目录；失败时保留现场用于排查。完整决策见 [ADR-011](../decisions/ADR-011-managed-windows-e2e-runner.md)。
 
-Code Intel lite 在本分支运行完成（工件 `C:\\Users\\asus\\AppData\\Local\\code-intel\\artifacts\\product-prd\\1786914033673-27196-core`）。Sentrux 没有发现循环或 God file，但相对初始基线的耦合指标由 36.09 升至 40.31，质量信号由 9671 降至 9608；基线没有被更新。该结构性 P2 与处理方案记录在[缺陷与边界记录](../reviews/2026-08-17-mvp-bug-log.md)。
+Code Intel lite 已在 v0.3 自动化切片后完成（工件 `C:\\Users\\asus\\AppData\\Local\\code-intel\\artifacts\\product-prd\\1787472143741-11148-core`）。本地仓库、`rg`、Git、Python 和 Sentrux 均 ready/pass；可选 Repowise 未安装，图谱 provider 在 lite 模式为 unavailable，因此没有把它误判为核心失败。当前 native-minimal 证据统计为 266 files、852 symbols、890 imports；它不生成旧版 `summary.md`/`hospital.md`/`understanding.md`，也没有更新 Sentrux baseline。该结构性 P2 与处理方案记录在[缺陷与边界记录](../reviews/2026-08-17-mvp-bug-log.md)。
 
 ## 8. 实施优先级
 

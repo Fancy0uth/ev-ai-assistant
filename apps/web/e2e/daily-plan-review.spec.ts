@@ -368,6 +368,13 @@ async function runPartialApplyAndReloadLoop(
 
   await openDailyPlan(page, fixture.localDate);
   const proposal = await generateProposalInBrowser(page, fixture);
+  const explanationResponse = page.waitForResponse((response) =>
+    isCoreProxyResponse(response, 'GET', `/api/core/daily-plans/proposals/${proposal.id}/explanation`),
+  );
+  await page.getByText('查看本次上下文与校验', { exact: true }).click();
+  expect((await explanationResponse).status()).toBe(200);
+  await expect(page.getByText(/草案基于日程版本 v\d+；当前为 v\d+。/)).toBeVisible();
+  await expect(page.getByRole('list', { name: '本次上下文类别' })).toBeVisible();
   expect(proposal.items.map((item) => item.operation)).toEqual([
     'SCHEDULE_TIME_REQUEST',
     'SCHEDULE_TIME_REQUEST',
@@ -498,7 +505,7 @@ test('daily plan review partially applies one edited item in isolated desktop an
         });
       } else {
         await page.goto('/today');
-        await expect(page.getByRole('heading', { name: '今天，从最重要的事开始。' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
       }
 
       if (!currentOwnerId) throw new Error('daily plan E2E owner id is unavailable');

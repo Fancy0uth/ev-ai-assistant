@@ -265,6 +265,28 @@ describe('daily planning generation service', () => {
     await expectFailed(provider, 'DAILY_PLAN_PROVIDER_UNAVAILABLE');
   });
 
+  it('fails a prepared run instead of leaving Today stuck when the generating transition fails', async () => {
+    const transitionFailureRepository: DailyPlanRunRepository = {
+      ...repository,
+      markRunGenerating() {
+        throw new Error('storage transition failed');
+      },
+    };
+
+    await expect(
+      service(new FakeProvider(), credentials(), transitionFailureRepository).generateDailyPlan({
+        ownerId,
+        localDate,
+        trigger: 'MANUAL',
+      }),
+    ).rejects.toMatchObject({ code: 'DAILY_PLAN_PROVIDER_UNAVAILABLE' });
+    expect(repository.getRun(ownerId, '00000000-0000-4000-8000-000000000641')).toMatchObject({
+      status: 'FAILED',
+      failureCode: 'DAILY_PLAN_PROVIDER_UNAVAILABLE',
+      proposalId: null,
+    });
+  });
+
   it('fails the run when the provider result is not valid model JSON', async () => {
     const provider = new FakeProvider();
     provider.response = '{raw provider response body}';

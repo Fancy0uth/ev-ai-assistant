@@ -2,7 +2,7 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 状态 | In progress — Provider 安全底座、每日计划契约、脱敏 Context Builder，以及 V3-06 生成和 V3-07 草案审核/确认已完成；下一步为 V3-08 的日程优先 Today 重构。 |
+| 状态 | Complete — V3-08 日程优先 Today、V3-09 本地解释与竞态修复、V3-10 07:00 自动化/首访补偿、独立浏览器验收和发布记录均已完成。 |
 | 权威输入 | [v0.3 规格](../docs/superpowers/specs/2026-08-17-v0.3-daily-ai-control-loop.md)、[v0.3 计划](../docs/superpowers/plans/2026-08-17-v0.3-daily-ai-control-loop.md)、[ADR-012](../docs/decisions/ADR-012-dpapi-secrets-and-proposal-only-daily-ai.md) |
 | 历史计划 | v0.2 和本地基础 MVP 计划保留在 `docs/superpowers/plans/`；当前文件只跟踪下一条真实 AI 闭环。 |
 
@@ -11,7 +11,7 @@
 1. **安全 Provider**：DPAPI SecretStore、DeepSeek adapter、连接测试与错误状态。
 2. **可确认计划**：最小 Context Manifest、Daily Plan Run、结构化 Proposal、确定性校验与部分确认。
 3. **首页产品化**：日程优先 Today、计划审阅、桌面/iPhone 响应式。
-4. **调度与验收**：07:00 幂等触发、首访补偿、独立 E2E、缺陷和验收文档。
+4. **调度与验收**：Shanghai 07:00 幂等触发、首访补偿、独立 E2E、缺陷和验收文档；旧通用调度保留兼容但不再由生产启动。
 
 ## 依赖图
 

@@ -112,6 +112,8 @@ export interface DailyPlanRunRepository {
   readScheduleVersion(ownerId: string): { version: number };
   createContextReady(input: NewContextReadyDailyPlanRun): DailyPlanRun;
   getRun(ownerId: string, runId: string): DailyPlanRun | undefined;
+  findLatestRunForDate(ownerId: string, localDate: string): DailyPlanRun | undefined;
+  markRunGenerating(ownerId: string, runId: string): DailyPlanRun;
   findProposalByRun(ownerId: string, runId: string): DailyPlanProposal | undefined;
   listProposals(ownerId: string, query: DailyPlanProposalListQuery): DailyPlanProposalList;
   getReview(ownerId: string, proposalId: string): DailyPlanReview | undefined;
@@ -376,6 +378,14 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      from daily_plan_runs
      where id = ? and owner_id = ?`,
   );
+  const findLatestRunForDate = database.prepare(
+    `select id, contract_version, local_date, trigger, status, context_manifest_json,
+            proposal_id, failure_code, created_at, completed_at
+     from daily_plan_runs
+     where owner_id = ? and local_date = ?
+     order by created_at desc, id asc
+     limit 1`,
+  );
   const findProposalByRun = database.prepare(
     `select id, contract_version, run_id, local_date, status, base_schedule_version, summary,
             items_json, version, created_at, updated_at
@@ -492,11 +502,16 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   const completeRun = database.prepare(
     `update daily_plan_runs
      set status = 'SUCCEEDED', proposal_id = ?, failure_code = null, completed_at = ?
-     where id = ? and owner_id = ? and status = 'CONTEXT_READY'`,
+     where id = ? and owner_id = ? and status in ('CONTEXT_READY', 'GENERATING')`,
   );
   const failContextReadyRun = database.prepare(
     `update daily_plan_runs
      set status = 'FAILED', proposal_id = null, failure_code = ?, completed_at = ?
+     where id = ? and owner_id = ? and status in ('CONTEXT_READY', 'GENERATING')`,
+  );
+  const markGeneratingRun = database.prepare(
+    `update daily_plan_runs
+     set status = 'GENERATING'
      where id = ? and owner_id = ? and status = 'CONTEXT_READY'`,
   );
   const failActiveRun = database.prepare(
@@ -513,7 +528,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
       proposal: DailyPlanProposal,
     ): { proposal: DailyPlanProposal } | { stale: true } => {
       const run = findRun.get(runId, ownerId) as DailyPlanRunRow | undefined;
-      if (!run || run.status !== 'CONTEXT_READY') {
+      if (!run || !['CONTEXT_READY', 'GENERATING'].includes(run.status)) {
         throw new DailyPlanRunStateConflictError();
       }
       if (proposal.status !== 'PENDING_REVIEW') {
@@ -826,6 +841,19 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
     getRun(ownerId, runId) {
       const row = findRun.get(runId, ownerId) as DailyPlanRunRow | undefined;
       return row ? toDailyPlanRun(row) : undefined;
+    },
+
+    findLatestRunForDate(ownerId, localDate) {
+      const row = findLatestRunForDate.get(ownerId, localDate) as DailyPlanRunRow | undefined;
+      return row ? toDailyPlanRun(row) : undefined;
+    },
+
+    markRunGenerating(ownerId, runId) {
+      const result = markGeneratingRun.run(runId, ownerId);
+      if (result.changes !== 1) {
+        throw new DailyPlanRunStateConflictError();
+      }
+      return toDailyPlanRun(findRun.get(runId, ownerId) as DailyPlanRunRow);
     },
 
     findProposalByRun(ownerId, runId) {

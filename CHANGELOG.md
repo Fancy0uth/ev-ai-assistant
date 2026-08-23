@@ -9,6 +9,7 @@
 - Core 的 live health 响应报告版本 `0.2.0`。
 - README 说明了本地单 Owner Dashboard 技术预览的启动方式与能力边界。
 - Today 从“任务摘要”扩展为日程、行动、恢复 Signal 和 Proposal 的本地控制台入口。
+- 每日计划的生产自动触发改为 Shanghai 07:00 一次性 timer 与当天首次访问补偿；旧通用 `daily_plan_jobs` 定时器不再由 Core 启动。
 
 ### Added
 
@@ -16,6 +17,8 @@
 - 学期、课程资料、课表导入请求、日计划 Proposal、恢复 check-in、已确认餐食和只读项目 scope 的本地数据层。
 - SQLite revision 与 Markdown 投影结合的分域本地记忆，并支持保存、历史、恢复和删除。
 - Provider-neutral Agent/Provider 契约；未配置 Provider 时明确阻断，不伪造 AI 输出。
+- DeepSeek Daily Plan 的 DPAPI 凭据存储、最小 Context Manifest、结构化草案、逐项确认和本地解释接口；草案仍不会自动写入日程。
+- Daily Plan Run 的 `GENERATING`/`FAILED` 可见状态、同日自动运行唯一约束，以及审阅页按需显示上下文类别、当前日程版本与冲突校验。
 - 独立数据目录的桌面/移动浏览器 E2E，以及 Windows 受管 E2E 进程 runner。
 
 ### Fixed
@@ -25,7 +28,8 @@
 - Windows E2E 完成后遗留 Core/Web 子进程的问题。
 - 课程资料链接可接受危险协议、记忆投影失败导致版本失同步、以及 E2E 可能碰到被占用测试端口的问题。
 - E2E 不再遗留 Next 自动改写的类型声明或成功测试的构建缓存。
-- Provider 架构现在可同时登记 DeepSeek 与本地 Codex adapter，但仍不包含真实凭据或 API 调用。
+- Provider 架构支持 Owner 配置的 DeepSeek 调用，并为后续受限本地 Codex adapter 保留契约；自动化测试始终使用 Fake Provider。
+- 日期切换后旧的每日计划生成错误不再覆盖当前日期页面。
 
 ## [0.1.0] — 技术预览
 

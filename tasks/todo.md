@@ -37,7 +37,7 @@
 
 ---
 
-## v0.3：Daily AI Control Loop（实施中）
+## v0.3：Daily AI Control Loop（已完成）
 
 详细边界与每项验收条件见 [v0.3 规格](../docs/superpowers/specs/2026-08-17-v0.3-daily-ai-control-loop.md) 和 [v0.3 实施计划](../docs/superpowers/plans/2026-08-17-v0.3-daily-ai-control-loop.md)。
 
@@ -49,6 +49,6 @@
 - [x] V3-05：完成加法迁移与最小每日计划 Context Builder。
 - [x] V3-06：实现生成、确定性校验和保存 Daily Plan Proposal。
 - [x] V3-07：实现草案编辑、部分确认、拒绝与日程版本冲突处理。
-- [ ] V3-08：重构 Today 为日程优先的 Daily Control Console。
-- [ ] V3-09：实现可见 Context、Plan Review 与确认 UI。
-- [ ] V3-10：实现 07:00 幂等触发/首访补偿、端到端验收与发布文档。
+- [x] V3-08：重构 Today 为日程优先的 Daily Control Console。
+- [x] V3-09：实现可见 Context、Plan Review 与确认 UI。
+- [x] V3-10：实现 07:00 幂等触发/首访补偿、端到端验收与发布文档。

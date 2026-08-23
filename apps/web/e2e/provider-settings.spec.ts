@@ -58,7 +58,7 @@ test('provider settings keep an unconfigured DeepSeek credential local in isolat
     try {
       if (storageState) {
         await page.goto('/today');
-        await expect(page.getByRole('heading', { name: '今天，从最重要的事开始。' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
       } else {
         await authenticate(page);
         storageState = await context.storageState();

@@ -3,6 +3,7 @@ import {
   dailyPlanProposalSchema,
   type DailyPlanFailureCode,
   type DailyPlanProposal,
+  type DailyPlanTrigger,
 } from '@ev/contracts';
 import { CredentialNotConfiguredError } from '../providers/credential-service';
 import type {
@@ -35,7 +36,7 @@ export interface DailyPlanningService {
   generateDailyPlan(input: {
     ownerId: string;
     localDate: string;
-    trigger: 'MANUAL';
+    trigger: DailyPlanTrigger;
   }): Promise<DailyPlanProposal>;
 }
 
@@ -104,6 +105,7 @@ export function createDailyPlanningService(
 
       let proposal: DailyPlanProposal;
       try {
+        dependencies.repository.markRunGenerating(input.ownerId, run.id);
         let providerOutput: unknown;
         await dependencies.credentialService.withApiKey(input.ownerId, async (apiKey) => {
           providerOutput = await dependencies.provider.generate(apiKey, providerInput(packet, input.localDate));
