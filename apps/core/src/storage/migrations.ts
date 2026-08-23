@@ -901,6 +901,95 @@ const migrations: readonly Migration[] = [
       end;
     `,
   },
+  {
+    version: 18,
+    name: 'add_provider_reliability',
+    sql: `
+      create table idempotency_records (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        idempotency_key text not null check (length(idempotency_key) between 16 and 128),
+        operation text not null check (operation in (
+          'daily_plan.generate', 'daily_plan.proposal.decision', 'proposal.decision'
+        )),
+        resource_id text,
+        request_hash text not null check (length(request_hash) = 64),
+        state text not null check (state in ('IN_PROGRESS', 'COMPLETED', 'FAILED')),
+        lease_token text,
+        lease_expires_at text,
+        attempt_count integer not null default 0 check (attempt_count between 0 and 2),
+        response_status integer,
+        response_json text check (response_json is null or json_valid(response_json)),
+        failure_code text,
+        created_at text not null,
+        updated_at text not null,
+        unique (owner_id, idempotency_key),
+        check (
+          (state = 'IN_PROGRESS'
+            and lease_token is not null
+            and lease_expires_at is not null
+            and response_status is null
+            and response_json is null)
+          or (state in ('COMPLETED', 'FAILED')
+            and lease_token is null
+            and lease_expires_at is null
+            and response_status is not null
+            and response_json is not null)
+        )
+      );
+      create index idempotency_records_owner_operation_state_idx
+        on idempotency_records(owner_id, operation, state, updated_at desc);
+      create index idempotency_records_owner_lease_idx
+        on idempotency_records(owner_id, lease_expires_at)
+        where state = 'IN_PROGRESS';
+
+      create table provider_call_logs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        run_id text,
+        idempotency_record_id text references idempotency_records(id) on delete set null,
+        provider text not null check (provider = 'DEEPSEEK'),
+        operation text not null check (operation = 'daily_plan.generate'),
+        model text not null check (model in ('deepseek-v4-flash', 'deepseek-v4-pro')),
+        attempt_no integer not null check (attempt_no between 1 and 2),
+        status text not null check (status in ('STARTED', 'SUCCEEDED', 'FAILED', 'REJECTED')),
+        failure_code text,
+        finish_reason text check (finish_reason is null or finish_reason in (
+          'stop', 'length', 'content_filter', 'tool_calls', 'insufficient_system_resource', 'unknown'
+        )),
+        prompt_tokens integer check (prompt_tokens is null or prompt_tokens >= 0),
+        completion_tokens integer check (completion_tokens is null or completion_tokens >= 0),
+        total_tokens integer check (total_tokens is null or total_tokens >= 0),
+        input_chars integer not null check (input_chars between 0 and 20000),
+        output_chars integer check (output_chars is null or output_chars between 0 and 20000),
+        policy_version text not null check (policy_version = 'PROVIDER_POLICY_V1'),
+        contract_version text not null check (contract_version = 'DAILY_PLAN_V1'),
+        app_version text not null check (app_version = '0.5.0'),
+        local_date text not null,
+        started_at text not null,
+        finished_at text,
+        duration_ms integer check (duration_ms is null or duration_ms >= 0),
+        foreign key (run_id, owner_id)
+          references daily_plan_runs(id, owner_id) on delete set null
+      );
+      create index provider_call_logs_owner_date_started_idx
+        on provider_call_logs(owner_id, local_date, started_at desc, id);
+      create index provider_call_logs_run_idx on provider_call_logs(run_id, attempt_no);
+
+      alter table daily_plan_runs add column attempt_count integer not null default 0
+        check (attempt_count between 0 and 2);
+      alter table daily_plan_runs add column lease_token text;
+      alter table daily_plan_runs add column lease_expires_at text;
+      alter table daily_plan_runs add column deadline_at text;
+      alter table daily_plan_runs add column terminal_reason text;
+      alter table daily_plan_runs add column app_version text not null default '0.5.0'
+        check (app_version = '0.5.0');
+      alter table daily_plan_runs add column idempotency_record_id text;
+      create index daily_plan_runs_owner_lease_idx
+        on daily_plan_runs(owner_id, lease_expires_at)
+        where status = 'GENERATING';
+    `,
+  },
 ];
 
 export function runMigrations(

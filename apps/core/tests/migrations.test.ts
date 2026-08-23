@@ -638,6 +638,16 @@ describe('daily-plan storage migrations', () => {
             closed_at: null,
             closed_reason: null,
           })),
+          runs: snapshot.runs.map((run) => ({
+            ...run,
+            attempt_count: 0,
+            lease_token: null,
+            lease_expires_at: null,
+            deadline_at: null,
+            terminal_reason: null,
+            app_version: '0.5.0',
+            idempotency_record_id: null,
+          })),
         });
         expect(
           Object.fromEntries(

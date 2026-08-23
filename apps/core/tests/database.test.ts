@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 16 });
+    expect(migrations).toEqual({ count: 18 });
     second.close();
   });
 
@@ -350,7 +350,13 @@ describe('SQLite lifecycle', () => {
     const upgraded = openDatabase(databasePath);
     try {
       expect(upgraded.prepare('select * from owners where id = ?').get(owner.id)).toEqual(owner);
-      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual(task);
+      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual({
+        ...task,
+        scheduling_duration_minutes: null,
+        scheduling_earliest_start_local_time: null,
+        scheduling_latest_end_local_time: null,
+        scheduling_is_fixed: null,
+      });
       expect(
         upgraded.prepare('select version, name from schema_migrations where version = 11').get(),
       ).toEqual({ version: 11, name: 'add_provider_credentials' });
@@ -554,7 +560,13 @@ describe('SQLite lifecycle', () => {
       expect(upgraded.prepare('select * from sessions where id = ?').get(authSession.id)).toEqual(
         authSession,
       );
-      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual(task);
+      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual({
+        ...task,
+        scheduling_duration_minutes: null,
+        scheduling_earliest_start_local_time: null,
+        scheduling_latest_end_local_time: null,
+        scheduling_is_fixed: null,
+      });
       expect(
         upgraded
           .prepare(
@@ -585,6 +597,8 @@ describe('SQLite lifecycle', () => {
         { version: 14, name: 'add_daily_plan_proposals' },
         { version: 15, name: 'add_daily_plan_decisions' },
         { version: 16, name: 'add_daily_plan_automatic_run_guard' },
+        { version: 17, name: 'add_scheduling_lifecycle' },
+        { version: 18, name: 'add_provider_reliability' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -822,7 +836,13 @@ describe('SQLite lifecycle', () => {
     const upgraded = openDatabase(databasePath);
     try {
       expect(upgraded.prepare('select * from owners where id = ?').get(owner.id)).toEqual(owner);
-      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual(task);
+      expect(upgraded.prepare('select * from tasks where id = ?').get(task.id)).toEqual({
+        ...task,
+        scheduling_duration_minutes: null,
+        scheduling_earliest_start_local_time: null,
+        scheduling_latest_end_local_time: null,
+        scheduling_is_fixed: null,
+      });
       expect(
         upgraded.prepare('select * from agent_sessions where id = ?').get(agentSession.id),
       ).toEqual(agentSession);
@@ -848,6 +868,8 @@ describe('SQLite lifecycle', () => {
         { version: 14, name: 'add_daily_plan_proposals' },
         { version: 15, name: 'add_daily_plan_decisions' },
         { version: 16, name: 'add_daily_plan_automatic_run_guard' },
+        { version: 17, name: 'add_scheduling_lifecycle' },
+        { version: 18, name: 'add_provider_reliability' },
       ]);
       expect(
         upgraded
