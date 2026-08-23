@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useEffect } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { DailyPlanWorkspace } from '@/components/daily-plan/daily-plan-workspace';
 import { TaskDetailWorkspace, EventDetailWorkspace, ProjectDetailWorkspace } from '@/components/details/entity-detail-workspaces';
@@ -24,6 +24,7 @@ const dateA = '2026-08-24';
 const dateB = '2026-08-25';
 const preflightId = '00000000-0000-4000-8000-000000000701';
 const proposalId = '00000000-0000-4000-8000-000000000702';
+const proposalIdB = '00000000-0000-4000-8000-000000000710';
 const eventId = '00000000-0000-4000-8000-000000000703';
 const taskIdA = '00000000-0000-4000-8000-000000000704';
 const taskIdB = '00000000-0000-4000-8000-000000000705';
@@ -164,6 +165,49 @@ function scheduleProposal(
   };
 }
 
+function multipleEventProposal(
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED',
+  version = 1,
+  id = proposalId,
+) {
+  return {
+    ...scheduleProposal(status, version, id),
+    changes: [
+      { operation: 'CREATE_EVENT', event: eventPayload() },
+      { operation: 'CREATE_EVENT', event: eventPayload(taskIdA) },
+    ],
+  };
+}
+
+function mixedScheduleProposal(
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED',
+  version = 1,
+  id = proposalId,
+) {
+  return {
+    ...scheduleProposal(status, version, id),
+    changes: [
+      { operation: 'CREATE_EVENT', event: eventPayload() },
+      {
+        operation: 'CREATE_CALENDAR_RULE',
+        rule: {
+          id: projectIdA,
+          termId: projectIdB,
+          title: 'Hidden calendar rule',
+          weekday: 1,
+          startLocalTime: '09:00',
+          endLocalTime: '10:00',
+          weekStart: 1,
+          weekEnd: 1,
+          weekPattern: 'EVERY_WEEK',
+          isHard: true,
+          version: 1,
+        },
+      },
+    ],
+  };
+}
+
 function projectSnapshot(id: string, label: string) {
   return {
     data: {
@@ -219,6 +263,7 @@ function PreflightHookHarness({
     <>
       <p data-testid="phase">{controller.state.phase}</p>
       <p data-testid="preflight-id">{preflight?.id ?? 'none'}</p>
+      <p data-testid="preflight-version">{preflight?.version ?? 'none'}</p>
       <p data-testid="draft-count">{drafts?.length ?? 'none'}</p>
       <button type="button" onClick={() => void controller.prepare()}>prepare</button>
       <button type="button" onClick={() => void controller.approve()}>approve</button>
@@ -384,6 +429,41 @@ describe('V4-06 scheduling workspaces', () => {
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('reviewing'));
   });
 
+  it('keeps a date-B prepare busy when a stale date-A prepare settles', async () => {
+    const latePrepareA = deferred<Response>();
+    const latePrepareB = deferred<Response>();
+    const onGenerated = vi.fn();
+    let prepareCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url !== '/api/core/daily-plans/preflights') return Promise.reject(new Error(`unexpected ${url}`));
+      prepareCount += 1;
+      return prepareCount === 1 ? latePrepareA.promise : latePrepareB.promise;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const rendered = render(<PreflightHookHarness localDate={dateA} onGenerated={onGenerated} />);
+    fireEvent.click(screen.getByRole('button', { name: 'prepare' }));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('preparing'));
+    rendered.rerender(<PreflightHookHarness localDate={dateB} onGenerated={onGenerated} />);
+    fireEvent.click(screen.getByRole('button', { name: 'prepare' }));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('preparing'));
+
+    await act(async () => {
+      latePrepareA.resolve(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1, dateA), 201));
+      await latePrepareA.promise;
+    });
+
+    expect(screen.getByTestId('phase')).toHaveTextContent('preparing');
+    expect(onGenerated).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'prepare' }));
+    expect(prepareCount).toBe(2);
+    await act(async () => {
+      latePrepareB.resolve(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1, dateB), 201));
+      await latePrepareB.promise;
+    });
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('reviewing'));
+  });
+
   it('does not call the external generated callback when a date-A generate becomes stale', async () => {
     const lateGenerate = deferred<Response>();
     const latePrepareB = deferred<Response>();
@@ -468,6 +548,63 @@ describe('V4-06 scheduling workspaces', () => {
 
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('blocked'));
     expect(screen.getByTestId('preflight-id')).toHaveTextContent('none');
+    expect(screen.getByTestId('draft-count')).toHaveTextContent('none');
+    expect(onGenerated).not.toHaveBeenCalled();
+  });
+
+  it('clears reviewed preflight data when approve enters blocked', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/core/daily-plans/preflights') return Promise.resolve(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1), 201));
+      if (url === `/api/core/daily-plans/preflights/${preflightId}/approve`) {
+        return Promise.resolve(jsonResponse({ error: { code: 'VERSION_CONFLICT', message: '已变化' } }, 409));
+      }
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<PreflightHookHarness localDate={dateA} />);
+    fireEvent.click(screen.getByRole('button', { name: 'prepare' }));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('reviewing'));
+    expect(screen.getByTestId('preflight-id')).toHaveTextContent(preflightId);
+    expect(screen.getByTestId('preflight-version')).toHaveTextContent('1');
+    expect(screen.getByTestId('draft-count')).toHaveTextContent('2');
+    fireEvent.click(screen.getByRole('button', { name: 'approve' }));
+
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('blocked'));
+    expect(screen.getByTestId('preflight-id')).toHaveTextContent('none');
+    expect(screen.getByTestId('preflight-version')).toHaveTextContent('none');
+    expect(screen.getByTestId('draft-count')).toHaveTextContent('none');
+  });
+
+  it('clears approved preflight data when a generating request enters blocked', async () => {
+    const lateGenerate = deferred<Response>();
+    const onGenerated = vi.fn();
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/core/daily-plans/preflights') return Promise.resolve(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1), 201));
+      if (url === `/api/core/daily-plans/preflights/${preflightId}/approve`) return Promise.resolve(jsonResponse(preflightPayload('APPROVED', 2)));
+      if (url === '/api/core/daily-plans/generate') return lateGenerate.promise;
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<PreflightHookHarness localDate={dateA} onGenerated={onGenerated} />);
+    fireEvent.click(screen.getByRole('button', { name: 'prepare' }));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('reviewing'));
+    fireEvent.click(screen.getByRole('button', { name: 'approve' }));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('approved'));
+    expect(screen.getByTestId('preflight-id')).toHaveTextContent(preflightId);
+    expect(screen.getByTestId('preflight-version')).toHaveTextContent('2');
+    fireEvent.click(screen.getByRole('button', { name: 'generate' }));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('generating'));
+
+    await act(async () => {
+      lateGenerate.resolve(jsonResponse({ error: { code: 'DAILY_PLAN_PROVIDER_UNAVAILABLE', message: 'Provider 暂不可用' } }, 503));
+      await lateGenerate.promise;
+    });
+
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('blocked'));
+    expect(screen.getByTestId('preflight-id')).toHaveTextContent('none');
+    expect(screen.getByTestId('preflight-version')).toHaveTextContent('none');
     expect(screen.getByTestId('draft-count')).toHaveTextContent('none');
     expect(onGenerated).not.toHaveBeenCalled();
   });
@@ -615,6 +752,46 @@ describe('V4-06 scheduling workspaces', () => {
     expect(screen.queryByRole('link', { name: '查看日程详情：Team review' })).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['mixed Event and calendar-rule changes', mixedScheduleProposal('PENDING')],
+    ['multiple Event changes', multipleEventProposal('PENDING')],
+  ] as const)('does not render a %s as a manual Event list card', async (_shape, proposal) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: [proposal] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ManualEventProposalPanel initialDate={dateA} />);
+
+    expect(await screen.findByText('还没有待确认的手工日程。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '确认写入日程' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看日程详情：Team review' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the active Strict Mode list operation loading when an aborted predecessor settles', async () => {
+    const firstList = deferred<Response>();
+    const secondList = deferred<Response>();
+    let listCalls = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url !== '/api/core/proposals?status=PENDING') return Promise.reject(new Error(`unexpected ${url}`));
+      listCalls += 1;
+      return listCalls === 1 ? firstList.promise : secondList.promise;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<StrictMode><ManualEventProposalPanel initialDate={dateA} /></StrictMode>);
+    await waitFor(() => expect(listCalls).toBe(2));
+    await act(async () => {
+      firstList.resolve(jsonResponse({ data: [] }));
+      await firstList.promise;
+    });
+
+    expect(screen.getByText('正在读取待确认手工日程…')).toBeInTheDocument();
+    await act(async () => {
+      secondList.resolve(jsonResponse({ data: [] }));
+      await secondList.promise;
+    });
+    expect(await screen.findByText('还没有待确认的手工日程。')).toBeInTheDocument();
+  });
+
   it('rejects an accepted response to manual Event creation before it can expose an Event link', async () => {
     const fetchMock = vi.fn((url: string) => {
       if (url === '/api/core/proposals?status=PENDING') return Promise.resolve(jsonResponse({ data: [] }));
@@ -634,8 +811,29 @@ describe('V4-06 scheduling workspaces', () => {
     expect(screen.queryByRole('link', { name: '查看日程详情：Team review' })).not.toBeInTheDocument();
   });
 
+  it('rejects a multiple-Event response to manual Event creation before it can expose a decision', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/core/proposals?status=PENDING') return Promise.resolve(jsonResponse({ data: [] }));
+      if (url === '/api/core/event-proposals') return Promise.resolve(jsonResponse({ data: multipleEventProposal('PENDING') }, 201));
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<ManualEventProposalPanel initialDate={dateA} />);
+    await screen.findByText('还没有待确认的手工日程。');
+    await user.type(screen.getByLabelText('日程标题'), 'Team review');
+    await user.click(screen.getByRole('button', { name: '创建待确认日程' }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText('待确认 · 尚未写入日程')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '确认写入日程' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看日程详情：Team review' })).not.toBeInTheDocument();
+  });
+
   it.each([
     ['ACCEPT', 'PENDING same id', scheduleProposal('PENDING', 2)],
+    ['ACCEPT', 'REJECTED same id', scheduleProposal('REJECTED', 2)],
     ['ACCEPT', 'ACCEPTED wrong id', scheduleProposal('ACCEPTED', 2, taskIdA)],
     ['REJECT', 'ACCEPTED same id', scheduleProposal('ACCEPTED', 2)],
   ] as const)('keeps manual Event decisions safe for a schema-valid %s response: %s', async (decision, _responseLabel, response) => {
@@ -658,6 +856,29 @@ describe('V4-06 scheduling workspaces', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByText('已确认 · 已写入日程')).not.toBeInTheDocument();
     expect(screen.queryByText('已拒绝 · 未写入日程')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看日程详情：Team review' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '确认写入日程' })).not.toBeInTheDocument();
+  });
+
+  it('rejects a mixed-change accept response before it can confirm or link a manual Event', async () => {
+    let listCalls = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/core/proposals?status=PENDING') {
+        listCalls += 1;
+        return Promise.resolve(jsonResponse({ data: listCalls === 1 ? [scheduleProposal('PENDING')] : [] }));
+      }
+      if (url === `/api/core/proposals/${proposalId}/decision`) return Promise.resolve(jsonResponse({ data: mixedScheduleProposal('ACCEPTED', 2) }));
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<ManualEventProposalPanel initialDate={dateA} />);
+    await screen.findByText('待确认 · 尚未写入日程');
+    await user.click(screen.getByRole('button', { name: '确认写入日程' }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText('已确认 · 已写入日程')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '查看日程详情：Team review' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '确认写入日程' })).not.toBeInTheDocument();
   });
@@ -715,6 +936,101 @@ describe('V4-06 scheduling workspaces', () => {
     expect(screen.queryByRole('button', { name: '确认写入日程' })).not.toBeInTheDocument();
   });
 
+  it('keeps a malformed-conflict version quarantined until a later reload returns a newer Pending Proposal', async () => {
+    const lateReload = deferred<Response>();
+    let listCalls = 0;
+    let decisionCalls = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/core/proposals?status=PENDING') {
+        listCalls += 1;
+        if (listCalls === 1) return Promise.resolve(jsonResponse({ data: [scheduleProposal('PENDING', 1)] }));
+        if (listCalls === 2) return lateReload.promise;
+        return Promise.resolve(jsonResponse({ data: [scheduleProposal('PENDING', 2)] }));
+      }
+      if (url === `/api/core/proposals/${proposalId}/decision`) {
+        decisionCalls += 1;
+        if (decisionCalls === 1) {
+          return Promise.resolve(jsonResponse({ error: { code: 'VERSION_CONFLICT', message: '已更新', details: {} } }, 409));
+        }
+        return Promise.resolve(jsonResponse({ data: scheduleProposal('REJECTED', 3) }));
+      }
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<ManualEventProposalPanel initialDate={dateA} />);
+    await screen.findByText('待确认 · 尚未写入日程');
+    const staleAccept = screen.getByRole('button', { name: '确认写入日程' });
+    await user.click(staleAccept);
+    await waitFor(() => expect(listCalls).toBe(2));
+
+    await act(async () => {
+      lateReload.resolve(jsonResponse({ data: [scheduleProposal('PENDING', 1)] }));
+      await lateReload.promise;
+    });
+
+    expect(await screen.findByRole('button', { name: '重新读取待确认手工日程' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '确认写入日程' })).not.toBeInTheDocument();
+    fireEvent.click(staleAccept);
+    expect(decisionCalls).toBe(1);
+    await user.click(screen.getByRole('button', { name: '重新读取待确认手工日程' }));
+    expect(await screen.findByText('待确认 · 尚未写入日程')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '拒绝写入日程' }));
+
+    expect(decisionCalls).toBe(2);
+    const decisionRequest = fetchMock.mock.calls.filter(([url]) => url === `/api/core/proposals/${proposalId}/decision`).at(-1) as unknown as [string, RequestInit] | undefined;
+    expect(JSON.parse(String(decisionRequest?.[1].body))).toEqual({ version: 2, decision: 'REJECT' });
+    expect(await screen.findByText('已拒绝 · 未写入日程')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看日程详情：Team review' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['successful', jsonResponse({ data: scheduleProposal('PENDING', 1, proposalIdB) }, 201)],
+    ['failing', jsonResponse({ error: { code: 'EVENT_PROPOSAL_FAILED', message: '创建失败' } }, 500)],
+  ])('does not cross a pending reload with a %s manual Event create', async (_outcome, createResponse) => {
+    const lateReload = deferred<Response>();
+    let listCalls = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/core/proposals?status=PENDING') {
+        listCalls += 1;
+        return listCalls === 1
+          ? Promise.resolve(jsonResponse({ data: [scheduleProposal('PENDING')] }))
+          : lateReload.promise;
+      }
+      if (url === `/api/core/proposals/${proposalId}/decision`) {
+        return Promise.resolve(jsonResponse({ error: { code: 'VERSION_CONFLICT', message: '已更新', details: {} } }, 409));
+      }
+      if (url === '/api/core/event-proposals') return Promise.resolve(createResponse);
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<ManualEventProposalPanel initialDate={dateA} />);
+    await screen.findByText('待确认 · 尚未写入日程');
+    await user.type(screen.getByLabelText('日程标题'), 'Team review');
+    await user.click(screen.getByRole('button', { name: '确认写入日程' }));
+    await waitFor(() => expect(listCalls).toBe(2));
+
+    const createButton = screen.getByRole('button', { name: '创建待确认日程' }) as HTMLButtonElement;
+    expect(createButton).toBeDisabled();
+    fireEvent.submit(createButton.form as HTMLFormElement);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/event-proposals')).toHaveLength(0);
+    await act(async () => {
+      lateReload.resolve(jsonResponse({ data: [] }));
+      await lateReload.promise;
+    });
+    await waitFor(() => expect(createButton).toBeEnabled());
+    await user.click(createButton);
+
+    if (_outcome === 'successful') {
+      expect(await screen.findByText('待确认 · 尚未写入日程')).toBeInTheDocument();
+    } else {
+      expect(await screen.findByRole('alert')).toHaveTextContent('创建失败');
+    }
+  });
+
   it('rejects a parseable conflict replacement for another Proposal id', async () => {
     let listCalls = 0;
     const fetchMock = vi.fn((url: string) => {
@@ -758,6 +1074,36 @@ describe('V4-06 scheduling workspaces', () => {
             code: 'VERSION_CONFLICT',
             message: '已更新',
             details: { currentProposal: { ...scheduleProposal('REJECTED', 2), kind: 'WORKOUT' } },
+          },
+        }, 409));
+      }
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<ManualEventProposalPanel initialDate={dateA} />);
+    await screen.findByText('待确认 · 尚未写入日程');
+    await user.click(screen.getByRole('button', { name: '拒绝写入日程' }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText('已拒绝 · 未写入日程')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '确认写入日程' })).not.toBeInTheDocument();
+  });
+
+  it('rejects a multiple-Event currentProposal from a version conflict', async () => {
+    let listCalls = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/core/proposals?status=PENDING') {
+        listCalls += 1;
+        return Promise.resolve(jsonResponse({ data: listCalls === 1 ? [scheduleProposal('PENDING')] : [] }));
+      }
+      if (url === `/api/core/proposals/${proposalId}/decision`) {
+        return Promise.resolve(jsonResponse({
+          error: {
+            code: 'VERSION_CONFLICT',
+            message: '已更新',
+            details: { currentProposal: multipleEventProposal('REJECTED', 2) },
           },
         }, 409));
       }

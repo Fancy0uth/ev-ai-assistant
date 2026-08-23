@@ -10,11 +10,17 @@ import {
   type Proposal,
 } from '@ev/contracts';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 
 interface ManualEventProposalPanelProps {
   initialDate: string;
+}
+
+interface ListOperation {
+  controller: AbortController;
+  id: number;
+  isReload: boolean;
 }
 
 const eventKinds: Array<[EventKind, string]> = [
@@ -31,7 +37,9 @@ function failureMessage(error: unknown): string {
 }
 
 function isManualEventProposal(proposal: Proposal): boolean {
-  return proposal.kind === 'SCHEDULE' && proposal.changes.some((change) => change.operation === 'CREATE_EVENT');
+  return proposal.kind === 'SCHEDULE'
+    && proposal.changes.length === 1
+    && proposal.changes[0]?.operation === 'CREATE_EVENT';
 }
 
 function isPendingManualEventProposal(proposal: Proposal): boolean {
@@ -39,9 +47,9 @@ function isPendingManualEventProposal(proposal: Proposal): boolean {
 }
 
 function acceptedEvent(proposal: Proposal) {
-  if (proposal.status !== 'ACCEPTED') return null;
-  const change = proposal.changes.find((entry) => entry.operation === 'CREATE_EVENT');
-  return change?.event ?? null;
+  if (proposal.status !== 'ACCEPTED' || !isManualEventProposal(proposal)) return null;
+  const [change] = proposal.changes;
+  return change?.operation === 'CREATE_EVENT' ? change.event : null;
 }
 
 function statusCopy(status: Proposal['status']): string {
@@ -78,58 +86,95 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [decidingProposalId, setDecidingProposalId] = useState<string | null>(null);
   const [isReloading, setIsReloading] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
+  const [listRequest, setListRequest] = useState({ id: 0, isReload: false });
   const createInFlightRef = useRef(false);
   const decisionInFlightRef = useRef<string | null>(null);
   const listRequestIdRef = useRef(0);
-  const listControllerRef = useRef<AbortController | null>(null);
+  const listOperationIdRef = useRef(0);
+  const activeListOperationRef = useRef<ListOperation | null>(null);
   const listReloadInFlightRef = useRef(false);
+  const quarantinedVersionsRef = useRef(new Map<string, number>());
   const statusRef = useRef<HTMLParagraphElement>(null);
   const visibleFailure = listFailure ?? failure;
+  const isQuarantinedProposalVersion = useCallback((proposal: Proposal): boolean => {
+    const quarantinedVersion = quarantinedVersionsRef.current.get(proposal.id);
+    return quarantinedVersion !== undefined && proposal.version <= quarantinedVersion;
+  }, []);
+  const isActionablePendingManualEventProposal = useCallback(
+    (proposal: Proposal): boolean => isPendingManualEventProposal(proposal) && !isQuarantinedProposalVersion(proposal),
+    [isQuarantinedProposalVersion],
+  );
+
+  function isActiveListOperation(operation: ListOperation): boolean {
+    return activeListOperationRef.current?.id === operation.id && !operation.controller.signal.aborted;
+  }
+
+  function settleListOperation(operation: ListOperation): void {
+    if (activeListOperationRef.current?.id !== operation.id) return;
+    activeListOperationRef.current = null;
+    setIsLoading(false);
+    if (operation.isReload) {
+      listReloadInFlightRef.current = false;
+      setIsReloading(false);
+    }
+  }
 
   useEffect(() => {
-    const controller = new AbortController();
-    const requestId = listRequestIdRef.current + 1;
-    listRequestIdRef.current = requestId;
-    listControllerRef.current = controller;
+    const operationId = listOperationIdRef.current + 1;
+    listOperationIdRef.current = operationId;
+    const operation: ListOperation = {
+      controller: new AbortController(),
+      id: operationId,
+      isReload: listRequest.isReload,
+    };
+    activeListOperationRef.current = operation;
     void requestCore('proposals?status=PENDING', {
       method: 'GET',
-      signal: controller.signal,
+      signal: operation.controller.signal,
     })
       .then((payload) => {
-        if (controller.signal.aborted || listRequestIdRef.current !== requestId) return;
-        setProposals(proposalListResponseSchema.parse(payload).data.filter(isPendingManualEventProposal));
-        setListFailure(null);
+        if (!isActiveListOperation(operation)) return;
+        const pending = proposalListResponseSchema.parse(payload).data.filter(isPendingManualEventProposal);
+        const containsQuarantinedVersion = pending.some(isQuarantinedProposalVersion);
+        setProposals(pending.filter(isActionablePendingManualEventProposal));
+        setListFailure(containsQuarantinedVersion ? '检测到过期的日程提案版本，请重新读取最新待确认日程。' : null);
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted || listRequestIdRef.current !== requestId) return;
+        if (!isActiveListOperation(operation)) return;
         setListFailure(failureMessage(error));
       })
       .finally(() => {
-        if (controller.signal.aborted || listRequestIdRef.current !== requestId) return;
-        if (listControllerRef.current === controller) listControllerRef.current = null;
-        listReloadInFlightRef.current = false;
-        setIsLoading(false);
-        setIsReloading(false);
+        settleListOperation(operation);
       });
     return () => {
-      controller.abort();
-      if (listControllerRef.current === controller) listControllerRef.current = null;
+      operation.controller.abort();
+      if (activeListOperationRef.current?.id === operation.id) {
+        activeListOperationRef.current = null;
+        if (operation.isReload) listReloadInFlightRef.current = false;
+      }
     };
-  }, [reloadKey]);
+  }, [isActionablePendingManualEventProposal, isQuarantinedProposalVersion, listRequest]);
 
   useEffect(() => {
     if (statusMessage) statusRef.current?.focus();
   }, [statusMessage]);
 
   function invalidateList(): void {
-    listRequestIdRef.current += 1;
-    listControllerRef.current?.abort();
-    listControllerRef.current = null;
-    setIsLoading(false);
+    const operation = activeListOperationRef.current;
+    if (!operation) return;
+    operation.controller.abort();
+    settleListOperation(operation);
+  }
+
+  function quarantineProposal(proposal: Proposal): void {
+    const quarantinedVersion = quarantinedVersionsRef.current.get(proposal.id);
+    if (quarantinedVersion === undefined || proposal.version > quarantinedVersion) {
+      quarantinedVersionsRef.current.set(proposal.id, proposal.version);
+    }
   }
 
   function replaceProposal(next: Proposal): void {
+    if (!isManualEventProposal(next) || (next.status === 'PENDING' && !isActionablePendingManualEventProposal(next))) return;
     setProposals((current) => {
       const existingIndex = current.findIndex((proposal) => proposal.id === next.id);
       if (existingIndex === -1) return [next, ...current];
@@ -149,11 +194,14 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
     setListFailure(null);
     setIsReloading(true);
     setIsLoading(true);
-    setReloadKey((value) => value + 1);
+    const nextRequestId = listRequestIdRef.current + 1;
+    listRequestIdRef.current = nextRequestId;
+    setListRequest({ id: nextRequestId, isReload: true });
   }
 
-  function freezeAndReload(proposalId: string, message: string): void {
-    removeProposal(proposalId);
+  function freezeAndReload(proposal: Proposal, message: string): void {
+    quarantineProposal(proposal);
+    removeProposal(proposal.id);
     setFailure(message);
     setStatusMessage(null);
     reloadPendingProposals(false);
@@ -161,7 +209,7 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
 
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (createInFlightRef.current) return;
+    if (createInFlightRef.current || listReloadInFlightRef.current) return;
     const parsed = createEventProposalInputSchema.safeParse({ title, kind, localDate, startLocalTime, endLocalTime, isHard });
     if (!parsed.success) {
       setFailure(parsed.error.issues[0]?.message ?? '请检查手工日程输入。');
@@ -176,7 +224,7 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
     try {
       const payload = await requestCore('event-proposals', { method: 'POST', body: JSON.stringify(parsed.data) });
       const proposal = proposalResponseSchema.parse(payload).data;
-      if (!isPendingManualEventProposal(proposal)) throw new Error('Core 返回了与手工日程创建不一致的响应。');
+      if (!isActionablePendingManualEventProposal(proposal)) throw new Error('Core 返回了与手工日程创建不一致的响应。');
       replaceProposal(proposal);
       setTitle('');
       setStatusMessage('手工日程已创建为待确认提案，尚未写入日程。');
@@ -189,7 +237,7 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
   }
 
   async function decide(proposal: Proposal, decision: 'ACCEPT' | 'REJECT'): Promise<void> {
-    if (decisionInFlightRef.current !== null || listReloadInFlightRef.current || !isPendingManualEventProposal(proposal)) return;
+    if (decisionInFlightRef.current !== null || listReloadInFlightRef.current || !isActionablePendingManualEventProposal(proposal)) return;
     decisionInFlightRef.current = proposal.id;
     invalidateList();
     setDecidingProposalId(proposal.id);
@@ -202,18 +250,23 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
       const next = proposalResponseSchema.parse(payload).data;
       const expectedStatus = decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
       if (next.id !== proposal.id || !isManualEventProposal(next) || next.status !== expectedStatus) {
-        freezeAndReload(proposal.id, 'Core 返回了与此次日程决定不一致的响应，正在重新读取待确认提案。');
+        freezeAndReload(proposal, 'Core 返回了与此次日程决定不一致的响应，正在重新读取待确认提案。');
         return;
       }
       replaceProposal(next);
       setStatusMessage(next.status === 'ACCEPTED' ? '日程提案已确认并写入日程。' : '日程提案已拒绝，未写入日程。');
     } catch (error: unknown) {
       const current = conflictProposal(error);
-      if (current && current.id === proposal.id && isManualEventProposal(current)) {
+      const replacesProposal = current
+        && current.id === proposal.id
+        && current.version > proposal.version
+        && isManualEventProposal(current)
+        && (current.status !== 'PENDING' || isActionablePendingManualEventProposal(current));
+      if (replacesProposal) {
         replaceProposal(current);
         setStatusMessage('提案已由 Core 的最新版本替换。');
       } else if (error instanceof CoreClientError && error.status === 409) {
-        freezeAndReload(proposal.id, '日程提案发生冲突，正在重新读取待确认提案。');
+        freezeAndReload(proposal, '日程提案发生冲突，正在重新读取待确认提案。');
       } else {
         setFailure(failureMessage(error));
       }
@@ -240,7 +293,7 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
         <label>开始时间<input type="time" value={startLocalTime} onChange={(event) => setStartLocalTime(event.target.value)} /></label>
         <label>结束时间<input type="time" value={endLocalTime} onChange={(event) => setEndLocalTime(event.target.value)} /></label>
         <label className="manual-event-proposal-form__hard"><input checked={isHard} type="checkbox" onChange={(event) => setIsHard(event.target.checked)} /> 固定安排</label>
-        <button disabled={isCreating} aria-busy={isCreating || undefined} type="submit">创建待确认日程</button>
+        <button disabled={isCreating || isReloading} aria-busy={isCreating || isReloading || undefined} type="submit">创建待确认日程</button>
       </form>
 
       {visibleFailure ? <p className="manual-event-proposal-panel__failure" role="alert">{visibleFailure}</p> : null}
