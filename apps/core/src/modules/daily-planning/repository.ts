@@ -13,6 +13,7 @@ import {
   type DailyPlanTrigger,
   type Event,
   type LocalTime,
+  type TimeRequestLifecycleStatus,
   type TimeRequestSource,
 } from '@ev/contracts';
 import type Database from 'better-sqlite3';
@@ -33,6 +34,7 @@ export interface DailyPlanningTimeRequestContext {
   earliestStartLocalTime: LocalTime | null;
   latestEndLocalTime: LocalTime | null;
   isFixed: boolean;
+  lifecycleStatus: TimeRequestLifecycleStatus;
 }
 
 export interface DailyPlanningReviewEventContext extends DailyPlanningEventContext {
@@ -186,6 +188,7 @@ interface TimeRequestContextRow {
   earliest_start_local_time: LocalTime | null;
   latest_end_local_time: LocalTime | null;
   is_fixed: number;
+  lifecycle_status: TimeRequestLifecycleStatus;
 }
 
 interface ReviewTimeRequestContextRow extends TimeRequestContextRow {
@@ -338,9 +341,9 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   );
   const readTimeRequests = database.prepare(
     `select id, version, source, target_date, duration_minutes, priority,
-            earliest_start_local_time, latest_end_local_time, is_fixed
+            earliest_start_local_time, latest_end_local_time, is_fixed, lifecycle_status
      from time_requests as request
-     where request.owner_id = ? and request.target_date = ?
+     where request.owner_id = ? and request.target_date = ? and request.lifecycle_status = 'ACTIVE'
        and not exists (
          select 1
          from proposal_decisions as decision
@@ -435,7 +438,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   );
   const readReviewTimeRequests = database.prepare(
     `select id, version, source, title, target_date, duration_minutes, priority,
-            earliest_start_local_time, latest_end_local_time, is_fixed
+            earliest_start_local_time, latest_end_local_time, is_fixed, lifecycle_status
      from time_requests
      where owner_id = ? and target_date = ?
      order by
@@ -795,6 +798,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           earliestStartLocalTime: row.earliest_start_local_time,
           latestEndLocalTime: row.latest_end_local_time,
           isFixed: row.is_fixed === 1,
+          lifecycleStatus: row.lifecycle_status,
         }),
       );
       const latestRecovery = readLatestRecovery.get(ownerId, localDate) as
@@ -936,6 +940,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         earliestStartLocalTime: request.earliest_start_local_time,
         latestEndLocalTime: request.latest_end_local_time,
         isFixed: request.is_fixed === 1,
+        lifecycleStatus: request.lifecycle_status,
       }));
 
       return {

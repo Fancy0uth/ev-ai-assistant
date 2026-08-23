@@ -59,6 +59,12 @@ function recoveryLevel(context: DailyPlanningReadContext): RecoveryLevel {
   return 'LIMITED';
 }
 
+function assertActiveTimeRequestContext(context: DailyPlanningReadContext): void {
+  if (context.timeRequests.some((request) => request.lifecycleStatus !== 'ACTIVE')) {
+    throw new Error('DAILY_PLAN_CLOSED_TIME_REQUEST_CONTEXT');
+  }
+}
+
 function buildManifest(
   context: DailyPlanningReadContext,
   localDate: string,
@@ -138,6 +144,7 @@ export function createDailyPlanningContextService(
     prepare(ownerId, localDate, trigger, now = new Date()) {
       const baseScheduleVersion = repository.readScheduleVersion(ownerId).version;
       const context = repository.readContext(ownerId, localDate);
+      assertActiveTimeRequestContext(context);
       const createdAt = now.toISOString();
       const manifest = buildManifest(context, localDate, createdAt);
       const run = repository.createContextReady({

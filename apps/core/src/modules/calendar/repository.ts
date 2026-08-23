@@ -1,4 +1,15 @@
-import type { CalendarRule, Event, Signal, Term, TimeRequest } from '@ev/contracts';
+import {
+  timeRequestSchema,
+  type CalendarRule,
+  type Event,
+  type LocalTime,
+  type NormalizedTimeRequest,
+  type Signal,
+  type Term,
+  type TimeRequest,
+  type TimeRequestClosedReason,
+  type TimeRequestOrigin,
+} from '@ev/contracts';
 import type Database from 'better-sqlite3';
 
 export interface NewTerm extends Term {
@@ -15,6 +26,47 @@ export interface NewEvent extends Event {
 
 export interface NewTimeRequest extends TimeRequest {
   ownerId: string;
+}
+
+export interface TimeRequestOriginIdentity {
+  kind: TimeRequestOrigin['kind'];
+  entityId: string;
+}
+
+export interface NewActiveTimeRequest {
+  id: string;
+  ownerId: string;
+  source: TimeRequest['source'];
+  title: string;
+  targetDate: string;
+  durationMinutes: number;
+  priority: TimeRequest['priority'];
+  earliestStartLocalTime: LocalTime | null;
+  latestEndLocalTime: LocalTime | null;
+  isFixed: boolean;
+  origin: TimeRequestOrigin;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActiveTimeRequestUpdate {
+  expectedVersion: number;
+  title: string;
+  targetDate: string;
+  durationMinutes: number;
+  priority: TimeRequest['priority'];
+  earliestStartLocalTime: LocalTime | null;
+  latestEndLocalTime: LocalTime | null;
+  isFixed: boolean;
+  origin: TimeRequestOrigin;
+  updatedAt: string;
+}
+
+export interface CloseActiveTimeRequestInput {
+  expectedVersion: number;
+  closedAt: string;
+  closedReason: TimeRequestClosedReason;
 }
 
 export interface NewSignal extends Signal {
@@ -70,6 +122,12 @@ interface TimeRequestRow {
   earliest_start_local_time: string | null;
   latest_end_local_time: string | null;
   is_fixed: number;
+  origin_kind: TimeRequestOrigin['kind'] | null;
+  origin_id: string | null;
+  origin_version: number | null;
+  lifecycle_status: 'ACTIVE' | 'CLOSED';
+  closed_at: string | null;
+  closed_reason: TimeRequestClosedReason | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -95,6 +153,25 @@ export interface CalendarRepository {
   listEventsForDate(ownerId: string, localDate: string): Event[];
   createTimeRequest(request: NewTimeRequest): TimeRequest;
   listTimeRequestsForDate(ownerId: string, localDate: string): TimeRequest[];
+  findActiveTimeRequestByOrigin(
+    ownerId: string,
+    origin: TimeRequestOriginIdentity,
+  ): NormalizedTimeRequest | undefined;
+  createActiveTimeRequest(input: NewActiveTimeRequest): NormalizedTimeRequest;
+  updateActiveTimeRequest(
+    ownerId: string,
+    id: string,
+    input: ActiveTimeRequestUpdate,
+  ): NormalizedTimeRequest | undefined;
+  closeActiveTimeRequest(
+    ownerId: string,
+    id: string,
+    input: CloseActiveTimeRequestInput,
+  ): NormalizedTimeRequest | undefined;
+  listTimeRequestHistoryForOrigin(
+    ownerId: string,
+    origin: TimeRequestOriginIdentity,
+  ): NormalizedTimeRequest[];
   createSignal(signal: NewSignal): Signal;
   listSignalsForDate(ownerId: string, localDate: string): Signal[];
 }
@@ -144,8 +221,25 @@ function toEvent(row: EventRow): Event {
   };
 }
 
-function toTimeRequest(row: TimeRequestRow): TimeRequest {
+function toTimeRequestOrigin(row: TimeRequestRow): TimeRequestOrigin | null {
+  if (row.origin_kind === null) {
+    if (row.origin_id !== null || row.origin_version !== null) {
+      throw new Error('TimeRequest origin columns are inconsistent');
+    }
+    return null;
+  }
+  if (row.origin_id === null || row.origin_version === null) {
+    throw new Error('TimeRequest origin columns are incomplete');
+  }
   return {
+    kind: row.origin_kind,
+    entityId: row.origin_id,
+    entityVersion: row.origin_version,
+  };
+}
+
+function toTimeRequest(row: TimeRequestRow): NormalizedTimeRequest {
+  return timeRequestSchema.parse({
     id: row.id,
     source: row.source,
     title: row.title,
@@ -155,10 +249,14 @@ function toTimeRequest(row: TimeRequestRow): TimeRequest {
     earliestStartLocalTime: row.earliest_start_local_time,
     latestEndLocalTime: row.latest_end_local_time,
     isFixed: row.is_fixed === 1,
+    origin: toTimeRequestOrigin(row),
+    lifecycleStatus: row.lifecycle_status,
+    closedAt: row.closed_at,
+    closedReason: row.closed_reason,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
+  });
 }
 
 function toSignal(row: SignalRow): Signal {
@@ -190,7 +288,8 @@ const eventColumns = `
 
 const timeRequestColumns = `
   id, source, title, target_date, duration_minutes, priority, earliest_start_local_time,
-  latest_end_local_time, is_fixed, version, created_at, updated_at
+  latest_end_local_time, is_fixed, origin_kind, origin_id, origin_version, lifecycle_status,
+  closed_at, closed_reason, version, created_at, updated_at
 `;
 
 const signalColumns = `
@@ -200,6 +299,40 @@ const signalColumns = `
 export function createCalendarRepository(database: Database.Database): CalendarRepository {
   const findTermStatement = database.prepare(
     `select ${termColumns} from terms where id = ? and owner_id = ?`,
+  );
+  const findTimeRequest = database.prepare(
+    `select ${timeRequestColumns} from time_requests where id = ? and owner_id = ?`,
+  );
+  const insertTimeRequest = database.prepare(
+    `insert into time_requests (
+       id, owner_id, source, title, target_date, duration_minutes, priority,
+       earliest_start_local_time, latest_end_local_time, is_fixed, origin_kind, origin_id,
+       origin_version, lifecycle_status, closed_at, closed_reason, version, created_at, updated_at
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const findActiveTimeRequestByOrigin = database.prepare(
+    `select ${timeRequestColumns}
+     from time_requests
+     where owner_id = ? and origin_kind = ? and origin_id = ? and lifecycle_status = 'ACTIVE'`,
+  );
+  const listTimeRequestHistoryForOrigin = database.prepare(
+    `select ${timeRequestColumns}
+     from time_requests
+     where owner_id = ? and origin_kind = ? and origin_id = ?
+     order by created_at asc, id asc`,
+  );
+  const updateActiveTimeRequest = database.prepare(
+    `update time_requests
+     set title = ?, target_date = ?, duration_minutes = ?, priority = ?,
+         earliest_start_local_time = ?, latest_end_local_time = ?, is_fixed = ?,
+         origin_kind = ?, origin_id = ?, origin_version = ?, updated_at = ?, version = version + 1
+     where id = ? and owner_id = ? and version = ? and lifecycle_status = 'ACTIVE'`,
+  );
+  const closeActiveTimeRequest = database.prepare(
+    `update time_requests
+     set lifecycle_status = 'CLOSED', closed_at = ?, closed_reason = ?, updated_at = ?,
+         version = version + 1
+     where id = ? and owner_id = ? and version = ? and lifecycle_status = 'ACTIVE'`,
   );
 
   return {
@@ -311,32 +444,30 @@ export function createCalendarRepository(database: Database.Database): CalendarR
     },
 
     createTimeRequest(request) {
-      database
-        .prepare(
-          `insert into time_requests (
-             id, owner_id, source, title, target_date, duration_minutes, priority,
-             earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at,
-             updated_at
-           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          request.id,
-          request.ownerId,
-          request.source,
-          request.title,
-          request.targetDate,
-          request.durationMinutes,
-          request.priority,
-          request.earliestStartLocalTime,
-          request.latestEndLocalTime,
-          request.isFixed ? 1 : 0,
-          request.version,
-          request.createdAt,
-          request.updatedAt,
-        );
-      const row = database
-        .prepare(`select ${timeRequestColumns} from time_requests where id = ? and owner_id = ?`)
-        .get(request.id, request.ownerId) as TimeRequestRow;
+      const { ownerId, ...timeRequest } = request;
+      const normalized = timeRequestSchema.parse(timeRequest);
+      insertTimeRequest.run(
+        normalized.id,
+        ownerId,
+        normalized.source,
+        normalized.title,
+        normalized.targetDate,
+        normalized.durationMinutes,
+        normalized.priority,
+        normalized.earliestStartLocalTime,
+        normalized.latestEndLocalTime,
+        normalized.isFixed ? 1 : 0,
+        normalized.origin?.kind ?? null,
+        normalized.origin?.entityId ?? null,
+        normalized.origin?.entityVersion ?? null,
+        normalized.lifecycleStatus,
+        normalized.closedAt,
+        normalized.closedReason,
+        normalized.version,
+        normalized.createdAt,
+        normalized.updatedAt,
+      );
+      const row = findTimeRequest.get(normalized.id, ownerId) as TimeRequestRow;
       return toTimeRequest(row);
     },
 
@@ -352,6 +483,94 @@ export function createCalendarRepository(database: Database.Database): CalendarR
              id asc`,
         )
         .all(ownerId, localDate) as TimeRequestRow[];
+      return rows.map(toTimeRequest);
+    },
+
+    findActiveTimeRequestByOrigin(ownerId, origin) {
+      const row = findActiveTimeRequestByOrigin.get(
+        ownerId,
+        origin.kind,
+        origin.entityId,
+      ) as TimeRequestRow | undefined;
+      return row ? toTimeRequest(row) : undefined;
+    },
+
+    createActiveTimeRequest(input) {
+      const { ownerId, ...timeRequest } = input;
+      const normalized = timeRequestSchema.parse({
+        ...timeRequest,
+        lifecycleStatus: 'ACTIVE',
+        closedAt: null,
+        closedReason: null,
+      });
+      insertTimeRequest.run(
+        normalized.id,
+        ownerId,
+        normalized.source,
+        normalized.title,
+        normalized.targetDate,
+        normalized.durationMinutes,
+        normalized.priority,
+        normalized.earliestStartLocalTime,
+        normalized.latestEndLocalTime,
+        normalized.isFixed ? 1 : 0,
+        normalized.origin?.kind ?? null,
+        normalized.origin?.entityId ?? null,
+        normalized.origin?.entityVersion ?? null,
+        normalized.lifecycleStatus,
+        normalized.closedAt,
+        normalized.closedReason,
+        normalized.version,
+        normalized.createdAt,
+        normalized.updatedAt,
+      );
+      return toTimeRequest(findTimeRequest.get(normalized.id, ownerId) as TimeRequestRow);
+    },
+
+    updateActiveTimeRequest(ownerId, id, input) {
+      const result = updateActiveTimeRequest.run(
+        input.title,
+        input.targetDate,
+        input.durationMinutes,
+        input.priority,
+        input.earliestStartLocalTime,
+        input.latestEndLocalTime,
+        input.isFixed ? 1 : 0,
+        input.origin.kind,
+        input.origin.entityId,
+        input.origin.entityVersion,
+        input.updatedAt,
+        id,
+        ownerId,
+        input.expectedVersion,
+      );
+      if (result.changes === 0) {
+        return undefined;
+      }
+      return toTimeRequest(findTimeRequest.get(id, ownerId) as TimeRequestRow);
+    },
+
+    closeActiveTimeRequest(ownerId, id, input) {
+      const result = closeActiveTimeRequest.run(
+        input.closedAt,
+        input.closedReason,
+        input.closedAt,
+        id,
+        ownerId,
+        input.expectedVersion,
+      );
+      if (result.changes === 0) {
+        return undefined;
+      }
+      return toTimeRequest(findTimeRequest.get(id, ownerId) as TimeRequestRow);
+    },
+
+    listTimeRequestHistoryForOrigin(ownerId, origin) {
+      const rows = listTimeRequestHistoryForOrigin.all(
+        ownerId,
+        origin.kind,
+        origin.entityId,
+      ) as TimeRequestRow[];
       return rows.map(toTimeRequest);
     },
 
