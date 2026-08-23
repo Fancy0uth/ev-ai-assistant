@@ -10,7 +10,7 @@ import {
 import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CoreClientError, requestCore } from '@/lib/core-client';
+import { CoreClientError, isUncertainCoreWriteFailure, requestCore } from '@/lib/core-client';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { StatusOverview } from './status-overview';
 import { DayConsole } from './day-console';
@@ -160,7 +160,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
       proposalDecisionKeys.current.delete(semanticAction);
       await refresh();
     } catch (failure) {
-      if (failure instanceof CoreClientError && failure.status !== 0) {
+      if (!isUncertainCoreWriteFailure(failure)) {
         proposalDecisionKeys.current.delete(semanticAction);
       }
       handleFailure(failure);

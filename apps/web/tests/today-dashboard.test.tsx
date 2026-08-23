@@ -165,14 +165,19 @@ describe('TodayDashboard', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('reuses a Today proposal decision key only after an uncertain transport failure', async () => {
+  it('reuses a Today proposal decision key after an uncertain Core gateway failure', async () => {
     const pendingSnapshot = {
       data: { ...emptySnapshot.data, pendingProposals: [pendingProposal] },
     };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(pendingSnapshot))
-      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: 'Core 是否已提交该决定未知' } },
+          502,
+        ),
+      )
       .mockResolvedValueOnce(jsonResponse({ data: { ...pendingProposal, status: 'ACCEPTED', version: 2 } }))
       .mockResolvedValueOnce(jsonResponse(emptySnapshot));
     vi.stubGlobal('fetch', fetchMock);

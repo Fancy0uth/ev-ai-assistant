@@ -14,6 +14,16 @@ export class CoreClientError extends Error {
   }
 }
 
+/**
+ * A write may already have reached Core when the browser loses transport,
+ * the BFF reports an unavailable upstream, or a nominally successful body
+ * cannot be understood. Callers must retain the semantic action's
+ * Idempotency-Key for those cases so a retry asks Core to replay the outcome.
+ */
+export function isUncertainCoreWriteFailure(error: unknown): boolean {
+  return !(error instanceof CoreClientError) || error.status === 0 || error.status === 502;
+}
+
 export async function requestCore(path: string, init: RequestInit): Promise<unknown> {
   const headers = new Headers(init.headers);
   if (init.body != null && !headers.has('content-type')) {

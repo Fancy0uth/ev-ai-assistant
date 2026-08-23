@@ -11,7 +11,7 @@ import {
 } from '@ev/contracts';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CoreClientError, requestCore } from '@/lib/core-client';
+import { CoreClientError, isUncertainCoreWriteFailure, requestCore } from '@/lib/core-client';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
 
 interface ManualEventProposalPanelProps {
@@ -250,7 +250,6 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
     const idempotencyKey =
       decisionIdempotencyKeysRef.current.get(semanticAction) ?? createIdempotencyKey();
     decisionIdempotencyKeysRef.current.set(semanticAction, idempotencyKey);
-    let responseReceived = false;
     try {
       const input = proposalDecisionSchema.parse({ version: proposal.version, decision });
       const payload = await requestCore(`proposals/${proposal.id}/decision`, {
@@ -258,7 +257,6 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
         body: JSON.stringify(input),
         headers: { 'Idempotency-Key': idempotencyKey },
       });
-      responseReceived = true;
       const next = proposalResponseSchema.parse(payload).data;
       const expectedStatus = decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
       if (next.id !== proposal.id || !isManualEventProposal(next) || next.status !== expectedStatus) {
@@ -270,7 +268,7 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
       replaceProposal(next);
       setStatusMessage(next.status === 'ACCEPTED' ? '日程提案已确认并写入日程。' : '日程提案已拒绝，未写入日程。');
     } catch (error: unknown) {
-      if (responseReceived || (error instanceof CoreClientError && error.status !== 0)) {
+      if (!isUncertainCoreWriteFailure(error)) {
         decisionIdempotencyKeysRef.current.delete(semanticAction);
       }
       const current = conflictProposal(error);

@@ -739,6 +739,32 @@ describe('V4-06 scheduling workspaces', () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it('reuses a manual Event decision key when a successful response cannot be parsed', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [scheduleProposal('PENDING')] }))
+      .mockResolvedValueOnce(jsonResponse({ malformed: true }))
+      .mockResolvedValueOnce(jsonResponse({ data: scheduleProposal('ACCEPTED', 2) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<ManualEventProposalPanel initialDate={dateA} />);
+    await screen.findByText('待确认 · 尚未写入日程');
+    await user.click(screen.getByRole('button', { name: '确认写入日程' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认写入日程' }));
+    expect(await screen.findByText('已确认 · 已写入日程')).toBeInTheDocument();
+
+    const decisions = fetchMock.mock.calls.filter(
+      ([url]) => url === `/api/core/proposals/${proposalId}/decision`,
+    );
+    expect(decisions).toHaveLength(2);
+    const firstKey = new Headers(decisions[0]?.[1]?.headers).get('idempotency-key');
+    const retryKey = new Headers(decisions[1]?.[1]?.headers).get('idempotency-key');
+    expect(firstKey).toMatch(/^web-/);
+    expect(retryKey).toBe(firstKey);
+  });
+
   it('settles a deferred list loading state after a manual Event create succeeds', async () => {
     const lateList = deferred<Response>();
     const fetchMock = vi.fn((url: string) => {
