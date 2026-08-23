@@ -2,6 +2,7 @@ import { devices, expect, test, type BrowserContext, type Page, type TestInfo } 
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import {
+  dailyPlanPreflightResponseSchema,
   dailyPlanDecisionBatchResponseSchema,
   dailyPlanProposalResponseSchema,
   dailyPlanReviewListResponseSchema,
@@ -262,6 +263,35 @@ async function openDailyPlan(page: Page, localDate: string): Promise<void> {
   await expect(page.getByText('还没有该日期的每日计划')).toBeVisible();
 }
 
+async function prepareAndApproveDailyPlan(page: Page, localDate: string): Promise<{
+  preflightId: string;
+  expectedPreflightVersion: number;
+}> {
+  const preparedResponse = await page.context().request.post('/api/core/daily-plans/preflights', {
+    data: { localDate },
+  });
+  expect(preparedResponse.status()).toBe(201);
+  const prepared = dailyPlanPreflightResponseSchema.parse(await preparedResponse.json()).data;
+  const approvedResponse = await page.context().request.post(
+    `/api/core/daily-plans/preflights/${prepared.id}/approve`,
+    {
+      data: {
+        expectedPreflightVersion: prepared.version,
+        items: prepared.items.map((item) => ({
+          contextRef: item.contextRef,
+          safeTitle: item.safeTitle,
+          domain: item.domain,
+          deadlineLocalDate: item.deadlineLocalDate,
+          included: item.included,
+        })),
+      },
+    },
+  );
+  expect(approvedResponse.status()).toBe(200);
+  const approved = dailyPlanPreflightResponseSchema.parse(await approvedResponse.json()).data;
+  return { preflightId: approved.id, expectedPreflightVersion: approved.version };
+}
+
 function isCoreProxyResponse(
   response: Awaited<ReturnType<Page['waitForResponse']>>,
   method: string,
@@ -277,7 +307,24 @@ function reviewFromListResponse(responseBody: unknown, proposalId: string): Dail
   return review;
 }
 
-async function generateProposalInBrowser(page: Page, fixture: DailyPlanFixture): Promise<DailyPlanProposal> {
+async function generateProposalInBrowser(
+  page: Page,
+  fixture: DailyPlanFixture,
+  proveIdempotency = false,
+): Promise<DailyPlanProposal> {
+  const prepared = page.waitForResponse((response) =>
+    isCoreProxyResponse(response, 'POST', '/api/core/daily-plans/preflights'),
+  );
+  await page.getByRole('button', { name: '准备外发内容' }).click();
+  expect((await prepared).status()).toBe(201);
+
+  const approved = page.waitForResponse((response) =>
+    response.request().method() === 'POST' &&
+    /\/api\/core\/daily-plans\/preflights\/[^/]+\/approve$/.test(new URL(response.url()).pathname),
+  );
+  await page.getByRole('button', { name: '批准外发内容' }).click();
+  expect((await approved).status()).toBe(200);
+
   const generated = page.waitForResponse((response) =>
     isCoreProxyResponse(response, 'POST', '/api/core/daily-plans/generate'),
   );
@@ -286,12 +333,36 @@ async function generateProposalInBrowser(page: Page, fixture: DailyPlanFixture):
     return new URL(response.url()).searchParams.get('localDate') === fixture.localDate;
   });
 
-  await page.getByRole('button', { name: '生成每日计划' }).click();
+  await page.getByRole('button', { name: '调用 Provider 生成草案' }).click();
 
   const generationResponse = await generated;
   expect(generationResponse.status()).toBe(201);
   const proposal = dailyPlanProposalResponseSchema.parse(await generationResponse.json()).data;
   expect(proposal.items).toHaveLength(fixture.timeRequests.length);
+
+  if (proveIdempotency) {
+    const requestInput = generationResponse.request().postDataJSON() as {
+      preflightId: string;
+      expectedPreflightVersion: number;
+    };
+    const idempotencyKey = generationResponse.request().headers()['idempotency-key'];
+    expect(idempotencyKey).toMatch(/^web-/);
+
+    const replay = await page.context().request.post('/api/core/daily-plans/generate', {
+      data: requestInput,
+      headers: { 'Idempotency-Key': idempotencyKey ?? '' },
+    });
+    expect(replay.status()).toBe(201);
+    expect(replay.headers()['idempotency-replayed']).toBe('true');
+    expect(dailyPlanProposalResponseSchema.parse(await replay.json()).data).toEqual(proposal);
+
+    const conflict = await page.context().request.post('/api/core/daily-plans/generate', {
+      data: { ...requestInput, expectedPreflightVersion: requestInput.expectedPreflightVersion + 1 },
+      headers: { 'Idempotency-Key': idempotencyKey ?? '' },
+    });
+    expect(conflict.status()).toBe(409);
+    expect(await conflict.json()).toMatchObject({ error: { code: 'IDEMPOTENCY_CONFLICT' } });
+  }
 
   const listResponse = await listed;
   expect(listResponse.status()).toBe(200);
@@ -367,7 +438,7 @@ async function runPartialApplyAndReloadLoop(
   if (!firstRequest || !secondRequest) throw new Error('partial apply fixture requires exactly two time requests');
 
   await openDailyPlan(page, fixture.localDate);
-  const proposal = await generateProposalInBrowser(page, fixture);
+  const proposal = await generateProposalInBrowser(page, fixture, !touch);
   const explanationResponse = page.waitForResponse((response) =>
     isCoreProxyResponse(response, 'GET', `/api/core/daily-plans/proposals/${proposal.id}/explanation`),
   );
@@ -474,6 +545,7 @@ async function runStaleVariant(page: Page, ownerIdValue: string, problems: Brows
 }
 
 test('daily plan review partially applies one edited item in isolated desktop and iPhone touch contexts while an unrelated same-date OPEN Task remains unchanged', async ({ browser }, testInfo) => {
+  test.setTimeout(60_000);
   const contexts: Array<{ name: 'desktop' | 'iphone-touch'; touch: boolean; context: BrowserContext }> = [];
   let storageState: Awaited<ReturnType<BrowserContext['storageState']>> | undefined;
   let currentOwnerId: string | undefined;
@@ -496,8 +568,10 @@ test('daily plan review partially applies one edited item in isolated desktop an
         storageState = await context.storageState();
         currentOwnerId = ownerId();
 
+        const unconfiguredInput = await prepareAndApproveDailyPlan(page, '2026-08-24');
         const unconfigured = await page.context().request.post('/api/core/daily-plans/generate?e2eWithoutTestCredential=1', {
-          data: { localDate: '2026-08-24' },
+          data: unconfiguredInput,
+          headers: { 'Idempotency-Key': 'v05-e2e-provider-not-configured' },
         });
         expect(unconfigured.status()).toBe(409);
         expect(await unconfigured.json()).toMatchObject({

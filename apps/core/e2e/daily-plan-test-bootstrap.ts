@@ -17,6 +17,9 @@ const TEST_PROVIDER_KEY = 'daily-plan-e2e-provider-key';
 const TEST_CREDENTIAL_SKIP_QUERY = 'e2eWithoutTestCredential';
 const TEST_PROVIDER_EVIDENCE_FILE = 'daily-plan-fake-provider-evidence.json';
 
+// This is out-of-band test infrastructure for a runner-owned, isolated EV_DATA_DIR.
+// It proves neither the Owner UI -> Core -> DPAPI credential path nor any real DeepSeek request.
+
 if (process.env[TEST_BOOTSTRAP_FLAG] !== '1' || process.env.NODE_ENV !== 'test') {
   throw new Error('The daily plan E2E bootstrap may run only with its explicit test-only environment.');
 }
