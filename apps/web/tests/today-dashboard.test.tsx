@@ -199,6 +199,80 @@ describe('TodayDashboard', () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it('retains a Today proposal key when a 2xx decision body is malformed and refresh fails', async () => {
+    const pendingSnapshot = {
+      data: { ...emptySnapshot.data, pendingProposals: [pendingProposal] },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(pendingSnapshot))
+      .mockResolvedValueOnce(jsonResponse({ malformed: true }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: '今天的数据刷新失败' } },
+          503,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: { ...pendingProposal, status: 'ACCEPTED', version: 2 } }))
+      .mockResolvedValueOnce(jsonResponse(emptySnapshot));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+    await screen.findByText(pendingProposal.title);
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    await screen.findByText('没有待确认的日程变更。');
+
+    const path = `/api/core/proposals/${pendingProposal.id}/decision`;
+    const decisions = fetchMock.mock.calls.filter(([url]) => url === path);
+    expect(decisions).toHaveLength(2);
+    const firstKey = new Headers(decisions[0]?.[1]?.headers).get('idempotency-key');
+    const retryKey = new Headers(decisions[1]?.[1]?.headers).get('idempotency-key');
+    expect(firstKey).toMatch(/^web-/);
+    expect(retryKey).toBe(firstKey);
+  });
+
+  it.each([
+    ['a different proposal id', { ...pendingProposal, id: '00000000-0000-4000-8000-000000000446', status: 'ACCEPTED', version: 2 }],
+    ['a non-increasing version', { ...pendingProposal, status: 'ACCEPTED', version: 1 }],
+    ['the wrong terminal status', { ...pendingProposal, status: 'REJECTED', version: 2 }],
+  ])('retains a Today proposal key when a schema-valid 2xx response has %s', async (_case, uncertainProposal) => {
+    const pendingSnapshot = {
+      data: { ...emptySnapshot.data, pendingProposals: [pendingProposal] },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(pendingSnapshot))
+      .mockResolvedValueOnce(jsonResponse({ data: uncertainProposal }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: '今天的数据刷新失败' } },
+          503,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: { ...pendingProposal, status: 'ACCEPTED', version: 2 } }))
+      .mockResolvedValueOnce(jsonResponse(emptySnapshot));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+    await screen.findByText(pendingProposal.title);
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    await screen.findByText('没有待确认的日程变更。');
+
+    const path = `/api/core/proposals/${pendingProposal.id}/decision`;
+    const decisions = fetchMock.mock.calls.filter(([url]) => url === path);
+    expect(decisions).toHaveLength(2);
+    const firstKey = new Headers(decisions[0]?.[1]?.headers).get('idempotency-key');
+    const retryKey = new Headers(decisions[1]?.[1]?.headers).get('idempotency-key');
+    expect(firstKey).toMatch(/^web-/);
+    expect(retryKey).toBe(firstKey);
+  });
+
   it('shows the latest local recovery signal as a decision input', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(recoverySnapshot)));
 

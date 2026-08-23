@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  proposalResponseSchema,
   taskResponseSchema,
   todaySnapshotSchema,
   type Task,
@@ -152,11 +153,23 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
     const idempotencyKey = proposalDecisionKeys.current.get(semanticAction) ?? createIdempotencyKey();
     proposalDecisionKeys.current.set(semanticAction, idempotencyKey);
     try {
-      await requestCore(`proposals/${proposalId}/decision`, {
+      const payload = await requestCore(`proposals/${proposalId}/decision`, {
         method: 'POST',
         body: JSON.stringify(input),
         headers: { 'Idempotency-Key': idempotencyKey },
       });
+      const parsed = proposalResponseSchema.safeParse(payload);
+      const expectedStatus = input.decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
+      const responseIsCorrelated =
+        parsed.success &&
+        parsed.data.data.id === proposalId &&
+        parsed.data.data.version > input.version &&
+        parsed.data.data.status === expectedStatus;
+      if (!responseIsCorrelated) {
+        setError('Core 返回的提案决定无法确认，正在重新读取今天的数据');
+        await refresh();
+        return;
+      }
       proposalDecisionKeys.current.delete(semanticAction);
       await refresh();
     } catch (failure) {
