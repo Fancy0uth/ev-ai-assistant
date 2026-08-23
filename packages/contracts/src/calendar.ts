@@ -22,6 +22,15 @@ export const timeRequestSourceSchema = z.enum([
   'PROJECT_AGENT',
   'NUTRITION_AGENT',
 ]);
+export const timeRequestOriginKindSchema = z.enum([
+  'TASK',
+  'ACTION',
+  'LEARNING_PLAN',
+  'WORKOUT',
+  'PROJECT_BRIEF',
+]);
+export const timeRequestLifecycleStatusSchema = z.enum(['ACTIVE', 'CLOSED']);
+export const timeRequestClosedReasonSchema = z.enum(['COMPLETED', 'CANCELLED', 'SUPERSEDED']);
 
 const nonBlankTitleSchema = z
   .string()
@@ -172,6 +181,19 @@ export const timeRequestSchema = z
     earliestStartLocalTime: localTimeSchema.nullable(),
     latestEndLocalTime: localTimeSchema.nullable(),
     isFixed: z.boolean(),
+    origin: z
+      .object({
+        kind: timeRequestOriginKindSchema,
+        entityId: z.uuid(),
+        entityVersion: z.number().int().positive(),
+      })
+      .strict()
+      .nullable()
+      .optional()
+      .default(null),
+    lifecycleStatus: timeRequestLifecycleStatusSchema.optional().default('ACTIVE'),
+    closedAt: z.iso.datetime().nullable().optional().default(null),
+    closedReason: timeRequestClosedReasonSchema.nullable().optional().default(null),
     version: z.number().int().positive(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -187,6 +209,26 @@ export const timeRequestSchema = z
         code: z.ZodIssueCode.custom,
         path: ['latestEndLocalTime'],
         message: '最晚结束时间必须晚于最早开始时间',
+      });
+    }
+
+    const isActive = request.lifecycleStatus === 'ACTIVE';
+    const hasClosedAt = request.closedAt !== null;
+    const hasClosedReason = request.closedReason !== null;
+
+    if (isActive && (hasClosedAt || hasClosedReason)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [hasClosedAt ? 'closedAt' : 'closedReason'],
+        message: '活跃 Time Request 不能包含关闭信息',
+      });
+    }
+
+    if (!isActive && (!hasClosedAt || !hasClosedReason)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [hasClosedAt ? 'closedReason' : 'closedAt'],
+        message: '已关闭 Time Request 必须包含关闭时间和原因',
       });
     }
   });
@@ -207,4 +249,9 @@ export type ActivitySession = z.infer<typeof activitySessionSchema>;
 export type SignalKind = z.infer<typeof signalKindSchema>;
 export type Signal = z.infer<typeof signalSchema>;
 export type TimeRequestSource = z.infer<typeof timeRequestSourceSchema>;
-export type TimeRequest = z.infer<typeof timeRequestSchema>;
+export type TimeRequestOriginKind = z.infer<typeof timeRequestOriginKindSchema>;
+export type TimeRequestLifecycleStatus = z.infer<typeof timeRequestLifecycleStatusSchema>;
+export type TimeRequestClosedReason = z.infer<typeof timeRequestClosedReasonSchema>;
+export type TimeRequestOrigin = NonNullable<z.output<typeof timeRequestSchema>['origin']>;
+export type TimeRequest = z.input<typeof timeRequestSchema>;
+export type NormalizedTimeRequest = z.output<typeof timeRequestSchema>;

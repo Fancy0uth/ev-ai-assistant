@@ -692,6 +692,108 @@ const migrations: readonly Migration[] = [
       create unique index daily_plan_runs_owner_automatic_date_idx
         on daily_plan_runs(owner_id, local_date)
         where trigger in ('SCHEDULED_0700', 'FIRST_VISIT_RECOVERY');
+      `,
+  },
+  {
+    version: 17,
+    name: 'add_scheduling_lifecycle',
+    sql: `
+      alter table tasks add column scheduling_duration_minutes integer
+        check (scheduling_duration_minutes is null or scheduling_duration_minutes between 5 and 960);
+      alter table tasks add column scheduling_earliest_start_local_time text
+        check (
+          scheduling_earliest_start_local_time is null
+          or (
+            scheduling_earliest_start_local_time glob '[0-2][0-9]:[0-5][0-9]'
+            and scheduling_earliest_start_local_time <= '23:59'
+          )
+        );
+      alter table tasks add column scheduling_latest_end_local_time text
+        check (
+          scheduling_latest_end_local_time is null
+          or (
+            scheduling_latest_end_local_time glob '[0-2][0-9]:[0-5][0-9]'
+            and scheduling_latest_end_local_time <= '23:59'
+          )
+        );
+      alter table tasks add column scheduling_is_fixed integer
+        check (scheduling_is_fixed is null or scheduling_is_fixed in (0, 1));
+
+      alter table time_requests add column origin_kind text
+        check (origin_kind is null or origin_kind in (
+          'TASK', 'ACTION', 'LEARNING_PLAN', 'WORKOUT', 'PROJECT_BRIEF'
+        ));
+      alter table time_requests add column origin_id text;
+      alter table time_requests add column origin_version integer
+        check (origin_version is null or origin_version >= 1);
+      alter table time_requests add column lifecycle_status text not null default 'ACTIVE'
+        check (lifecycle_status in ('ACTIVE', 'CLOSED'));
+      alter table time_requests add column closed_at text;
+      alter table time_requests add column closed_reason text
+        check (closed_reason is null or closed_reason in ('COMPLETED', 'CANCELLED', 'SUPERSEDED'));
+
+      create trigger time_requests_v17_validate_before_insert
+      before insert on time_requests
+      when
+        ((new.origin_kind is null) != (new.origin_id is null))
+        or ((new.origin_kind is null) != (new.origin_version is null))
+        or (
+          new.lifecycle_status = 'ACTIVE'
+          and (new.closed_at is not null or new.closed_reason is not null)
+        )
+        or (
+          new.lifecycle_status = 'CLOSED'
+          and (new.closed_at is null or new.closed_reason is null)
+        )
+      begin
+        select raise(abort, 'invalid TimeRequest origin or lifecycle state');
+      end;
+
+      create trigger time_requests_v17_validate_before_update
+      before update on time_requests
+      when
+        ((new.origin_kind is null) != (new.origin_id is null))
+        or ((new.origin_kind is null) != (new.origin_version is null))
+        or (
+          new.lifecycle_status = 'ACTIVE'
+          and (new.closed_at is not null or new.closed_reason is not null)
+        )
+        or (
+          new.lifecycle_status = 'CLOSED'
+          and (new.closed_at is null or new.closed_reason is null)
+        )
+      begin
+        select raise(abort, 'invalid TimeRequest origin or lifecycle state');
+      end;
+
+      create unique index time_requests_owner_active_origin_uidx
+        on time_requests(owner_id, origin_kind, origin_id)
+        where origin_id is not null and lifecycle_status = 'ACTIVE';
+
+      create table daily_plan_preflights (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        run_id text not null,
+        contract_version text not null check (contract_version = 'DAILY_PLAN_PREFLIGHT_V1'),
+        local_date text not null,
+        status text not null check (status in (
+          'AWAITING_APPROVAL', 'APPROVED', 'CLAIMED', 'CONSUMED', 'STALE'
+        )),
+        base_schedule_version integer not null check (base_schedule_version >= 1),
+        items_json text not null check (json_valid(items_json)),
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        approved_at text,
+        claimed_at text,
+        consumed_at text,
+        foreign key (run_id, owner_id)
+          references daily_plan_runs(id, owner_id) on delete cascade,
+        unique (run_id)
+      );
+
+      create index daily_plan_preflights_owner_date_status_idx
+        on daily_plan_preflights(owner_id, local_date, status, created_at desc);
     `,
   },
 ];

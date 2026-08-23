@@ -110,6 +110,128 @@ export const dailyPlanContextManifestSchema = z
 
 const contextRefSchema = z.string().regex(/^TIME_REQUEST_[1-9]\d{0,2}$/).max(20);
 
+export const dailyPlanPreflightStatusSchema = z.enum([
+  'AWAITING_APPROVAL',
+  'APPROVED',
+  'CLAIMED',
+  'CONSUMED',
+  'STALE',
+]);
+
+const dailyPlanPreflightAvailabilitySchema = z
+  .object({
+    earliestStartLocalTime: localTimeSchema.nullable(),
+    latestEndLocalTime: localTimeSchema.nullable(),
+  })
+  .strict()
+  .superRefine((availability, context) => {
+    if (
+      availability.earliestStartLocalTime !== null &&
+      availability.latestEndLocalTime !== null &&
+      availability.latestEndLocalTime <= availability.earliestStartLocalTime
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['latestEndLocalTime'],
+        message: '最晚结束时间必须晚于最早开始时间',
+      });
+    }
+  });
+
+export const dailyPlanPreflightItemSchema = z
+  .object({
+    contextRef: contextRefSchema,
+    safeTitle: nonBlankText(200),
+    domain: z.enum(['WORK', 'STUDY', 'FITNESS', 'NUTRITION', 'LIFE']),
+    deadlineLocalDate: z.iso.date().nullable(),
+    durationMinutes: z.number().int().min(5).max(960),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+    availability: dailyPlanPreflightAvailabilitySchema,
+    isFixed: z.boolean(),
+    included: z.boolean(),
+  })
+  .strict();
+
+export const dailyPlanPreflightSchema = z
+  .object({
+    id: z.uuid(),
+    runId: z.uuid(),
+    contractVersion: z.literal('DAILY_PLAN_PREFLIGHT_V1'),
+    localDate: z.iso.date(),
+    status: dailyPlanPreflightStatusSchema,
+    baseScheduleVersion: positiveVersionSchema,
+    items: z.array(dailyPlanPreflightItemSchema).max(24),
+    version: positiveVersionSchema,
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+    approvedAt: z.iso.datetime().nullable(),
+    claimedAt: z.iso.datetime().nullable(),
+    consumedAt: z.iso.datetime().nullable(),
+  })
+  .strict()
+  .superRefine((preflight, context) => {
+    const contextRefs = new Set<string>();
+
+    for (const [index, item] of preflight.items.entries()) {
+      if (contextRefs.has(item.contextRef)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['items', index, 'contextRef'],
+          message: '每个 Time Request 只能出现一次',
+        });
+      }
+      contextRefs.add(item.contextRef);
+    }
+  });
+
+export const dailyPlanPreflightPrepareInputSchema = z
+  .object({ localDate: z.iso.date() })
+  .strict();
+
+const dailyPlanPreflightApprovalItemSchema = z
+  .object({
+    contextRef: contextRefSchema,
+    safeTitle: nonBlankText(200),
+    domain: z.enum(['WORK', 'STUDY', 'FITNESS', 'NUTRITION', 'LIFE']),
+    deadlineLocalDate: z.iso.date().nullable(),
+    included: z.boolean(),
+  })
+  .strict();
+
+export const dailyPlanPreflightApproveInputSchema = z
+  .object({
+    expectedPreflightVersion: positiveVersionSchema,
+    items: z.array(dailyPlanPreflightApprovalItemSchema).max(24),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const contextRefs = new Set<string>();
+
+    for (const [index, item] of input.items.entries()) {
+      if (contextRefs.has(item.contextRef)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['items', index, 'contextRef'],
+          message: '每个 Time Request 只能批准一次',
+        });
+      }
+      contextRefs.add(item.contextRef);
+    }
+  });
+
+export const dailyPlanPreflightGenerateInputSchema = z
+  .object({
+    preflightId: z.uuid(),
+    expectedPreflightVersion: positiveVersionSchema,
+  })
+  .strict();
+
+export const dailyPlanPreflightPathParamsSchema = z.object({ id: z.uuid() }).strict();
+
+export const dailyPlanPreflightResponseSchema = z
+  .object({ data: dailyPlanPreflightSchema })
+  .strict();
+
 export const dailyPlanUnschedulableReasonCodeSchema = z.enum([
   'HARD_EVENT_CONFLICT',
   'OUTSIDE_AVAILABILITY',
@@ -582,6 +704,12 @@ export type DailyPlanRunStatus = z.infer<typeof dailyPlanRunStatusSchema>;
 export type DailyPlanProposalStatus = z.infer<typeof dailyPlanProposalStatusSchema>;
 export type DailyPlanItemStatus = z.infer<typeof dailyPlanItemStatusSchema>;
 export type DailyPlanFailureCode = z.infer<typeof dailyPlanFailureCodeSchema>;
+export type DailyPlanPreflightStatus = z.infer<typeof dailyPlanPreflightStatusSchema>;
+export type DailyPlanPreflightItem = z.infer<typeof dailyPlanPreflightItemSchema>;
+export type DailyPlanPreflight = z.infer<typeof dailyPlanPreflightSchema>;
+export type DailyPlanPreflightPrepareInput = z.input<typeof dailyPlanPreflightPrepareInputSchema>;
+export type DailyPlanPreflightApproveInput = z.input<typeof dailyPlanPreflightApproveInputSchema>;
+export type DailyPlanPreflightGenerateInput = z.input<typeof dailyPlanPreflightGenerateInputSchema>;
 export type DailyPlanContextManifest = z.infer<typeof dailyPlanContextManifestSchema>;
 export type DailyPlanModelAction = z.infer<typeof dailyPlanModelActionSchema>;
 export type DailyPlanModelOutput = z.infer<typeof dailyPlanModelOutputSchema>;

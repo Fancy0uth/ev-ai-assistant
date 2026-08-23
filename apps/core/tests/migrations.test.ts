@@ -109,7 +109,13 @@ describe('daily-plan storage migrations', () => {
     const database = openDatabase(databasePath);
     try {
       expect(database.prepare('select * from owners where id = ?').get(owner.id)).toEqual(owner);
-      expect(database.prepare('select * from tasks where id = ?').get(task.id)).toEqual(task);
+      expect(database.prepare('select * from tasks where id = ?').get(task.id)).toEqual({
+        ...task,
+        scheduling_duration_minutes: null,
+        scheduling_earliest_start_local_time: null,
+        scheduling_latest_end_local_time: null,
+        scheduling_is_fixed: null,
+      });
       expect(
         database.prepare('select version from schedule_versions where owner_id = ?').get(owner.id),
       ).toEqual({ version: 1 });
@@ -347,6 +353,9 @@ describe('daily-plan storage migrations', () => {
       expect(
         database.prepare('select version, name from schema_migrations where version = 16').get(),
       ).toEqual({ version: 16, name: 'add_daily_plan_automatic_run_guard' });
+      expect(
+        database.prepare('select version, name from schema_migrations where version = 17').get(),
+      ).toEqual({ version: 17, name: 'add_scheduling_lifecycle' });
     } finally {
       database.close();
     }
@@ -380,6 +389,321 @@ describe('daily-plan storage migrations', () => {
       expect(
         database.prepare('select version, name from schema_migrations where version = 16').get(),
       ).toEqual({ version: 16, name: 'add_daily_plan_automatic_run_guard' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('adds v17 lifecycle storage without rewriting v16 TimeRequest history', () => {
+    const databasePath = join(testDirectory, 'v16.sqlite');
+    const timestamp = '2026-08-23T00:00:00.000Z';
+    const ownerId = 'v16-owner';
+    const legacy = new Database(databasePath);
+
+    try {
+      legacy.pragma('foreign_keys = ON');
+      legacy.exec(`
+        create table schema_migrations (
+          version integer primary key,
+          name text not null,
+          applied_at text not null
+        );
+      `);
+      legacy.exec(migration001FixtureSql);
+      legacy.exec(`
+        create table time_requests (
+          id text primary key,
+          owner_id text not null references owners(id) on delete cascade,
+          source text not null,
+          title text not null,
+          target_date text not null,
+          duration_minutes integer not null,
+          priority text not null,
+          earliest_start_local_time text,
+          latest_end_local_time text,
+          is_fixed integer not null,
+          version integer not null,
+          created_at text not null,
+          updated_at text not null
+        );
+
+        create table daily_plan_runs (
+          id text primary key,
+          owner_id text not null references owners(id) on delete cascade,
+          contract_version text not null,
+          local_date text not null,
+          trigger text not null,
+          status text not null,
+          context_manifest_json text not null,
+          proposal_id text,
+          failure_code text,
+          created_at text not null,
+          completed_at text,
+          unique (id, owner_id)
+        );
+      `);
+      const addMigration = legacy.prepare(
+        'insert into schema_migrations (version, name, applied_at) values (?, ?, ?)',
+      );
+      for (let version = 1; version <= 16; version += 1) {
+        addMigration.run(version, `legacy-v${version}`, timestamp);
+      }
+      legacy
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run(ownerId, ownerId, 'hash', timestamp);
+      legacy
+        .prepare(
+          `insert into tasks (
+            id, owner_id, title, area, priority, status, target_date, completed_at,
+            version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'v16-task',
+          ownerId,
+          'Keep v16 task',
+          'WORK',
+          'HIGH',
+          'OPEN',
+          '2026-08-24',
+          null,
+          4,
+          timestamp,
+          timestamp,
+        );
+      legacy
+        .prepare(
+          `insert into time_requests (
+            id, owner_id, source, title, target_date, duration_minutes, priority,
+            earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'v16-request',
+          ownerId,
+          'PROJECT_AGENT',
+          'Keep v16 request',
+          '2026-08-24',
+          45,
+          'HIGH',
+          '09:00',
+          '11:00',
+          0,
+          2,
+          timestamp,
+          timestamp,
+        );
+      legacy
+        .prepare(
+          `insert into daily_plan_runs (
+            id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
+            proposal_id, failure_code, created_at, completed_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'v16-run',
+          ownerId,
+          'DAILY_PLAN_V1',
+          '2026-08-24',
+          'MANUAL',
+          'CONTEXT_READY',
+          '{}',
+          null,
+          null,
+          timestamp,
+          null,
+        );
+    } finally {
+      legacy.close();
+    }
+
+    const database = openDatabase(databasePath);
+    try {
+      const taskColumns = database
+        .prepare("select name from pragma_table_info('tasks') order by cid")
+        .all() as Array<{ name: string }>;
+      expect(taskColumns.map(({ name }) => name)).toEqual(
+        expect.arrayContaining([
+          'scheduling_duration_minutes',
+          'scheduling_earliest_start_local_time',
+          'scheduling_latest_end_local_time',
+          'scheduling_is_fixed',
+        ]),
+      );
+      expect(database.prepare('select * from tasks where id = ?').get('v16-task')).toMatchObject({
+        id: 'v16-task',
+        title: 'Keep v16 task',
+        version: 4,
+        scheduling_duration_minutes: null,
+        scheduling_earliest_start_local_time: null,
+        scheduling_latest_end_local_time: null,
+        scheduling_is_fixed: null,
+      });
+      expect(
+        database.prepare('select origin_kind, origin_id, origin_version, lifecycle_status, closed_at, closed_reason from time_requests where id = ?').get('v16-request'),
+      ).toEqual({
+        origin_kind: null,
+        origin_id: null,
+        origin_version: null,
+        lifecycle_status: 'ACTIVE',
+        closed_at: null,
+        closed_reason: null,
+      });
+
+      const insertTimeRequest = database.prepare(
+        `insert into time_requests (
+          id, owner_id, source, title, target_date, duration_minutes, priority,
+          earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at, updated_at,
+          origin_kind, origin_id, origin_version, lifecycle_status, closed_at, closed_reason
+        ) values (?, ?, 'PROJECT_AGENT', 'Lifecycle request', '2026-08-24', 45, 'HIGH', null, null, 0, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      insertTimeRequest.run(
+        'active-origin-request',
+        ownerId,
+        timestamp,
+        timestamp,
+        'TASK',
+        '33333333-3333-4333-8333-333333333333',
+        1,
+        'ACTIVE',
+        null,
+        null,
+      );
+      expect(() =>
+        insertTimeRequest.run(
+          'duplicate-active-origin-request',
+          ownerId,
+          timestamp,
+          timestamp,
+          'TASK',
+          '33333333-3333-4333-8333-333333333333',
+          2,
+          'ACTIVE',
+          null,
+          null,
+        ),
+      ).toThrow();
+      expect(() =>
+        insertTimeRequest.run(
+          'partial-origin-request',
+          ownerId,
+          timestamp,
+          timestamp,
+          'TASK',
+          null,
+          null,
+          'ACTIVE',
+          null,
+          null,
+        ),
+      ).toThrow();
+      expect(() =>
+        insertTimeRequest.run(
+          'active-with-closure-request',
+          ownerId,
+          timestamp,
+          timestamp,
+          null,
+          null,
+          null,
+          'ACTIVE',
+          timestamp,
+          'CANCELLED',
+        ),
+      ).toThrow();
+      database
+        .prepare(
+          "update time_requests set lifecycle_status = 'CLOSED', closed_at = ?, closed_reason = 'COMPLETED' where id = ?",
+        )
+        .run(timestamp, 'active-origin-request');
+      insertTimeRequest.run(
+        'replacement-active-origin-request',
+        ownerId,
+        timestamp,
+        timestamp,
+        'TASK',
+        '33333333-3333-4333-8333-333333333333',
+        3,
+        'ACTIVE',
+        null,
+        null,
+      );
+
+      database
+        .prepare(
+          `insert into daily_plan_preflights (
+            id, owner_id, run_id, contract_version, local_date, status, base_schedule_version,
+            items_json, version, created_at, updated_at, approved_at, claimed_at, consumed_at
+          ) values (?, ?, ?, 'DAILY_PLAN_PREFLIGHT_V1', '2026-08-24', 'AWAITING_APPROVAL', 1, '[]', 1, ?, ?, null, null, null)`,
+        )
+        .run('v17-preflight', ownerId, 'v16-run', timestamp, timestamp);
+      expect(database.prepare('select id, status from daily_plan_preflights where id = ?').get('v17-preflight')).toEqual({
+        id: 'v17-preflight',
+        status: 'AWAITING_APPROVAL',
+      });
+      expect(
+        database.prepare('select version, name from schema_migrations where version = 17').get(),
+      ).toEqual({ version: 17, name: 'add_scheduling_lifecycle' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('preserves v2 agent-session data while upgrading through v17', () => {
+    const databasePath = join(testDirectory, 'v2.sqlite');
+    const timestamp = '2026-08-23T00:00:00.000Z';
+    const ownerId = 'v2-owner';
+    const legacy = new Database(databasePath);
+
+    try {
+      legacy.pragma('foreign_keys = ON');
+      legacy.exec(`
+        create table schema_migrations (
+          version integer primary key,
+          name text not null,
+          applied_at text not null
+        );
+      `);
+      legacy.exec(migration001FixtureSql);
+      legacy.exec(`
+        create table agent_sessions (
+          id text not null primary key,
+          owner_id text not null references owners(id) on delete cascade,
+          title text not null,
+          created_at text not null,
+          updated_at text not null
+        );
+      `);
+      legacy
+        .prepare('insert into schema_migrations (version, name, applied_at) values (?, ?, ?)')
+        .run(1, 'initial_core_schema', timestamp);
+      legacy
+        .prepare('insert into schema_migrations (version, name, applied_at) values (?, ?, ?)')
+        .run(2, 'add_agent_storage', timestamp);
+      legacy
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run(ownerId, ownerId, 'hash', timestamp);
+      legacy
+        .prepare(
+          'insert into agent_sessions (id, owner_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)',
+        )
+        .run('v2-agent-session', ownerId, 'Keep v2 session', timestamp, timestamp);
+    } finally {
+      legacy.close();
+    }
+
+    const database = openDatabase(databasePath);
+    try {
+      expect(database.prepare('select * from agent_sessions where id = ?').get('v2-agent-session')).toEqual({
+        id: 'v2-agent-session',
+        owner_id: ownerId,
+        title: 'Keep v2 session',
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+      expect(
+        database.prepare('select version, name from schema_migrations where version = 17').get(),
+      ).toEqual({ version: 17, name: 'add_scheduling_lifecycle' });
     } finally {
       database.close();
     }

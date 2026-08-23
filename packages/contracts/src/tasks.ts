@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { localTimeSchema } from './calendar';
 
 export const taskAreaSchema = z.enum(['WORK', 'STUDY', 'LIFE']);
 export const taskPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH']);
@@ -14,6 +15,44 @@ export const taskDateScopeSchema = z.enum(['FUTURE', 'UNDATED']);
 export const taskTitleSchema = z.string().trim().min(1).max(200);
 export const localDateSchema = z.iso.date();
 
+export const taskSchedulingInputSchema = z
+  .object({
+    durationMinutes: z.number().int().min(5).max(960),
+    earliestStartLocalTime: localTimeSchema.nullable(),
+    latestEndLocalTime: localTimeSchema.nullable(),
+    isFixed: z.boolean(),
+  })
+  .strict()
+  .superRefine((scheduling, context) => {
+    if (
+      scheduling.earliestStartLocalTime !== null &&
+      scheduling.latestEndLocalTime !== null &&
+      scheduling.latestEndLocalTime <= scheduling.earliestStartLocalTime
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['latestEndLocalTime'],
+        message: '最晚结束时间必须晚于最早开始时间',
+      });
+    }
+  });
+
+export type TaskSchedulingInput = z.infer<typeof taskSchedulingInputSchema>;
+
+type TaskWire = {
+  id: string;
+  title: string;
+  area: z.infer<typeof taskAreaSchema>;
+  priority: z.infer<typeof taskPrioritySchema>;
+  status: z.infer<typeof taskStatusSchema>;
+  targetDate: string | null;
+  completedAt: string | null;
+  scheduling?: TaskSchedulingInput | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export const taskSchema = z
   .object({
     id: z.uuid(),
@@ -23,11 +62,12 @@ export const taskSchema = z
     status: taskStatusSchema,
     targetDate: localDateSchema.nullable(),
     completedAt: z.iso.datetime().nullable(),
+    scheduling: taskSchedulingInputSchema.nullable().optional().default(null),
     version: z.number().int().positive(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
-  .strict();
+  .strict() as z.ZodType<TaskWire, TaskWire>;
 
 export const createTaskSchema = z
   .object({
@@ -35,6 +75,7 @@ export const createTaskSchema = z
     area: taskAreaSchema,
     priority: taskPrioritySchema,
     targetDate: localDateSchema.nullable().optional(),
+    scheduling: taskSchedulingInputSchema.nullable().optional(),
   })
   .strict();
 
@@ -46,6 +87,7 @@ export const updateTaskSchema = z
     priority: taskPrioritySchema.optional(),
     status: taskStatusSchema.optional(),
     targetDate: localDateSchema.nullable().optional(),
+    scheduling: taskSchedulingInputSchema.nullable().optional(),
   })
   .strict()
   .refine(
@@ -124,7 +166,10 @@ export type TaskArea = z.infer<typeof taskAreaSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskDateScope = z.infer<typeof taskDateScopeSchema>;
-export type Task = z.infer<typeof taskSchema>;
+export type Task = TaskWire;
+export type NormalizedTask = Omit<TaskWire, 'scheduling'> & {
+  scheduling: TaskSchedulingInput | null;
+};
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type TaskListQuery = z.infer<typeof taskListQuerySchema>;
