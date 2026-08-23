@@ -90,6 +90,7 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
   const [listRequest, setListRequest] = useState({ id: 0, isReload: false });
   const createInFlightRef = useRef(false);
   const decisionInFlightRef = useRef<string | null>(null);
+  const decisionIdempotencyKeysRef = useRef(new Map<string, string>());
   const listRequestIdRef = useRef(0);
   const listOperationIdRef = useRef(0);
   const activeListOperationRef = useRef<ListOperation | null>(null);
@@ -245,22 +246,33 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
     setFailure(null);
     setListFailure(null);
     setStatusMessage(null);
+    const semanticAction = `${proposal.id}:${proposal.version}:${decision}`;
+    const idempotencyKey =
+      decisionIdempotencyKeysRef.current.get(semanticAction) ?? createIdempotencyKey();
+    decisionIdempotencyKeysRef.current.set(semanticAction, idempotencyKey);
+    let responseReceived = false;
     try {
       const input = proposalDecisionSchema.parse({ version: proposal.version, decision });
       const payload = await requestCore(`proposals/${proposal.id}/decision`, {
         method: 'POST',
         body: JSON.stringify(input),
-        headers: { 'Idempotency-Key': createIdempotencyKey() },
+        headers: { 'Idempotency-Key': idempotencyKey },
       });
+      responseReceived = true;
       const next = proposalResponseSchema.parse(payload).data;
       const expectedStatus = decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
       if (next.id !== proposal.id || !isManualEventProposal(next) || next.status !== expectedStatus) {
+        decisionIdempotencyKeysRef.current.delete(semanticAction);
         freezeAndReload(proposal, 'Core 返回了与此次日程决定不一致的响应，正在重新读取待确认提案。');
         return;
       }
+      decisionIdempotencyKeysRef.current.delete(semanticAction);
       replaceProposal(next);
       setStatusMessage(next.status === 'ACCEPTED' ? '日程提案已确认并写入日程。' : '日程提案已拒绝，未写入日程。');
     } catch (error: unknown) {
+      if (responseReceived || (error instanceof CoreClientError && error.status !== 0)) {
+        decisionIdempotencyKeysRef.current.delete(semanticAction);
+      }
       const current = conflictProposal(error);
       const replacesProposal = current
         && current.id === proposal.id

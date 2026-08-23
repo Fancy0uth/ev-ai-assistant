@@ -48,6 +48,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
   const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [mutationKey, setMutationKey] = useState<string | null>(null);
   const createInFlight = useRef(false);
+  const proposalDecisionKeys = useRef(new Map<string, string>());
 
   const handleFailure = useCallback(
     (failure: unknown): void => {
@@ -147,14 +148,21 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
   async function decideProposal(proposalId: string, input: { version: number; decision: 'ACCEPT' | 'REJECT' }): Promise<void> {
     setMutationKey(proposalId);
     setError(null);
+    const semanticAction = `${proposalId}:${input.version}:${input.decision}`;
+    const idempotencyKey = proposalDecisionKeys.current.get(semanticAction) ?? createIdempotencyKey();
+    proposalDecisionKeys.current.set(semanticAction, idempotencyKey);
     try {
       await requestCore(`proposals/${proposalId}/decision`, {
         method: 'POST',
         body: JSON.stringify(input),
-        headers: { 'Idempotency-Key': createIdempotencyKey() },
+        headers: { 'Idempotency-Key': idempotencyKey },
       });
+      proposalDecisionKeys.current.delete(semanticAction);
       await refresh();
     } catch (failure) {
+      if (failure instanceof CoreClientError && failure.status !== 0) {
+        proposalDecisionKeys.current.delete(semanticAction);
+      }
       handleFailure(failure);
     } finally {
       setMutationKey(null);

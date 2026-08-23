@@ -41,6 +41,35 @@ const task = {
 };
 
 const unbrokenTaskTitle = 'x'.repeat(200);
+const pendingProposal = {
+  id: '00000000-0000-4000-8000-000000000444',
+  kind: 'SCHEDULE',
+  status: 'PENDING',
+  source: 'DAILY_SCHEDULER',
+  title: '确认今天的时间块',
+  changes: [
+    {
+      operation: 'CREATE_EVENT',
+      event: {
+        id: '00000000-0000-4000-8000-000000000445',
+        calendarRuleId: null,
+        title: '今天的深度工作',
+        kind: 'WORK_BLOCK',
+        localDate: '2026-08-07',
+        startLocalTime: '14:00',
+        endLocalTime: '15:00',
+        isHard: false,
+        status: 'CONFIRMED',
+        version: 1,
+        createdAt: '2026-08-07T01:00:00.000Z',
+        updatedAt: '2026-08-07T01:00:00.000Z',
+      },
+    },
+  ],
+  version: 1,
+  createdAt: '2026-08-07T01:00:00.000Z',
+  expiresAt: null,
+};
 
 const populatedSnapshot = {
   data: {
@@ -134,6 +163,35 @@ describe('TodayDashboard', () => {
     const renderedIds = Array.from(document.querySelectorAll('[id]'), ({ id }) => id);
     expect(new Set(renderedIds).size).toBe(renderedIds.length);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('reuses a Today proposal decision key only after an uncertain transport failure', async () => {
+    const pendingSnapshot = {
+      data: { ...emptySnapshot.data, pendingProposals: [pendingProposal] },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(pendingSnapshot))
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(jsonResponse({ data: { ...pendingProposal, status: 'ACCEPTED', version: 2 } }))
+      .mockResolvedValueOnce(jsonResponse(emptySnapshot));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+    await screen.findByText(pendingProposal.title);
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    await screen.findByText('没有待确认的日程变更。');
+
+    const path = `/api/core/proposals/${pendingProposal.id}/decision`;
+    const decisions = fetchMock.mock.calls.filter(([url]) => url === path);
+    expect(decisions).toHaveLength(2);
+    const firstKey = new Headers(decisions[0]?.[1]?.headers).get('idempotency-key');
+    const retryKey = new Headers(decisions[1]?.[1]?.headers).get('idempotency-key');
+    expect(firstKey).toMatch(/^web-/);
+    expect(retryKey).toBe(firstKey);
   });
 
   it('shows the latest local recovery signal as a decision input', async () => {
