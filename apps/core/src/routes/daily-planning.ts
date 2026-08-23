@@ -22,7 +22,6 @@ import { authenticatedOwnerId, createAuthGuard } from '../modules/auth/guard';
 import type { AuthService } from '../modules/auth/service';
 import {
   DailyPlanBaseVersionStaleError,
-  DailyPlanReviewBaseVersionStaleError,
 } from '../modules/daily-planning/repository';
 import {
   DailyPlanProposalNotFoundError,
@@ -106,11 +105,6 @@ function rethrowReviewError(error: unknown): never {
   }
   if (error instanceof DailyPlanProposalVersionConflictError) {
     throw new ApiError(409, error.code, '每日计划草案已更新，请刷新后重试', {
-      currentReview: dailyPlanReviewSchema.parse(error.review),
-    });
-  }
-  if (error instanceof DailyPlanReviewBaseVersionStaleError) {
-    throw new ApiError(409, 'DAILY_PLAN_BASE_VERSION_STALE', '日程已变化，草案已失效，请刷新后重试', {
       currentReview: dailyPlanReviewSchema.parse(error.review),
     });
   }
@@ -366,10 +360,20 @@ export async function registerDailyPlanningRoutes(
         },
         () => {
           try {
+            const decision = options.dailyPlanReviewService.submitDecisions(ownerId, proposalId, input);
+            if (decision.kind === 'stale') {
+              const stale = new ApiError(
+                409,
+                'DAILY_PLAN_BASE_VERSION_STALE',
+                '日程已变化，草案已失效，请刷新后重试',
+                { currentReview: dailyPlanReviewSchema.parse(decision.review) },
+              );
+              return { status: 409, body: apiErrorBody(stale) };
+            }
             return {
               status: 200,
               body: dailyPlanReviewResponseSchema.parse({
-                data: options.dailyPlanReviewService.submitDecisions(ownerId, proposalId, input),
+                data: decision.review,
               }),
             };
           } catch (error) {

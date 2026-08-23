@@ -56,6 +56,31 @@ const modelOutput = {
 };
 
 describe('daily plan contracts', () => {
+  it('reads legacy, current, and future semantic app versions without changing the runtime version fact', () => {
+    const run = {
+      id: firstId,
+      contractVersion: 'DAILY_PLAN_V1',
+      localDate: '2026-08-17',
+      trigger: 'MANUAL',
+      status: 'CONTEXT_READY',
+      contextManifest,
+      proposalId: null,
+      failureCode: null,
+      createdAt: now,
+      completedAt: null,
+      attemptCount: 0,
+      leaseExpiresAt: null,
+      deadlineAt: null,
+      terminalReason: null,
+      idempotencyRecordId: null,
+    };
+
+    expect(dailyPlanRunSchema.parse({ ...run, appVersion: null }).appVersion).toBeNull();
+    expect(dailyPlanRunSchema.parse({ ...run, appVersion: '0.5.0' }).appVersion).toBe('0.5.0');
+    expect(dailyPlanRunSchema.parse({ ...run, appVersion: '0.6.0' }).appVersion).toBe('0.6.0');
+    expect(dailyPlanRunSchema.safeParse({ ...run, appVersion: 'version-next' }).success).toBe(false);
+  });
+
   it('accepts a privacy-preserving context manifest without entity content or identifiers', () => {
     expect(dailyPlanContextManifestSchema.parse(contextManifest)).toEqual(contextManifest);
   });

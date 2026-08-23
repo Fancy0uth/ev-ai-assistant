@@ -1,4 +1,5 @@
 import {
+  APP_VERSION,
   dailyPlanPreflightSchema,
   dailyPlanReviewSchema,
   dailyPlanProposalSchema,
@@ -150,6 +151,10 @@ export interface CommitReviewDecisionsInput {
   updatedAt?: string;
 }
 
+export type DailyPlanReviewDecisionCommitResult =
+  | { kind: 'committed'; review: DailyPlanReview }
+  | { kind: 'stale'; review: DailyPlanReview };
+
 export interface DailyPlanRunRepository {
   readContext(ownerId: string, localDate: string): DailyPlanningReadContext;
   readScheduleVersion(ownerId: string): { version: number };
@@ -211,7 +216,7 @@ export interface DailyPlanRunRepository {
     ownerId: string,
     proposalId: string,
     input: CommitReviewDecisionsInput,
-  ): DailyPlanReview;
+  ): DailyPlanReviewDecisionCommitResult;
   completeWithProposal(
     ownerId: string,
     runId: string,
@@ -232,13 +237,6 @@ export class DailyPlanReviewCommitConflictError extends Error {
   constructor() {
     super('DAILY_PLAN_REVIEW_COMMIT_CONFLICT');
     this.name = 'DailyPlanReviewCommitConflictError';
-  }
-}
-
-export class DailyPlanReviewBaseVersionStaleError extends Error {
-  constructor(readonly review: DailyPlanReview) {
-    super('DAILY_PLAN_BASE_VERSION_STALE');
-    this.name = 'DailyPlanReviewBaseVersionStaleError';
   }
 }
 
@@ -308,7 +306,7 @@ interface DailyPlanRunRow {
   lease_expires_at: string | null;
   deadline_at: string | null;
   terminal_reason: string | null;
-  app_version: '0.5.0';
+  app_version: string | null;
   idempotency_record_id: string | null;
 }
 
@@ -526,7 +524,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
        proposal_id, failure_code, created_at, completed_at, attempt_count, lease_token,
        lease_expires_at, deadline_at, terminal_reason, app_version, idempotency_record_id
      ) values (?, ?, 'DAILY_PLAN_V1', ?, ?, 'CONTEXT_READY', ?, null, null, ?, null,
-       0, null, null, null, null, '0.5.0', null)`,
+       0, null, null, null, null, ?, null)`,
   );
   const insertPreflight = database.prepare(
     `insert into daily_plan_preflights (
@@ -731,13 +729,13 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   const claimGeneratingRun = database.prepare(
     `update daily_plan_runs
      set status = 'GENERATING', attempt_count = ?, lease_token = ?, lease_expires_at = ?,
-         deadline_at = ?, terminal_reason = null, app_version = '0.5.0', idempotency_record_id = ?
+         deadline_at = ?, terminal_reason = null, app_version = ?, idempotency_record_id = ?
      where id = ? and owner_id = ? and status = 'CONTEXT_READY'`,
   );
   const recoverGeneratingRun = database.prepare(
     `update daily_plan_runs
      set attempt_count = ?, lease_token = ?, lease_expires_at = ?, deadline_at = ?,
-         terminal_reason = null, app_version = '0.5.0', idempotency_record_id = ?
+         terminal_reason = null, app_version = ?, idempotency_record_id = ?
      where id = ? and owner_id = ? and status = 'GENERATING' and attempt_count = 1
        and lease_expires_at <= ?`,
   );
@@ -761,6 +759,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         input.run.trigger,
         JSON.stringify(input.run.contextManifest),
         input.run.createdAt,
+        APP_VERSION,
       );
       insertPreflight.run(
         input.preflight.id,
@@ -910,6 +909,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           input.execution.leaseToken,
           input.execution.leaseExpiresAt,
           input.execution.deadlineAt,
+          APP_VERSION,
           input.execution.idempotencyRecordId,
           preflight.runId,
           input.ownerId,
@@ -958,6 +958,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           input.execution.leaseToken,
           input.execution.leaseExpiresAt,
           input.execution.deadlineAt,
+          APP_VERSION,
           input.execution.idempotencyRecordId,
           preflight.runId,
           input.ownerId,
@@ -1351,12 +1352,12 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
     ownerId: string,
     proposalId: string,
     input: CommitReviewDecisionsInput,
-  ): DailyPlanReview {
+  ): DailyPlanReviewDecisionCommitResult {
     const result = commitReviewDecisionsTransaction(ownerId, proposalId, input);
     if ('stale' in result) {
-      throw new DailyPlanReviewBaseVersionStaleError(result.stale);
+      return { kind: 'stale', review: result.stale };
     }
-    return result.review;
+    return { kind: 'committed', review: result.review };
   }
 
   const failRun = database.transaction(
@@ -1392,6 +1393,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         input.trigger,
         JSON.stringify(input.contextManifest),
         input.createdAt,
+        APP_VERSION,
       );
 
       return toDailyPlanRun(

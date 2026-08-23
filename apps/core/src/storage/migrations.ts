@@ -964,7 +964,7 @@ const migrations: readonly Migration[] = [
         output_chars integer check (output_chars is null or output_chars between 0 and 20000),
         policy_version text not null check (policy_version = 'PROVIDER_POLICY_V1'),
         contract_version text not null check (contract_version = 'DAILY_PLAN_V1'),
-        app_version text not null check (app_version = '0.5.0'),
+        app_version text not null,
         local_date text not null,
         started_at text not null,
         finished_at text,
@@ -982,8 +982,7 @@ const migrations: readonly Migration[] = [
       alter table daily_plan_runs add column lease_expires_at text;
       alter table daily_plan_runs add column deadline_at text;
       alter table daily_plan_runs add column terminal_reason text;
-      alter table daily_plan_runs add column app_version text not null default '0.5.0'
-        check (app_version = '0.5.0');
+      alter table daily_plan_runs add column app_version text;
       alter table daily_plan_runs add column idempotency_record_id text;
       create index daily_plan_runs_owner_lease_idx
         on daily_plan_runs(owner_id, lease_expires_at)

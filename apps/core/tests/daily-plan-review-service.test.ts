@@ -17,7 +17,6 @@ import {
 } from '../src/modules/daily-planning/review-service';
 import {
   createDailyPlanRunRepository,
-  DailyPlanReviewBaseVersionStaleError,
   type DailyPlanRunRepository,
 } from '../src/modules/daily-planning/repository';
 import { DailyPlanValidationError } from '../src/modules/daily-planning/validator';
@@ -35,6 +34,12 @@ type ScheduledItem = Extract<DailyPlanProposal['items'][number], {
 type UnschedulableItem = Extract<DailyPlanProposal['items'][number], {
   operation: 'MARK_TIME_REQUEST_UNSCHEDULABLE';
 }>;
+
+function committedReview(result: ReturnType<DailyPlanReviewService['submitDecisions']>) {
+  expect(result.kind).toBe('committed');
+  if (result.kind !== 'committed') throw new Error('expected a committed review');
+  return result.review;
+}
 
 describe('daily plan review service', () => {
   let database: Database.Database;
@@ -214,10 +219,10 @@ describe('daily plan review service', () => {
     const item = scheduledItem(request);
     const proposal = createProposal([item]);
 
-    const review = service.submitDecisions(ownerId, proposal.id, {
+    const review = committedReview(service.submitDecisions(ownerId, proposal.id, {
       expectedProposalVersion: 1,
       decisions: [{ itemId: item.id, decision: 'APPLY' }],
-    });
+    }));
 
     expect(review.proposal).toMatchObject({ status: 'APPLIED', version: 2 });
     expect(review.proposal.items).toEqual([
@@ -246,12 +251,12 @@ describe('daily plan review service', () => {
     const item = scheduledItem(request);
     const proposal = createProposal([item]);
 
-    const review = service.submitDecisions(ownerId, proposal.id, {
+    const review = committedReview(service.submitDecisions(ownerId, proposal.id, {
       expectedProposalVersion: 1,
       decisions: [
         { itemId: item.id, decision: 'APPLY', startLocalTime: '13:00', endLocalTime: '14:00' },
       ],
-    });
+    }));
 
     expect(review.proposal.items[0]).toMatchObject({
       id: item.id,
@@ -273,14 +278,14 @@ describe('daily plan review service', () => {
     });
     const proposal = createProposal([firstItem, secondItem]);
 
-    const firstReview = service.submitDecisions(ownerId, proposal.id, {
+    const firstReview = committedReview(service.submitDecisions(ownerId, proposal.id, {
       expectedProposalVersion: 1,
       decisions: [{ itemId: firstItem.id, decision: 'APPLY' }],
-    });
-    const secondReview = service.submitDecisions(ownerId, proposal.id, {
+    }));
+    const secondReview = committedReview(service.submitDecisions(ownerId, proposal.id, {
       expectedProposalVersion: 2,
       decisions: [{ itemId: secondItem.id, decision: 'APPLY' }],
-    });
+    }));
 
     expect(firstReview.proposal).toMatchObject({ status: 'PARTIALLY_APPLIED', version: 2 });
     expect(secondReview.proposal).toMatchObject({ status: 'APPLIED', version: 3 });
@@ -298,13 +303,13 @@ describe('daily plan review service', () => {
     const unschedulable = unschedulableItem(unschedulableRequest, { ordinal: 2 });
     const proposal = createProposal([scheduled, unschedulable]);
 
-    const review = service.submitDecisions(ownerId, proposal.id, {
+    const review = committedReview(service.submitDecisions(ownerId, proposal.id, {
       expectedProposalVersion: 1,
       decisions: [
         { itemId: scheduled.id, decision: 'REJECT', reason: 'Keep the existing schedule.' },
         { itemId: unschedulable.id, decision: 'REJECT' },
       ],
-    });
+    }));
 
     expect(review.proposal).toMatchObject({ status: 'REJECTED', version: 2 });
     expect(softEvents()).toEqual([]);
@@ -316,10 +321,10 @@ describe('daily plan review service', () => {
     const item = unschedulableItem(request);
     const proposal = createProposal([item]);
 
-    const review = service.submitDecisions(ownerId, proposal.id, {
+    const review = committedReview(service.submitDecisions(ownerId, proposal.id, {
       expectedProposalVersion: 1,
       decisions: [{ itemId: item.id, decision: 'APPLY' }],
-    });
+    }));
 
     expect(review.proposal.items[0]).toMatchObject({ id: item.id, status: 'APPLIED' });
     expect(softEvents()).toEqual([]);
@@ -354,12 +359,14 @@ describe('daily plan review service', () => {
     const proposal = createProposal([item]);
     createConfirmedEvent('15:00', '16:00', true);
 
-    expect(() =>
-      service.submitDecisions(ownerId, proposal.id, {
-        expectedProposalVersion: 1,
-        decisions: [{ itemId: item.id, decision: 'APPLY' }],
-      }),
-    ).toThrow(DailyPlanReviewBaseVersionStaleError);
+    const result = service.submitDecisions(ownerId, proposal.id, {
+      expectedProposalVersion: 1,
+      decisions: [{ itemId: item.id, decision: 'APPLY' }],
+    });
+    expect(result).toMatchObject({
+      kind: 'stale',
+      review: { proposal: { id: proposal.id, status: 'STALE', version: 2 } },
+    });
     expect(repository.getReview(ownerId, proposal.id)).toMatchObject({
       proposal: expect.objectContaining({ status: 'STALE', version: 2 }),
       decisions: [],

@@ -53,6 +53,9 @@ describe('v0.5 reliability storage migration', () => {
       run: database
         .prepare('select id, owner_id, status, context_manifest_json from daily_plan_runs where id = ?')
         .get('v17-run'),
+      runRootPage: database
+        .prepare("select rootpage from sqlite_master where type = 'table' and name = 'daily_plan_runs'")
+        .get(),
     };
 
     runMigrations(database);
@@ -70,6 +73,41 @@ describe('v0.5 reliability storage migration', () => {
         .prepare('select id, owner_id, status, context_manifest_json from daily_plan_runs where id = ?')
         .get('v17-run'),
     ).toEqual(before.run);
+    expect(
+      database.prepare('select app_version from daily_plan_runs where id = ?').get('v17-run'),
+    ).toEqual({ app_version: null });
+    expect(
+      database
+        .prepare("select rootpage from sqlite_master where type = 'table' and name = 'daily_plan_runs'")
+        .get(),
+    ).toEqual(before.runRootPage);
+
+    database.prepare('update daily_plan_runs set app_version = ? where id = ?').run('0.5.0', 'v17-run');
+    expect(
+      database.prepare('select app_version from daily_plan_runs where id = ?').get('v17-run'),
+    ).toEqual({ app_version: '0.5.0' });
+    database.prepare('update daily_plan_runs set app_version = ? where id = ?').run('0.6.0', 'v17-run');
+    expect(
+      database.prepare('select app_version from daily_plan_runs where id = ?').get('v17-run'),
+    ).toEqual({ app_version: '0.6.0' });
+
+    expect(() =>
+      database
+        .prepare(
+          `insert into provider_call_logs (
+            id, owner_id, run_id, idempotency_record_id, provider, operation, model, attempt_no,
+            status, failure_code, finish_reason, prompt_tokens, completion_tokens, total_tokens,
+            input_chars, output_chars, policy_version, contract_version, app_version, local_date,
+            started_at, finished_at, duration_ms
+          ) values (?, ?, null, null, 'DEEPSEEK', 'daily_plan.generate', 'deepseek-v4-flash', 1,
+            'SUCCEEDED', null, 'stop', 1, 1, 2, 10, 10,
+            'PROVIDER_POLICY_V1', 'DAILY_PLAN_V1', ?, '2026-08-24', ?, ?, 1)`,
+        )
+        .run('v06-provider-call', ownerId, '0.6.0', createdAt, createdAt),
+    ).not.toThrow();
+    expect(
+      database.prepare('select app_version from provider_call_logs where id = ?').get('v06-provider-call'),
+    ).toEqual({ app_version: '0.6.0' });
 
     const runColumns = database
       .prepare('select name from pragma_table_info(\'daily_plan_runs\') order by cid')

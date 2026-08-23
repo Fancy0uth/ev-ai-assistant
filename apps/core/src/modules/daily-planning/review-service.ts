@@ -11,6 +11,7 @@ import type {
   DailyPlanProposalList,
   DailyPlanProposalListQuery,
   DailyPlanRunRepository,
+  DailyPlanReviewDecisionCommitResult,
   DailyPlanReviewExecutionContext,
   PreparedDailyPlanReviewDecision,
 } from './repository';
@@ -34,7 +35,7 @@ export interface DailyPlanReviewService {
     ownerId: string,
     proposalId: string,
     input: DailyPlanDecisionBatchInput,
-  ): DailyPlanReview;
+  ): DailyPlanReviewDecisionCommitResult;
 }
 
 export interface DailyPlanReviewServiceOptions {

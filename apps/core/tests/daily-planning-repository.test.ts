@@ -9,6 +9,7 @@ import { createDailyPlanningContextService } from '../src/modules/daily-planning
 import {
   DailyPlanBaseVersionStaleError,
   createDailyPlanRunRepository,
+  type DailyPlanReviewDecisionCommitResult,
 } from '../src/modules/daily-planning/repository';
 import { openDatabase } from '../src/storage/database';
 
@@ -16,6 +17,12 @@ const ownerId = '00000000-0000-4000-8000-000000000501';
 const otherOwnerId = '00000000-0000-4000-8000-000000000502';
 const localDate = '2026-08-18';
 const timestamp = '2026-08-18T07:00:00.000Z';
+
+function committedReview(result: DailyPlanReviewDecisionCommitResult) {
+  expect(result.kind).toBe('committed');
+  if (result.kind !== 'committed') throw new Error('expected a committed review');
+  return result.review;
+}
 
 describe('daily plan proposal repository', () => {
   let database: Database.Database;
@@ -371,7 +378,7 @@ describe('daily plan proposal repository', () => {
       .prepare('select (select count(*) from tasks) as tasks, (select count(*) from actions) as actions')
       .get();
 
-    const review = repository.commitReviewDecisions(ownerId, proposalId, {
+    const review = committedReview(repository.commitReviewDecisions(ownerId, proposalId, {
       expectedProposalVersion: 1,
       decisions: [
         {
@@ -380,7 +387,7 @@ describe('daily plan proposal repository', () => {
           scheduledEvent: preparedSoftEvent('00000000-0000-4000-8000-000000000558'),
         },
       ],
-    });
+    }));
 
     expect(review).toEqual({
       proposal: expect.objectContaining({ status: 'PARTIALLY_APPLIED', version: 2 }),
@@ -440,7 +447,7 @@ describe('daily plan proposal repository', () => {
       ],
     );
 
-    const review = repository.commitReviewDecisions(ownerId, proposalId, {
+    const review = committedReview(repository.commitReviewDecisions(ownerId, proposalId, {
       expectedProposalVersion: 1,
       decisions: [
         {
@@ -452,7 +459,7 @@ describe('daily plan proposal repository', () => {
           input: { itemId: unschedulableItemId, decision: 'REJECT' },
         },
       ],
-    });
+    }));
 
     expect(review).toEqual({
       proposal: expect.objectContaining({ status: 'REJECTED', version: 2 }),
@@ -490,7 +497,7 @@ describe('daily plan proposal repository', () => {
       [unschedulableItem(itemId, requestId)],
     );
 
-    const review = repository.commitReviewDecisions(ownerId, proposalId, {
+    const review = committedReview(repository.commitReviewDecisions(ownerId, proposalId, {
       expectedProposalVersion: 1,
       decisions: [
         {
@@ -498,7 +505,7 @@ describe('daily plan proposal repository', () => {
           input: { itemId, decision: 'APPLY' },
         },
       ],
-    });
+    }));
 
     expect(review).toEqual({
       proposal: expect.objectContaining({ status: 'APPLIED', version: 2 }),
@@ -543,18 +550,20 @@ describe('daily plan proposal repository', () => {
       updatedAt: timestamp,
     });
 
-    expect(() =>
-      repository.commitReviewDecisions(ownerId, proposalId, {
-        expectedProposalVersion: 1,
-        decisions: [
-          {
-            id: '00000000-0000-4000-8000-000000000584',
-            input: { itemId, decision: 'APPLY' },
-            scheduledEvent: preparedSoftEvent('00000000-0000-4000-8000-000000000585'),
-          },
-        ],
-      }),
-    ).toThrow('DAILY_PLAN_BASE_VERSION_STALE');
+    const result = repository.commitReviewDecisions(ownerId, proposalId, {
+      expectedProposalVersion: 1,
+      decisions: [
+        {
+          id: '00000000-0000-4000-8000-000000000584',
+          input: { itemId, decision: 'APPLY' },
+          scheduledEvent: preparedSoftEvent('00000000-0000-4000-8000-000000000585'),
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      kind: 'stale',
+      review: { proposal: { id: proposalId, status: 'STALE', version: 2 } },
+    });
 
     expect(repository.getReview(ownerId, proposalId)).toEqual({
       proposal: expect.objectContaining({ status: 'STALE', version: 2 }),

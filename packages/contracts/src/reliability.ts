@@ -3,6 +3,12 @@ import * as z from 'zod';
 /** The only application version fact exposed by v0.5 runtime contracts. */
 export const APP_VERSION = '0.5.0' as const;
 
+export const appVersionSchema = z
+  .string()
+  .regex(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+  );
+
 export const idempotencyKeySchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/);
 
 export const idempotencyOperationSchema = z.enum([

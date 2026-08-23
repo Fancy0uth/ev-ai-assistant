@@ -520,10 +520,33 @@ describe('daily plan review routes', () => {
       },
     });
 
-    expect(expectConflict(response, 'DAILY_PLAN_BASE_VERSION_STALE').proposal).toMatchObject({
+    const staleReview = expectConflict(response, 'DAILY_PLAN_BASE_VERSION_STALE');
+    expect(staleReview.proposal).toMatchObject({
       id: proposal.id,
       status: 'STALE',
       version: proposal.version + 1,
     });
+
+    const persisted = await app!.inject({
+      method: 'GET',
+      url: `/v1/daily-plans/proposals/${proposal.id}`,
+      cookies: { ev_session: token },
+    });
+    expect(persisted.statusCode).toBe(200);
+    expect(dailyPlanReviewResponseSchema.parse(persisted.json()).data).toEqual(staleReview);
+
+    const replay = await app!.inject({
+      method: 'POST',
+      url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-review-stale-schedule-01' },
+      payload: {
+        expectedProposalVersion: proposal.version,
+        decisions: [{ itemId: proposal.items[0]!.id, decision: 'APPLY' }],
+      },
+    });
+    expect(replay.statusCode).toBe(409);
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(replay.json()).toEqual(response.json());
   });
 });
