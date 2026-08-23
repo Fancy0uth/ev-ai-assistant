@@ -4,7 +4,7 @@
 
 ## v0.4：Action Scheduling Foundation
 
-- [ ] V4-01：冻结 optional 排程、origin、ACTIVE/CLOSED、preflight 契约及无损 migration v17。
+- [x] V4-01：冻结 optional 排程、origin、ACTIVE/CLOSED、preflight 契约及无损 migration v17。
 - [ ] V4-02：实现可审计 TimeRequest 生命周期，并让新 Daily Plan context 只读取 ACTIVE。
 - [ ] V4-03：以本地 Unit of Work 原子同步 Task↔TimeRequest，并提供 Task 详情 API。
 - [ ] V4-04：拆分持久 preflight 与事务外 Provider 调用，明确 `service.ts` 和 `app.ts` 装配。
