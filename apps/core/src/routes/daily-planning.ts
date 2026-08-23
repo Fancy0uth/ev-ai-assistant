@@ -1,6 +1,10 @@
 import {
   dailyPlanDecisionBatchInputSchema,
-  dailyPlanGenerationInputSchema,
+  dailyPlanPreflightApproveInputSchema,
+  dailyPlanPreflightGenerateInputSchema,
+  dailyPlanPreflightPathParamsSchema,
+  dailyPlanPreflightPrepareInputSchema,
+  dailyPlanPreflightResponseSchema,
   dailyPlanProposalListQuerySchema,
   dailyPlanProposalResponseSchema,
   dailyPlanReviewExplanationResponseSchema,
@@ -27,11 +31,16 @@ import {
   DailyPlanGenerationError,
   type DailyPlanningService,
 } from '../modules/daily-planning/service';
+import {
+  DailyPlanPreflightError,
+  type DailyPlanPreflightService,
+} from '../modules/daily-planning/preflight-service';
 import { DailyPlanValidationError } from '../modules/daily-planning/validator';
 
 interface DailyPlanningRouteOptions {
   authService: AuthService;
   dailyPlanningService: DailyPlanningService;
+  dailyPlanPreflightService: Pick<DailyPlanPreflightService, 'prepare' | 'approve'>;
   dailyPlanReviewService: DailyPlanReviewService;
 }
 
@@ -44,6 +53,20 @@ const dailyPlanProposalPathParamsSchema = z
 function rethrowGenerationError(error: unknown): never {
   if (error instanceof DailyPlanBaseVersionStaleError) {
     throw new ApiError(409, 'DAILY_PLAN_BASE_VERSION_STALE', '日程已变化，请重新生成计划');
+  }
+  if (error instanceof DailyPlanPreflightError) {
+    switch (error.code) {
+      case 'DAILY_PLAN_PREFLIGHT_NOT_FOUND':
+        throw new ApiError(404, error.code, '每日计划上下文不存在');
+      case 'DAILY_PLAN_PREFLIGHT_VERSION_CONFLICT':
+        throw new ApiError(409, error.code, '每日计划上下文已更新，请刷新后重试');
+      case 'DAILY_PLAN_PREFLIGHT_NOT_APPROVABLE':
+        throw new ApiError(409, error.code, '每日计划上下文当前不能批准');
+      case 'DAILY_PLAN_PREFLIGHT_NOT_APPROVED':
+        throw new ApiError(409, error.code, '每日计划上下文尚未批准');
+      case 'DAILY_PLAN_PREFLIGHT_CONTEXT_MISMATCH':
+        throw new ApiError(409, error.code, '每日计划上下文与批准内容不一致');
+    }
   }
   if (!(error instanceof DailyPlanGenerationError)) {
     throw error;
@@ -89,19 +112,60 @@ export async function registerDailyPlanningRoutes(
 ): Promise<void> {
   const authGuard = createAuthGuard(options.authService);
 
+  app.post('/v1/daily-plans/preflights', { preHandler: authGuard }, (request, reply) => {
+    const ownerId = authenticatedOwnerId(request);
+    const input = parseRequestInput(
+      dailyPlanPreflightPrepareInputSchema,
+      request.body,
+      '每日计划上下文请求不符合要求',
+    );
+    try {
+      const preflight = options.dailyPlanPreflightService.prepare(ownerId, input.localDate, 'MANUAL');
+      return reply.status(201).send(dailyPlanPreflightResponseSchema.parse({ data: preflight }));
+    } catch (error) {
+      return rethrowGenerationError(error);
+    }
+  });
+
+  app.post('/v1/daily-plans/preflights/:id/approve', { preHandler: authGuard }, (request) => {
+    const ownerId = authenticatedOwnerId(request);
+    const { id } = parseRequestInput(
+      dailyPlanPreflightPathParamsSchema,
+      request.params,
+      '每日计划上下文路径参数不符合要求',
+    );
+    const input = parseRequestInput(
+      dailyPlanPreflightApproveInputSchema,
+      request.body,
+      '每日计划上下文批准请求不符合要求',
+    );
+    try {
+      return dailyPlanPreflightResponseSchema.parse({
+        data: options.dailyPlanPreflightService.approve(
+          ownerId,
+          id,
+          input.expectedPreflightVersion,
+          input.items,
+        ),
+      });
+    } catch (error) {
+      return rethrowGenerationError(error);
+    }
+  });
+
   app.post('/v1/daily-plans/generate', { preHandler: authGuard }, async (request, reply) => {
     const ownerId = authenticatedOwnerId(request);
     const input = parseRequestInput(
-      dailyPlanGenerationInputSchema,
+      dailyPlanPreflightGenerateInputSchema,
       request.body,
       '每日计划生成请求不符合要求',
     );
 
     try {
-      const proposal = await options.dailyPlanningService.generateDailyPlan({
+      const proposal = await options.dailyPlanningService.generateApprovedPreflight({
         ownerId,
-        localDate: input.localDate,
-        trigger: 'MANUAL',
+        preflightId: input.preflightId,
+        expectedPreflightVersion: input.expectedPreflightVersion,
       });
       return reply.status(201).send(dailyPlanProposalResponseSchema.parse({ data: proposal }));
     } catch (error) {

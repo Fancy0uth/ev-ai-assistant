@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   proposalVersionConflictDetailsSchema,
+  type CreateProposalInput,
   type Proposal,
   type ProposalDecisionInput,
 } from '@ev/contracts';
@@ -15,6 +16,7 @@ interface ProposalServiceOptions {
 }
 
 export interface ProposalService {
+  create(ownerId: string, input: CreateProposalInput): Proposal;
   listPending(ownerId: string): Proposal[];
   findById(ownerId: string, proposalId: string): Proposal;
   decide(ownerId: string, proposalId: string, input: ProposalDecisionInput): Proposal;
@@ -90,6 +92,21 @@ export function createProposalService(
   }
 
   return {
+    create(ownerId, input) {
+      return proposalRepository.create({
+        id: newId(),
+        ownerId,
+        kind: input.kind,
+        status: 'PENDING',
+        source: input.source,
+        title: input.title,
+        changes: input.changes,
+        version: 1,
+        createdAt: now().toISOString(),
+        expiresAt: input.expiresAt ?? null,
+      });
+    },
+
     listPending(ownerId) {
       return proposalRepository.listPending(ownerId);
     },

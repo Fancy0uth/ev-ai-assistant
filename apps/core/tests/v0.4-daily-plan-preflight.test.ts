@@ -96,36 +96,6 @@ describe('v0.4 daily plan preflight boundary', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it('fails closed for legacy direct generation without loading credentials or calling the provider', async () => {
-    const repository = createDailyPlanRunRepository(database);
-    const provider = new CountingProvider();
-    const contextService = createDailyPlanningContextService(repository, {
-      newId: () => '00000000-0000-4000-8000-000000004421',
-    });
-    const service = createDailyPlanningService({
-      preflightService: createDailyPlanPreflightService({
-        contextService,
-        repository,
-        newId: () => '00000000-0000-4000-8000-000000004423',
-        now: () => now,
-      }),
-      repository,
-      credentialService: credentials(),
-      provider,
-      newId: () => '00000000-0000-4000-8000-000000004422',
-      now: () => now,
-    });
-
-    await expect(
-      service.generateDailyPlan({ ownerId, localDate, trigger: 'MANUAL' }),
-    ).rejects.toMatchObject({ code: 'DAILY_PLAN_PREFLIGHT_REQUIRED' });
-
-    expect(provider.calls).toBe(0);
-    expect(database.prepare('select count(*) as count from daily_plan_runs').get()).toEqual({ count: 0 });
-    expect(database.prepare('select count(*) as count from daily_plan_preflights').get()).toEqual({ count: 0 });
-    expect(database.prepare('select count(*) as count from daily_plan_proposals').get()).toEqual({ count: 0 });
-  });
-
   it('persists public preflight semantics atomically before any provider call', () => {
     const repository = createDailyPlanRunRepository(database);
     const preflightService = createDailyPlanPreflightService({

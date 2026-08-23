@@ -33,11 +33,7 @@ function dailyPlanSummary(
   dailyPlanReviewService: DailyPlanReviewService,
   providerCredentialService: ProviderCredentialService,
   dailyPlanRepository: DailyPlanRunRepository,
-  dailyPlanAutomationService: DailyPlanAutomationService,
 ): TodayDailyPlanSummary {
-  if (dailyPlanAutomationService.isGenerating(ownerId, date)) {
-    return { status: 'GENERATING', proposalId: null, pendingItemCount: 0 };
-  }
   const latest = dailyPlanReviewService.listProposals(ownerId, {
     localDate: date,
     page: 1,
@@ -46,11 +42,14 @@ function dailyPlanSummary(
 
   if (!latest) {
     const latestRun = dailyPlanRepository.findLatestRunForDate(ownerId, date);
+    if (latestRun?.status === 'CONTEXT_READY') {
+      return { status: 'AWAITING_CONTEXT_APPROVAL', proposalId: null, pendingItemCount: 0 };
+    }
+    if (latestRun && ['CREATED', 'GENERATING'].includes(latestRun.status)) {
+      return { status: 'GENERATING', proposalId: null, pendingItemCount: 0 };
+    }
     if (latestRun?.status === 'FAILED') {
       return { status: 'FAILED', proposalId: null, pendingItemCount: 0 };
-    }
-    if (latestRun && ['CREATED', 'CONTEXT_READY', 'GENERATING'].includes(latestRun.status)) {
-      return { status: 'GENERATING', proposalId: null, pendingItemCount: 0 };
     }
     return providerCredentialService.getMetadata(ownerId).state === 'CONFIGURED'
       ? { status: 'READY_TO_GENERATE', proposalId: null, pendingItemCount: 0 }
@@ -93,12 +92,12 @@ export async function registerTodayRoutes(
   const authGuard = createAuthGuard(authService);
 
   app.get('/v1/today', { preHandler: authGuard }, async (request) => {
+    const ownerId = authenticatedOwnerId(request);
     const { date } = parseRequestInput(
       todayQuerySchema,
       request.query,
       'Today 查询日期不符合要求',
     );
-    const ownerId = authenticatedOwnerId(request);
     dailyPlanAutomationService.ensureForFirstVisit(ownerId, date);
     const tasks = taskService.listForDate(ownerId, date);
     const yesterday = null;
@@ -119,7 +118,6 @@ export async function registerTodayRoutes(
           dailyPlanReviewService,
           providerCredentialService,
           dailyPlanRepository,
-          dailyPlanAutomationService,
         ),
         agents: {
           deepSeek: 'NOT_CONFIGURED',

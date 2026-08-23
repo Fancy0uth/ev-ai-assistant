@@ -1,52 +1,42 @@
-import { dailyPlanFailureCodeSchema, type DailyPlanTrigger } from '@ev/contracts';
+import type { DailyPlanPreflight, DailyPlanTrigger } from '@ev/contracts';
 
 const shanghaiTimeZone = 'Asia/Shanghai';
 const dailyPlanHour = 7;
 const oneDayMilliseconds = 24 * 60 * 60 * 1000;
+type TimerHandle = ReturnType<typeof setTimeout> | number;
 
-export interface DailyPlanAutomationGenerationPort {
-  generateDailyPlan(input: {
-    ownerId: string;
-    localDate: string;
-    trigger: DailyPlanTrigger;
-  }): Promise<unknown>;
+export interface DailyPlanAutomationPreflightPort {
+  prepare(ownerId: string, localDate: string, trigger: DailyPlanTrigger): DailyPlanPreflight;
 }
 
 export interface DailyPlanAutomationRunRepository {
   findLatestRunForDate(ownerId: string, localDate: string): { status: string } | undefined;
 }
 
-export interface DailyPlanAutomationCredentialPort {
-  getMetadata(ownerId: string): { state: 'CONFIGURED' | 'NOT_CONFIGURED' };
-}
-
 export type DailyPlanAutomationResult =
   | 'NOT_DUE'
-  | 'NOT_CONFIGURED'
   | 'EXISTING_RUN'
-  | 'IN_FLIGHT'
-  | 'STARTED';
+  | 'AWAITING_CONTEXT_APPROVAL'
+  | 'PREPARATION_FAILED';
 
 export interface DailyPlanAutomationService {
   ensureForFirstVisit(ownerId: string, requestedDate: string): DailyPlanAutomationResult;
   runScheduled(): DailyPlanAutomationResult;
   scheduleNextRun(): void;
   stop(): void;
-  isGenerating(ownerId: string, localDate: string): boolean;
 }
 
 export interface DailyPlanAutomationServiceOptions {
-  dailyPlanningService: DailyPlanAutomationGenerationPort;
+  dailyPlanPreflightService: DailyPlanAutomationPreflightPort;
   dailyPlanRunRepository: DailyPlanAutomationRunRepository;
-  providerCredentialService: DailyPlanAutomationCredentialPort;
   findOwnerId: () => string | undefined;
   now?: () => Date;
-  schedule?: (callback: () => void, delayMilliseconds: number) => unknown;
-  cancel?: (handle: unknown) => void;
+  schedule?: (callback: () => void, delayMilliseconds: number) => TimerHandle;
+  cancel?: (handle: TimerHandle) => void;
   onEvent?: (event: {
-    event: 'daily_plan_automation_started' | 'daily_plan_automation_finished' | 'daily_plan_automation_failed';
+    event: 'daily_plan_automation_failed';
     trigger: DailyPlanTrigger;
-    failureCode?: string;
+    failureCode: 'DAILY_PLAN_CONTEXT_INVALID';
   }) => void;
 }
 
@@ -85,61 +75,33 @@ function nextShanghaiSeven(now: Date): Date {
   return new Date(todayAtSeven.getTime() + oneDayMilliseconds);
 }
 
-function failureCode(error: unknown): string {
-  const parsed = error instanceof Error
-    ? dailyPlanFailureCodeSchema.safeParse(error.message)
-    : { success: false as const };
-  return parsed.success ? parsed.data : 'DAILY_PLAN_PROVIDER_UNAVAILABLE';
-}
-
-function runKey(ownerId: string, localDate: string): string {
-  return `${ownerId}:${localDate}`;
-}
-
 export function createDailyPlanAutomationService(
   options: DailyPlanAutomationServiceOptions,
 ): DailyPlanAutomationService {
   const now = options.now ?? (() => new Date());
   const schedule = options.schedule ?? ((callback, delay) => setTimeout(callback, delay));
-  const cancel = options.cancel ?? ((handle) => clearTimeout(handle as NodeJS.Timeout));
-  const inFlight = new Set<string>();
-  let timerHandle: unknown;
+  const cancel = options.cancel ?? ((handle) => clearTimeout(handle));
+  let timerHandle: TimerHandle | undefined;
 
-  function start(
+  function prepare(
     ownerId: string,
     localDate: string,
     trigger: DailyPlanTrigger,
   ): DailyPlanAutomationResult {
-    const key = runKey(ownerId, localDate);
-    if (inFlight.has(key)) return 'IN_FLIGHT';
     if (options.dailyPlanRunRepository.findLatestRunForDate(ownerId, localDate)) {
       return 'EXISTING_RUN';
     }
-    if (options.providerCredentialService.getMetadata(ownerId).state !== 'CONFIGURED') {
-      return 'NOT_CONFIGURED';
-    }
-
-    inFlight.add(key);
-    options.onEvent?.({ event: 'daily_plan_automation_started', trigger });
-    let generation: Promise<unknown>;
     try {
-      generation = options.dailyPlanningService.generateDailyPlan({ ownerId, localDate, trigger });
-    } catch (error) {
-      inFlight.delete(key);
-      options.onEvent?.({ event: 'daily_plan_automation_failed', trigger, failureCode: failureCode(error) });
-      return 'STARTED';
-    }
-    void generation
-      .then(() => {
-        options.onEvent?.({ event: 'daily_plan_automation_finished', trigger });
-      })
-      .catch((error: unknown) => {
-        options.onEvent?.({ event: 'daily_plan_automation_failed', trigger, failureCode: failureCode(error) });
-      })
-      .finally(() => {
-        inFlight.delete(key);
+      options.dailyPlanPreflightService.prepare(ownerId, localDate, trigger);
+      return 'AWAITING_CONTEXT_APPROVAL';
+    } catch {
+      options.onEvent?.({
+        event: 'daily_plan_automation_failed',
+        trigger,
+        failureCode: 'DAILY_PLAN_CONTEXT_INVALID',
       });
-    return 'STARTED';
+      return 'PREPARATION_FAILED';
+    }
   }
 
   function runScheduled(): DailyPlanAutomationResult {
@@ -147,7 +109,7 @@ export function createDailyPlanAutomationService(
     if (current.hour < dailyPlanHour) return 'NOT_DUE';
     const ownerId = options.findOwnerId();
     if (!ownerId) return 'NOT_DUE';
-    return start(ownerId, current.localDate, 'SCHEDULED_0700');
+    return prepare(ownerId, current.localDate, 'SCHEDULED_0700');
   }
 
   function scheduleNextRun(): void {
@@ -165,7 +127,7 @@ export function createDailyPlanAutomationService(
     ensureForFirstVisit(ownerId, requestedDate) {
       const current = shanghaiDateTime(now());
       if (current.hour < dailyPlanHour || requestedDate !== current.localDate) return 'NOT_DUE';
-      return start(ownerId, requestedDate, 'FIRST_VISIT_RECOVERY');
+      return prepare(ownerId, requestedDate, 'FIRST_VISIT_RECOVERY');
     },
 
     runScheduled,
@@ -175,10 +137,6 @@ export function createDailyPlanAutomationService(
     stop() {
       if (timerHandle !== undefined) cancel(timerHandle);
       timerHandle = undefined;
-    },
-
-    isGenerating(ownerId, localDate) {
-      return inFlight.has(runKey(ownerId, localDate));
     },
   };
 }

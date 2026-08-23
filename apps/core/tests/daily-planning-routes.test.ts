@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
-import { apiErrorSchema, type DailyPlanModelOutput } from '@ev/contracts';
+import {
+  apiErrorSchema,
+  dailyPlanPreflightResponseSchema,
+  type DailyPlanModelOutput,
+} from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
@@ -136,6 +140,41 @@ describe('daily planning generation route', () => {
     expect(response.statusCode).toBe(200);
   }
 
+  async function prepareAndApprove(token: string): Promise<{
+    preflightId: string;
+    expectedPreflightVersion: number;
+  }> {
+    const prepared = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/preflights',
+      cookies: { ev_session: token },
+      payload: { localDate },
+    });
+    expect(prepared.statusCode).toBe(201);
+    const preflight = dailyPlanPreflightResponseSchema.parse(prepared.json()).data;
+    const approved = await app!.inject({
+      method: 'POST',
+      url: `/v1/daily-plans/preflights/${preflight.id}/approve`,
+      cookies: { ev_session: token },
+      payload: {
+        expectedPreflightVersion: preflight.version,
+        items: preflight.items.map((item) => ({
+          contextRef: item.contextRef,
+          safeTitle: item.safeTitle,
+          domain: item.domain,
+          deadlineLocalDate: item.deadlineLocalDate,
+          included: item.included,
+        })),
+      },
+    });
+    expect(approved.statusCode).toBe(200);
+    const approvedPreflight = dailyPlanPreflightResponseSchema.parse(approved.json()).data;
+    return {
+      preflightId: approvedPreflight.id,
+      expectedPreflightVersion: approvedPreflight.version,
+    };
+  }
+
   function calendar() {
     if (!controlDatabase) controlDatabase = openDatabase(databasePath);
     return createCalendarRepository(controlDatabase);
@@ -208,10 +247,18 @@ describe('daily planning generation route', () => {
     expectSafeResponse(response.body);
   });
 
-  it('rejects request bodies that are not exactly a local date', async () => {
+  it('rejects request bodies that are not exactly an approved preflight reference', async () => {
     const { token } = await createAuthenticatedApp();
 
-    for (const payload of [{}, { localDate: '2026-8-18' }, { localDate, extra: true }]) {
+    for (const payload of [
+      {},
+      { preflightId: 'not-a-uuid', expectedPreflightVersion: 1 },
+      {
+        preflightId: '00000000-0000-4000-8000-000000000705',
+        expectedPreflightVersion: 1,
+        extra: true,
+      },
+    ]) {
       const response = await app!.inject({
         method: 'POST',
         url: '/v1/daily-plans/generate',
@@ -227,12 +274,13 @@ describe('daily planning generation route', () => {
 
   it('maps a missing credential to a safe provider-not-configured conflict', async () => {
     const { token } = await createAuthenticatedApp();
+    const generationInput = await prepareAndApprove(token);
 
     const response = await app!.inject({
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: generationInput,
     });
 
     expect(response.statusCode).toBe(409);
@@ -245,13 +293,14 @@ describe('daily planning generation route', () => {
   it('maps provider transport failures without exposing raw provider text', async () => {
     const { token } = await createAuthenticatedApp();
     await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
     provider.error = new DailyPlanningProviderUnavailableError();
 
     const response = await app!.inject({
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: generationInput,
     });
 
     expect(response.statusCode).toBe(503);
@@ -262,13 +311,14 @@ describe('daily planning generation route', () => {
   it('maps malformed fake output without exposing it', async () => {
     const { token } = await createAuthenticatedApp();
     await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
     provider.response = { raw: rawProviderText };
 
     const response = await app!.inject({
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: generationInput,
     });
 
     expect(response.statusCode).toBe(422);
@@ -280,6 +330,7 @@ describe('daily planning generation route', () => {
     const { token, ownerId } = await createAuthenticatedApp();
     createTimeRequest(ownerId, ownerTimeRequestId, 'owner private request');
     await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
     provider.response = {
       ...validModelOutput(),
       actions: [
@@ -296,7 +347,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: generationInput,
     });
 
     expect(response.statusCode).toBe(422);
@@ -308,6 +359,7 @@ describe('daily planning generation route', () => {
     const { token, ownerId } = await createAuthenticatedApp();
     createTimeRequest(ownerId, ownerTimeRequestId, 'owner private request');
     await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
     provider.beforeGenerate = () => {
       calendar().createEvent({
         id: '00000000-0000-4000-8000-000000000704',
@@ -330,7 +382,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: generationInput,
     });
 
     expect(response.statusCode).toBe(409);
@@ -342,12 +394,13 @@ describe('daily planning generation route', () => {
     const { token, ownerId } = await createAuthenticatedApp();
     createTimeRequest(ownerId, ownerTimeRequestId, 'owner private request');
     await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
 
     const response = await app!.inject({
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: generationInput,
     });
 
     expect(response.statusCode).toBe(201);

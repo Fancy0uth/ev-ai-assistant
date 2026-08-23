@@ -32,6 +32,13 @@ function contentFor(
         label: '生成今日计划',
         icon: Sparkles,
       };
+    case 'AWAITING_CONTEXT_APPROVAL':
+      return {
+        detail: '外发上下文等待你审阅/批准，尚未调用 Provider。',
+        href: `/daily-plan?date=${encodeURIComponent(date)}`,
+        label: '审阅外发上下文',
+        icon: Settings2,
+      };
     case 'PENDING_REVIEW':
       return {
         detail: `有 ${pendingItemCount} 项建议等待你的审核，尚未写入日程。`,

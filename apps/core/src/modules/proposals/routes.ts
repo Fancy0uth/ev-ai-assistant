@@ -23,29 +23,32 @@ export async function registerProposalRoutes(
   const authGuard = createAuthGuard(options.authService);
 
   app.get('/v1/proposals', { preHandler: authGuard }, async (request) => {
+    const ownerId = authenticatedOwnerId(request);
     parseRequestInput(proposalListQuerySchema, request.query, '提案查询参数不符合要求');
-    const proposals = options.proposalService.listPending(authenticatedOwnerId(request));
+    const proposals = options.proposalService.listPending(ownerId);
     return proposalListResponseSchema.parse({ data: proposals });
   });
 
   app.get('/v1/proposals/:id', { preHandler: authGuard }, async (request) => {
+    const ownerId = authenticatedOwnerId(request);
     const { id } = parseRequestInput(
       proposalPathParamsSchema,
       request.params,
       '提案路径参数不符合要求',
     );
-    const proposal = options.proposalService.findById(authenticatedOwnerId(request), id);
+    const proposal = options.proposalService.findById(ownerId, id);
     return proposalResponseSchema.parse({ data: proposal });
   });
 
   app.post('/v1/proposals/:id/decision', { preHandler: authGuard }, async (request) => {
+    const ownerId = authenticatedOwnerId(request);
     const { id } = parseRequestInput(
       proposalPathParamsSchema,
       request.params,
       '提案路径参数不符合要求',
     );
     const input = parseRequestInput(proposalDecisionSchema, request.body, '提案决定不符合要求');
-    const proposal = options.proposalService.decide(authenticatedOwnerId(request), id, input);
+    const proposal = options.proposalService.decide(ownerId, id, input);
     return proposalResponseSchema.parse({ data: proposal });
   });
 }

@@ -120,6 +120,29 @@ export const eventSchema = z
     }
   });
 
+export const createEventProposalInputSchema = z
+  .object({
+    title: nonBlankTitleSchema.transform((value) => value.trim()),
+    kind: eventKindSchema,
+    localDate: z.iso.date(),
+    startLocalTime: localTimeSchema,
+    endLocalTime: localTimeSchema,
+    isHard: z.boolean(),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    if (event.endLocalTime <= event.startLocalTime) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endLocalTime'],
+        message: '结束时间必须晚于开始时间',
+      });
+    }
+  });
+
+export const eventPathParamsSchema = z.object({ id: z.uuid() }).strict();
+export const eventResponseSchema = z.object({ data: eventSchema }).strict();
+
 export const actionSchema = z
   .object({
     id: z.uuid(),
@@ -241,6 +264,7 @@ export type CalendarRule = z.infer<typeof calendarRuleSchema>;
 export type EventKind = z.infer<typeof eventKindSchema>;
 export type EventStatus = z.infer<typeof eventStatusSchema>;
 export type Event = z.infer<typeof eventSchema>;
+export type CreateEventProposalInput = z.input<typeof createEventProposalInputSchema>;
 export type ActionKind = z.infer<typeof actionKindSchema>;
 export type ActionStatus = z.infer<typeof actionStatusSchema>;
 export type Action = z.infer<typeof actionSchema>;

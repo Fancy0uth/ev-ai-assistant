@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { todaySnapshotSchema } from '@ev/contracts';
+import { dailyPlanPreflightResponseSchema, todaySnapshotSchema } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
 import type { DailyPlanningProvider } from '../src/modules/daily-planning/provider';
 import type { SecretStorePort } from '../src/modules/providers/secret-store';
@@ -19,6 +19,7 @@ const testApiKey = 'test-only-today-daily-plan-api-key';
 
 class InMemorySecretStore implements SecretStorePort {
   private readonly values = new Map<string, string>();
+  unprotectCalls = 0;
 
   async protect(plaintext: string): Promise<string> {
     const protectedValue = `today-snapshot-credential-${this.values.size + 1}`;
@@ -27,6 +28,7 @@ class InMemorySecretStore implements SecretStorePort {
   }
 
   async unprotect(protectedValue: string): Promise<string> {
+    this.unprotectCalls += 1;
     const value = this.values.get(protectedValue);
     if (!value) throw new Error('credential missing');
     return value;
@@ -50,12 +52,41 @@ function readSessionToken(setCookieHeader: string | string[] | undefined): strin
   return match[1];
 }
 
-function deferred<T>() {
-  let resolve: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve;
+async function generateApprovedPlan(app: FastifyInstance, token: string, localDate: string) {
+  const prepared = await app.inject({
+    method: 'POST',
+    url: '/v1/daily-plans/preflights',
+    cookies: { ev_session: token },
+    payload: { localDate },
   });
-  return { promise, resolve: (value: T) => resolve(value) };
+  expect(prepared.statusCode).toBe(201);
+  const preflight = dailyPlanPreflightResponseSchema.parse(prepared.json()).data;
+  const approved = await app.inject({
+    method: 'POST',
+    url: `/v1/daily-plans/preflights/${preflight.id}/approve`,
+    cookies: { ev_session: token },
+    payload: {
+      expectedPreflightVersion: preflight.version,
+      items: preflight.items.map((item) => ({
+        contextRef: item.contextRef,
+        safeTitle: item.safeTitle,
+        domain: item.domain,
+        deadlineLocalDate: item.deadlineLocalDate,
+        included: item.included,
+      })),
+    },
+  });
+  expect(approved.statusCode).toBe(200);
+  const approvedPreflight = dailyPlanPreflightResponseSchema.parse(approved.json()).data;
+  return app.inject({
+    method: 'POST',
+    url: '/v1/daily-plans/generate',
+    cookies: { ev_session: token },
+    payload: {
+      preflightId: approvedPreflight.id,
+      expectedPreflightVersion: approvedPreflight.version,
+    },
+  });
 }
 
 describe('Today snapshot API', () => {
@@ -191,12 +222,7 @@ describe('Today snapshot API', () => {
     });
     expect(credential.statusCode).toBe(200);
 
-    const generated = await app.inject({
-      method: 'POST',
-      url: '/v1/daily-plans/generate',
-      cookies: { ev_session: token },
-      payload: { localDate: date },
-    });
+    const generated = await generateApprovedPlan(app, token, date);
     expect(generated.statusCode).toBe(201);
 
     const response = await app.inject({
@@ -213,59 +239,91 @@ describe('Today snapshot API', () => {
     });
   });
 
-  it('starts one post-07:00 local recovery run for today and reports its real lifecycle state', async () => {
+  it('prepares one post-07:00 local recovery run without calling the Provider or SecretStore', async () => {
     const date = '2026-08-18';
-    const generation = deferred<unknown>();
+    testDirectory = mkdtempSync(join(tmpdir(), 'ev-today-automation-'));
+    const databasePath = join(testDirectory, 'app.sqlite');
+    let providerCalls = 0;
     const provider: DailyPlanningProvider = {
-      generate: vi.fn(async () => generation.promise),
+      async generate() {
+        providerCalls += 1;
+        return planningProvider.generate('', {
+          localDate: date,
+          fixedBlocks: [],
+          softBlocks: [],
+          timeRequests: [],
+          recoveryLevel: 'NONE',
+        });
+      },
     };
+    const secretStore = new InMemorySecretStore();
     app = await buildApp({
+      databasePath,
       logger: false,
-      secretStore: new InMemorySecretStore(),
+      secretStore,
       dailyPlanningProvider: provider,
       enableDailyPlanAutomation: true,
       dailyPlanAutomationNow: () => new Date('2026-08-17T23:05:00.000Z'),
     });
     const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
     const token = readSessionToken(setup.headers['set-cookie']);
+    const ownerId = setup.json().data.owner.id;
     await app.inject({
       method: 'PUT',
       url: '/v1/providers/deepseek/credential',
       cookies: { ev_session: token },
       payload: { apiKey: testApiKey },
     });
+    const unprotectCallsBeforeAutomation = secretStore.unprotectCalls;
 
-    const generating = await app.inject({
+    const awaiting = await app.inject({
       method: 'GET',
       url: `/v1/today?date=${date}`,
       cookies: { ev_session: token },
     });
-    expect(generating.statusCode).toBe(200);
-    expect(todaySnapshotSchema.parse(generating.json()).data.dailyPlan).toEqual({
-      status: 'GENERATING',
+    expect(awaiting.statusCode).toBe(200);
+    expect(todaySnapshotSchema.parse(awaiting.json()).data.dailyPlan).toEqual({
+      status: 'AWAITING_CONTEXT_APPROVAL',
       proposalId: null,
       pendingItemCount: 0,
     });
-    expect(provider.generate).toHaveBeenCalledTimes(1);
+    const repeated = await app.inject({
+      method: 'GET',
+      url: `/v1/today?date=${date}`,
+      cookies: { ev_session: token },
+    });
+    expect(repeated.statusCode).toBe(200);
+    expect(todaySnapshotSchema.parse(repeated.json()).data.dailyPlan.status).toBe(
+      'AWAITING_CONTEXT_APPROVAL',
+    );
+    expect(providerCalls).toBe(0);
+    expect(secretStore.unprotectCalls).toBe(unprotectCallsBeforeAutomation);
 
-    generation.resolve({
-      schemaVersion: 'DAILY_PLAN_MODEL_V1',
-      summary: '自动生成的计划仍等待审核。',
-      actions: [],
-    });
-    await generation.promise;
-    await vi.waitFor(async () => {
-      const completed = await app!.inject({
-        method: 'GET',
-        url: `/v1/today?date=${date}`,
-        cookies: { ev_session: token },
-      });
-      expect(todaySnapshotSchema.parse(completed.json()).data.dailyPlan).toMatchObject({
-        status: 'PENDING_REVIEW',
-        pendingItemCount: 0,
-      });
-    });
-    expect(provider.generate).toHaveBeenCalledTimes(1);
+    const database = openDatabase(databasePath);
+    try {
+      expect(
+        Number(
+          database
+            .prepare('select count(*) from daily_plan_runs where owner_id = ? and local_date = ?')
+            .pluck()
+            .get(ownerId, date),
+        ),
+      ).toBe(1);
+      expect(
+        Number(
+          database
+            .prepare(
+              `select count(*) from daily_plan_preflights
+               join daily_plan_runs on daily_plan_runs.id = daily_plan_preflights.run_id
+               where daily_plan_runs.owner_id = ? and daily_plan_runs.local_date = ?`,
+            )
+            .pluck()
+            .get(ownerId, date),
+        ),
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
   });
 
   it('calculates Today from every task for the signed-in owner and date', async () => {

@@ -189,6 +189,30 @@ describe('TodayDashboard', () => {
     );
   });
 
+  it('explains that external context awaits approval without claiming Provider generation ran', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      data: {
+        ...emptySnapshot.data,
+        dailyPlan: {
+          status: 'AWAITING_CONTEXT_APPROVAL',
+          proposalId: null,
+          pendingItemCount: 0,
+        },
+      },
+    })));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(
+      await screen.findByText('外发上下文等待你审阅/批准，尚未调用 Provider。'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('系统正在准备今日计划。生成完成后会显示为待审核草案。')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '审阅外发上下文' })).toHaveAttribute(
+      'href',
+      '/daily-plan?date=2026-08-07',
+    );
+  });
+
   it('links each daily domain to its dedicated workspace instead of a generic todo flow', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(emptySnapshot)));
 

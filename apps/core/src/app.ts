@@ -95,6 +95,9 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   );
   const taskRepository = createTaskRepository(database);
   const calendarRepository = createCalendarRepository(database);
+  const proposalRepository = createProposalRepository(database);
+  const proposalService = createProposalService(proposalRepository, calendarRepository);
+  const calendarService = createCalendarService(calendarRepository, proposalService);
   const taskService = createTaskService(taskRepository, {
     schedulingUnitOfWork: createTaskSchedulingUnitOfWork(database, {
       taskRepository,
@@ -103,13 +106,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       now: () => new Date(),
     }),
   });
-  const calendarService = createCalendarService(calendarRepository);
   const fitnessService = createFitnessService(calendarRepository);
   const learningService = createLearningService(database, calendarRepository);
-  const proposalService = createProposalService(
-    createProposalRepository(database),
-    calendarRepository,
-  );
   const dayPlanningService = createDayPlanningService(
     calendarRepository,
     taskService,
@@ -118,7 +116,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const courseImportService = createCourseImportService(
     database,
     calendarRepository,
-    createProposalRepository(database),
+    proposalRepository,
     options.courseScheduleVisionProvider
       ? { provider: options.courseScheduleVisionProvider }
       : {},
@@ -155,17 +153,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     newId: () => crypto.randomUUID(),
   });
   const dailyPlanAutomationService = createDailyPlanAutomationService({
-    dailyPlanningService,
+    dailyPlanPreflightService,
     dailyPlanRunRepository: dailyPlanRepository,
-    providerCredentialService,
     findOwnerId: () => authRepository.findOwnerId(),
     ...(options.dailyPlanAutomationNow ? { now: options.dailyPlanAutomationNow } : {}),
     onEvent(event) {
-      if (event.event === 'daily_plan_automation_failed') {
-        app.log.warn(event, 'daily plan automation failed');
-        return;
-      }
-      app.log.info(event, 'daily plan automation updated');
+      app.log.warn(event, 'daily plan automation failed');
     },
   });
   const nutritionService = createNutritionService(database);
@@ -202,6 +195,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerDailyPlanningRoutes(app, {
     authService,
     dailyPlanningService,
+    dailyPlanPreflightService,
     dailyPlanReviewService,
   });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });

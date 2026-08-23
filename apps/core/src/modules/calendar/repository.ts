@@ -151,6 +151,7 @@ export interface CalendarRepository {
   listTerms(ownerId: string): Term[];
   createRule(rule: NewCalendarRule): CalendarRule;
   createEvent(event: NewEvent): Event;
+  findEvent(ownerId: string, eventId: string): Event | undefined;
   listEventsForDate(ownerId: string, localDate: string): Event[];
   createTimeRequest(request: NewTimeRequest): NormalizedTimeRequest;
   listTimeRequestsForDate(ownerId: string, localDate: string): NormalizedTimeRequest[];
@@ -304,6 +305,9 @@ export function createCalendarRepository(database: Database.Database): CalendarR
   const findTimeRequest = database.prepare(
     `select ${timeRequestColumns} from time_requests where id = ? and owner_id = ?`,
   );
+  const findEvent = database.prepare(
+    `select ${eventColumns} from events where owner_id = ? and id = ?`,
+  );
   const insertTimeRequest = database.prepare(
     `insert into time_requests (
        id, owner_id, source, title, target_date, duration_minutes, priority,
@@ -430,6 +434,11 @@ export function createCalendarRepository(database: Database.Database): CalendarR
         .prepare(`select ${eventColumns} from events where id = ? and owner_id = ?`)
         .get(event.id, event.ownerId) as EventRow;
       return toEvent(row);
+    },
+
+    findEvent(ownerId, eventId) {
+      const row = findEvent.get(ownerId, eventId) as EventRow | undefined;
+      return row ? toEvent(row) : undefined;
     },
 
     listEventsForDate(ownerId, localDate) {

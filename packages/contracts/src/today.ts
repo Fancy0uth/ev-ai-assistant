@@ -51,7 +51,13 @@ export const dayViewResponseSchema = z.object({ data: dayViewSchema }).strict();
 
 const dailyPlanWithoutProposalSchema = z
   .object({
-    status: z.enum(['NOT_CONFIGURED', 'READY_TO_GENERATE', 'GENERATING', 'FAILED']),
+    status: z.enum([
+      'NOT_CONFIGURED',
+      'READY_TO_GENERATE',
+      'AWAITING_CONTEXT_APPROVAL',
+      'GENERATING',
+      'FAILED',
+    ]),
     proposalId: z.null(),
     pendingItemCount: z.literal(0),
   })

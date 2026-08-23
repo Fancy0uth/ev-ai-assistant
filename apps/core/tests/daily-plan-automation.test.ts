@@ -1,40 +1,43 @@
+import type { DailyPlanPreflight } from '@ev/contracts';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  createDailyPlanAutomationService,
-  type DailyPlanAutomationGenerationPort,
-} from '../src/modules/daily-planning/automation-service';
+import { createDailyPlanAutomationService } from '../src/modules/daily-planning/automation-service';
 
 const ownerId = '00000000-0000-4000-8000-000000000801';
 
-function deferred<T>() {
-  let resolve: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve;
-  });
-  return { promise, resolve: (value: T) => resolve(value) };
-}
-
 function createService(options: {
   now: () => Date;
-  credentialState?: 'CONFIGURED' | 'NOT_CONFIGURED';
   existingRun?: { status: string };
-  generate?: DailyPlanAutomationGenerationPort['generateDailyPlan'];
   findOwnerId?: () => string | undefined;
+  prepareError?: Error;
   onEvent?: (event: { event: string; trigger: string; failureCode?: string }) => void;
 }) {
   const timers: Array<{ delay: number; callback: () => void }> = [];
-  const generated: Array<{ ownerId: string; localDate: string; trigger: string }> = [];
-  const generate = options.generate ?? vi.fn(async (input) => {
-    generated.push(input);
-    return {};
+  const prepared: Array<{ ownerId: string; localDate: string; trigger: string }> = [];
+  let latestRun = options.existingRun;
+  const prepare = vi.fn((nextOwnerId: string, localDate: string, trigger: string): DailyPlanPreflight => {
+    prepared.push({ ownerId: nextOwnerId, localDate, trigger });
+    if (options.prepareError) throw options.prepareError;
+    latestRun = { status: 'CONTEXT_READY' };
+    return {
+      id: '00000000-0000-4000-8000-000000000802',
+      runId: '00000000-0000-4000-8000-000000000803',
+      contractVersion: 'DAILY_PLAN_PREFLIGHT_V1',
+      localDate,
+      status: 'AWAITING_APPROVAL',
+      baseScheduleVersion: 1,
+      items: [],
+      version: 1,
+      createdAt: '2026-08-18T00:00:00.000Z',
+      updatedAt: '2026-08-18T00:00:00.000Z',
+      approvedAt: null,
+      claimedAt: null,
+      consumedAt: null,
+    };
   });
   const service = createDailyPlanAutomationService({
-    dailyPlanningService: { generateDailyPlan: generate },
+    dailyPlanPreflightService: { prepare },
     dailyPlanRunRepository: {
-      findLatestRunForDate: () => options.existingRun,
-    },
-    providerCredentialService: {
-      getMetadata: () => ({ state: options.credentialState ?? 'CONFIGURED' }),
+      findLatestRunForDate: () => latestRun,
     },
     findOwnerId: options.findOwnerId ?? (() => ownerId),
     now: options.now,
@@ -45,97 +48,90 @@ function createService(options: {
     cancel: () => undefined,
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
   });
-  return { service, timers, generated, generate };
+  return { service, timers, prepared, prepare };
 }
 
 describe('daily plan automation service', () => {
-  it('starts one first-visit recovery run only after 07:00 Shanghai time', async () => {
+  it('prepares once after 07:00 for first visit and lets every later trigger observe the existing run', () => {
     let current = new Date('2026-08-17T22:59:00.000Z');
-    const generated = deferred<unknown>();
-    const generatedInputs: Array<{ ownerId: string; localDate: string; trigger: string }> = [];
-    const harness = createService({
-      now: () => current,
-      generate: async (input) => {
-        generatedInputs.push(input);
-        return generated.promise;
-      },
-    });
+    const harness = createService({ now: () => current });
 
     expect(harness.service.ensureForFirstVisit(ownerId, '2026-08-18')).toBe('NOT_DUE');
-    expect(generatedInputs).toEqual([]);
+    expect(harness.prepared).toEqual([]);
 
     current = new Date('2026-08-17T23:00:00.000Z');
-    expect(harness.service.ensureForFirstVisit(ownerId, '2026-08-18')).toBe('STARTED');
-    expect(harness.service.ensureForFirstVisit(ownerId, '2026-08-18')).toBe('IN_FLIGHT');
-    expect(generatedInputs).toEqual([
+    expect(harness.service.ensureForFirstVisit(ownerId, '2026-08-18')).toBe(
+      'AWAITING_CONTEXT_APPROVAL',
+    );
+    expect(harness.service.ensureForFirstVisit(ownerId, '2026-08-18')).toBe('EXISTING_RUN');
+    expect(harness.service.runScheduled()).toBe('EXISTING_RUN');
+    expect(harness.prepared).toEqual([
       {
         ownerId,
         localDate: '2026-08-18',
         trigger: 'FIRST_VISIT_RECOVERY',
       },
     ]);
-    expect(harness.service.isGenerating(ownerId, '2026-08-18')).toBe(true);
-
-    generated.resolve({});
-    await generated.promise;
-    await vi.waitFor(() => {
-      expect(harness.service.isGenerating(ownerId, '2026-08-18')).toBe(false);
-    });
   });
 
-  it('uses one exact next-07:00 timer and skips unconfigured or already-run dates', () => {
-    const beforeSeven = createService({
-      now: () => new Date('2026-08-17T22:59:00.000Z'),
-      credentialState: 'NOT_CONFIGURED',
-    });
-    beforeSeven.service.scheduleNextRun();
-    expect(beforeSeven.timers).toHaveLength(1);
-    expect(beforeSeven.timers[0]!.delay).toBe(60_000);
+  it('uses scheduled preparation first when it wins the same-day race', () => {
+    const harness = createService({ now: () => new Date('2026-08-17T23:05:00.000Z') });
 
-    expect(beforeSeven.service.runScheduled()).toBe('NOT_DUE');
-    expect(beforeSeven.generated).toEqual([]);
-
-    const unconfiguredAfterSeven = createService({
-      now: () => new Date('2026-08-17T23:05:00.000Z'),
-      credentialState: 'NOT_CONFIGURED',
-    });
-    expect(unconfiguredAfterSeven.service.runScheduled()).toBe('NOT_CONFIGURED');
-    expect(unconfiguredAfterSeven.generated).toEqual([]);
-
-    const existing = createService({
-      now: () => new Date('2026-08-17T23:05:00.000Z'),
-      existingRun: { status: 'SUCCEEDED' },
-    });
-    expect(existing.service.runScheduled()).toBe('EXISTING_RUN');
-    expect(existing.generated).toEqual([]);
-
-    const scheduled = createService({
-      now: () => new Date('2026-08-17T23:05:00.000Z'),
-    });
-    expect(scheduled.service.runScheduled()).toBe('STARTED');
-    expect(scheduled.generated).toEqual([
-      { ownerId, localDate: '2026-08-18', trigger: 'SCHEDULED_0700' },
+    expect(harness.service.runScheduled()).toBe('AWAITING_CONTEXT_APPROVAL');
+    expect(harness.service.ensureForFirstVisit(ownerId, '2026-08-18')).toBe('EXISTING_RUN');
+    expect(harness.prepared).toEqual([
+      {
+        ownerId,
+        localDate: '2026-08-18',
+        trigger: 'SCHEDULED_0700',
+      },
     ]);
   });
 
-  it('emits only a classified failure code, never an arbitrary provider error message', async () => {
+  it('does no preparation before 07:00, for another date, without an owner, or after a run exists', () => {
+    const beforeSeven = createService({ now: () => new Date('2026-08-17T22:59:00.000Z') });
+    beforeSeven.service.scheduleNextRun();
+    expect(beforeSeven.timers).toHaveLength(1);
+    expect(beforeSeven.timers[0]?.delay).toBe(60_000);
+    expect(beforeSeven.service.runScheduled()).toBe('NOT_DUE');
+    expect(beforeSeven.service.ensureForFirstVisit(ownerId, '2026-08-19')).toBe('NOT_DUE');
+    expect(beforeSeven.prepared).toEqual([]);
+
+    const noOwner = createService({
+      now: () => new Date('2026-08-17T23:05:00.000Z'),
+      findOwnerId: () => undefined,
+    });
+    expect(noOwner.service.runScheduled()).toBe('NOT_DUE');
+    expect(noOwner.prepared).toEqual([]);
+
+    const existing = createService({
+      now: () => new Date('2026-08-17T23:05:00.000Z'),
+      existingRun: { status: 'CONTEXT_READY' },
+    });
+    expect(existing.service.runScheduled()).toBe('EXISTING_RUN');
+    expect(existing.prepared).toEqual([]);
+  });
+
+  it('reports only the allowlisted preparation failure and schedules the following run', () => {
     const events: Array<{ event: string; trigger: string; failureCode?: string }> = [];
     const harness = createService({
       now: () => new Date('2026-08-17T23:05:00.000Z'),
-      generate: async () => {
-        throw new Error('provider response included test-secret-value');
-      },
+      prepareError: new Error('provider response included test-secret-value'),
       onEvent: (event) => events.push(event),
     });
 
-    expect(harness.service.runScheduled()).toBe('STARTED');
-    await vi.waitFor(() => {
-      expect(events).toContainEqual({
+    harness.service.scheduleNextRun();
+    expect(harness.service.runScheduled()).toBe('PREPARATION_FAILED');
+    expect(events).toEqual([
+      {
         event: 'daily_plan_automation_failed',
         trigger: 'SCHEDULED_0700',
-        failureCode: 'DAILY_PLAN_PROVIDER_UNAVAILABLE',
-      });
-    });
+        failureCode: 'DAILY_PLAN_CONTEXT_INVALID',
+      },
+    ]);
     expect(JSON.stringify(events)).not.toContain('test-secret-value');
+
+    harness.timers[0]?.callback();
+    expect(harness.timers).toHaveLength(2);
   });
 });

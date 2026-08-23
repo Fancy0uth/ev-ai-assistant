@@ -344,4 +344,84 @@ describe('v0.4 scheduling contracts', () => {
       expect(contracts.dailyPlanPreflightSchema.safeParse(invalidPreflight).success).toBe(false);
     }
   });
+
+  it('defines strict safe Event Proposal input and Event HTTP schemas', () => {
+    const eventProposal = {
+      title: '  Team review  ',
+      kind: 'MEETING',
+      localDate: '2026-08-24',
+      startLocalTime: '14:00',
+      endLocalTime: '15:00',
+      isHard: true,
+    };
+    const event = {
+      id,
+      calendarRuleId: null,
+      title: 'Team review',
+      kind: 'MEETING' as const,
+      localDate: '2026-08-24',
+      startLocalTime: '14:00',
+      endLocalTime: '15:00',
+      isHard: true,
+      status: 'CONFIRMED' as const,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    expect(contracts.createEventProposalInputSchema.parse(eventProposal)).toEqual({
+      ...eventProposal,
+      title: 'Team review',
+    });
+    expect(contracts.eventPathParamsSchema.parse({ id })).toEqual({ id });
+    expect(contracts.eventResponseSchema.parse({ data: event })).toEqual({ data: event });
+
+    for (const invalidInput of [
+      { ...eventProposal, endLocalTime: '14:00' },
+      { ...eventProposal, endLocalTime: '13:59' },
+      { ...eventProposal, ownerId: id },
+      { ...eventProposal, source: 'DAILY_SCHEDULER' },
+      { ...eventProposal, provider: 'deepseek' },
+      { ...eventProposal, id },
+      { ...eventProposal, calendarRuleId: id },
+      { ...eventProposal, status: 'CONFIRMED' },
+      { ...eventProposal, version: 1 },
+      { ...eventProposal, createdAt: now },
+      { ...eventProposal, updatedAt: now },
+      { ...eventProposal, expiresAt: now },
+      { ...eventProposal, kind: 'SCHEDULE' },
+      { ...eventProposal, changes: [] },
+      { ...eventProposal, event },
+    ]) {
+      expect(contracts.createEventProposalInputSchema.safeParse(invalidInput).success).toBe(false);
+    }
+
+    expect(contracts.eventPathParamsSchema.safeParse({ id, ownerId: id }).success).toBe(false);
+    expect(contracts.eventResponseSchema.safeParse({ data: { ...event, ownerId: id } }).success).toBe(false);
+  });
+
+  it('exposes awaiting context approval as a no-proposal Today state', () => {
+    expect(
+      contracts.todayDailyPlanSummarySchema.safeParse({
+        status: 'AWAITING_CONTEXT_APPROVAL',
+        proposalId: null,
+        pendingItemCount: 0,
+      }).success,
+    ).toBe(true);
+
+    for (const invalidSummary of [
+      {
+        status: 'AWAITING_CONTEXT_APPROVAL',
+        proposalId: id,
+        pendingItemCount: 0,
+      },
+      {
+        status: 'AWAITING_CONTEXT_APPROVAL',
+        proposalId: null,
+        pendingItemCount: 1,
+      },
+    ]) {
+      expect(contracts.todayDailyPlanSummarySchema.safeParse(invalidSummary).success).toBe(false);
+    }
+  });
 });

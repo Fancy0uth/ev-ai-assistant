@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import {
   apiErrorSchema,
+  dailyPlanPreflightResponseSchema,
   dailyPlanProposalResponseSchema,
   dailyPlanReviewExplanationResponseSchema,
   dailyPlanReviewListResponseSchema,
@@ -142,11 +143,39 @@ describe('daily plan review routes', () => {
       payload: { apiKey: testApiKey },
     });
     expect(credential.statusCode).toBe(200);
+    const prepared = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/preflights',
+      cookies: { ev_session: token },
+      payload: { localDate },
+    });
+    expect(prepared.statusCode).toBe(201);
+    const preflight = dailyPlanPreflightResponseSchema.parse(prepared.json()).data;
+    const approved = await app!.inject({
+      method: 'POST',
+      url: `/v1/daily-plans/preflights/${preflight.id}/approve`,
+      cookies: { ev_session: token },
+      payload: {
+        expectedPreflightVersion: preflight.version,
+        items: preflight.items.map((item) => ({
+          contextRef: item.contextRef,
+          safeTitle: item.safeTitle,
+          domain: item.domain,
+          deadlineLocalDate: item.deadlineLocalDate,
+          included: item.included,
+        })),
+      },
+    });
+    expect(approved.statusCode).toBe(200);
+    const approvedPreflight = dailyPlanPreflightResponseSchema.parse(approved.json()).data;
     const response = await app!.inject({
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: {
+        preflightId: approvedPreflight.id,
+        expectedPreflightVersion: approvedPreflight.version,
+      },
     });
     expect(response.statusCode).toBe(201);
     return dailyPlanProposalResponseSchema.parse(response.json()).data;

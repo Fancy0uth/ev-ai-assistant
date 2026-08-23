@@ -3,7 +3,6 @@ import {
   dailyPlanProposalSchema,
   type DailyPlanFailureCode,
   type DailyPlanProposal,
-  type DailyPlanTrigger,
 } from '@ev/contracts';
 import { CredentialNotConfiguredError } from '../providers/credential-service';
 import type {
@@ -36,25 +35,11 @@ export interface DailyPlanningServiceDependencies {
 }
 
 export interface DailyPlanningService {
-  generateDailyPlan(input: {
-    ownerId: string;
-    localDate: string;
-    trigger: DailyPlanTrigger;
-  }): Promise<DailyPlanProposal>;
   generateApprovedPreflight(input: {
     ownerId: string;
     preflightId: string;
     expectedPreflightVersion: number;
   }): Promise<DailyPlanProposal>;
-}
-
-export class DailyPlanPreflightRequiredError extends Error {
-  readonly code = 'DAILY_PLAN_PREFLIGHT_REQUIRED';
-
-  constructor() {
-    super('DAILY_PLAN_PREFLIGHT_REQUIRED');
-    this.name = 'DailyPlanPreflightRequiredError';
-  }
 }
 
 export class DailyPlanGenerationError extends Error {
@@ -119,11 +104,6 @@ export function createDailyPlanningService(
   const now = dependencies.now ?? (() => new Date());
 
   return {
-    async generateDailyPlan(_input) {
-      void _input;
-      throw new DailyPlanPreflightRequiredError();
-    },
-
     async generateApprovedPreflight(input) {
       const claimed = dependencies.preflightService.claimApproved(
         input.ownerId,
