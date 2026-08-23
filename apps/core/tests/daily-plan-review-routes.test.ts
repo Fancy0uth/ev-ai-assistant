@@ -172,6 +172,7 @@ describe('daily plan review routes', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-review-create-proposal' },
       payload: {
         preflightId: approvedPreflight.id,
         expectedPreflightVersion: approvedPreflight.version,
@@ -283,10 +284,23 @@ describe('daily plan review routes', () => {
     expect(read.statusCode).toBe(200);
     expect(dailyPlanReviewResponseSchema.parse(read.json()).data.proposal.id).toBe(proposal.id);
 
+    const missingKey = await app!.inject({
+      method: 'POST',
+      url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
+      cookies: { ev_session: token },
+      payload: {
+        expectedProposalVersion: proposal.version,
+        decisions: [{ itemId: proposal.items[0]!.id, decision: 'APPLY' }],
+      },
+    });
+    expect(missingKey.statusCode).toBe(400);
+    expect(apiErrorSchema.parse(missingKey.json()).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+
     const decision = await app!.inject({
       method: 'POST',
       url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-review-apply-decision-01' },
       payload: {
         expectedProposalVersion: proposal.version,
         decisions: [{ itemId: proposal.items[0]!.id, decision: 'APPLY' }],
@@ -309,6 +323,22 @@ describe('daily plan review routes', () => {
         reason: null,
       }),
     );
+    const replay = await app!.inject({
+      method: 'POST',
+      url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-review-apply-decision-01' },
+      payload: {
+        expectedProposalVersion: proposal.version,
+        decisions: [{ itemId: proposal.items[0]!.id, decision: 'APPLY' }],
+      },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(replay.json()).toEqual(decision.json());
+    expect(
+      controlDatabase!.prepare("select count(*) as count from events where owner_id = ? and status = 'CONFIRMED'").get(ownerId),
+    ).toEqual({ count: 1 });
   });
 
   it('does not disclose another owner\'s proposal', async () => {
@@ -322,6 +352,7 @@ describe('daily plan review routes', () => {
       {
         method: 'POST' as const,
         url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
+        headers: { 'idempotency-key': 'v05-review-owner-isolation-01' },
         payload: {
           expectedProposalVersion: proposal.version,
           decisions: [{ itemId: proposal.items[0]!.id, decision: 'APPLY' }],
@@ -420,6 +451,7 @@ describe('daily plan review routes', () => {
       method: 'POST',
       url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-review-invalid-time-00001' },
       payload: {
         expectedProposalVersion: proposal.version,
         decisions: [
@@ -450,6 +482,7 @@ describe('daily plan review routes', () => {
       method: 'POST',
       url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-review-version-conflict-1' },
       payload: {
         expectedProposalVersion: proposal.version + 1,
         decisions: [{ itemId: proposal.items[0]!.id, decision: 'APPLY' }],
@@ -472,6 +505,7 @@ describe('daily plan review routes', () => {
       method: 'POST',
       url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-review-stale-schedule-01' },
       payload: {
         expectedProposalVersion: proposal.version,
         decisions: [{ itemId: proposal.items[0]!.id, decision: 'APPLY' }],

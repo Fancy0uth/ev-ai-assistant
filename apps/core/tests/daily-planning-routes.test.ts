@@ -263,6 +263,7 @@ describe('daily planning generation route', () => {
         method: 'POST',
         url: '/v1/daily-plans/generate',
         cookies: { ev_session: token },
+        headers: { 'idempotency-key': 'v05-route-validation-key-01' },
         payload,
       });
 
@@ -270,6 +271,62 @@ describe('daily planning generation route', () => {
       expect(apiErrorSchema.parse(response.json()).error.code).toBe('VALIDATION_ERROR');
       expectSafeResponse(response.body);
     }
+  });
+
+  it('requires a valid key, replays a completed generation, and rejects semantic key reuse', async () => {
+    const { token, ownerId } = await createAuthenticatedApp();
+    createTimeRequest(ownerId, ownerTimeRequestId, 'idempotency replay request');
+    await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
+
+    const missing = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      payload: generationInput,
+    });
+    expect(missing.statusCode).toBe(400);
+    expect(apiErrorSchema.parse(missing.json()).error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+
+    const invalid = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'short' },
+      payload: generationInput,
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(apiErrorSchema.parse(invalid.json()).error.code).toBe('IDEMPOTENCY_KEY_INVALID');
+
+    const first = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-replay-generation' },
+      payload: generationInput,
+    });
+    expect(first.statusCode).toBe(201);
+    const replay = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-replay-generation' },
+      payload: generationInput,
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(replay.json()).toEqual(first.json());
+    expect(provider.inputs).toHaveLength(1);
+
+    const conflict = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-replay-generation' },
+      payload: { ...generationInput, expectedPreflightVersion: generationInput.expectedPreflightVersion + 1 },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(apiErrorSchema.parse(conflict.json()).error.code).toBe('IDEMPOTENCY_CONFLICT');
   });
 
   it('maps a missing credential to a safe provider-not-configured conflict', async () => {
@@ -280,6 +337,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-missing-credential' },
       payload: generationInput,
     });
 
@@ -300,6 +358,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-provider-unavailable' },
       payload: generationInput,
     });
 
@@ -318,6 +377,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-model-invalid-0001' },
       payload: generationInput,
     });
 
@@ -347,6 +407,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-validation-failure' },
       payload: generationInput,
     });
 
@@ -382,6 +443,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-stale-base-version' },
       payload: generationInput,
     });
 
@@ -400,6 +462,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-route-successful-proposal' },
       payload: generationInput,
     });
 

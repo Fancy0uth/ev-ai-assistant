@@ -1,4 +1,5 @@
 import {
+  apiErrorSchema,
   dailyPlanDecisionBatchInputSchema,
   dailyPlanPreflightApproveInputSchema,
   dailyPlanPreflightGenerateInputSchema,
@@ -11,8 +12,9 @@ import {
   dailyPlanReviewListResponseSchema,
   dailyPlanReviewResponseSchema,
   dailyPlanReviewSchema,
+  idempotencyKeySchema,
 } from '@ev/contracts';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import * as z from 'zod';
 import { ApiError } from '../http/api-error';
 import { parseRequestInput } from '../http/validation';
@@ -36,12 +38,18 @@ import {
   type DailyPlanPreflightService,
 } from '../modules/daily-planning/preflight-service';
 import { DailyPlanValidationError } from '../modules/daily-planning/validator';
+import {
+  IdempotencyConflictError,
+  type IdempotencyClaim,
+  type IdempotencyService,
+} from '../modules/providers/idempotency-service';
 
 interface DailyPlanningRouteOptions {
   authService: AuthService;
   dailyPlanningService: DailyPlanningService;
   dailyPlanPreflightService: Pick<DailyPlanPreflightService, 'prepare' | 'approve'>;
   dailyPlanReviewService: DailyPlanReviewService;
+  idempotencyService: IdempotencyService;
 }
 
 const dailyPlanProposalPathParamsSchema = z
@@ -106,6 +114,54 @@ function rethrowReviewError(error: unknown): never {
   throw error;
 }
 
+function idempotencyKey(request: FastifyRequest): string {
+  const value = request.headers['idempotency-key'];
+  if (value === undefined) {
+    throw new ApiError(400, 'IDEMPOTENCY_KEY_REQUIRED', '高影响操作需要 Idempotency-Key');
+  }
+  if (typeof value !== 'string') {
+    throw new ApiError(400, 'IDEMPOTENCY_KEY_INVALID', 'Idempotency-Key 格式无效');
+  }
+  const parsed = idempotencyKeySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiError(400, 'IDEMPOTENCY_KEY_INVALID', 'Idempotency-Key 格式无效');
+  }
+  return parsed.data;
+}
+
+function apiErrorBody(error: ApiError): unknown {
+  return apiErrorSchema.parse({
+    error: {
+      code: error.code,
+      message: error.message,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    },
+  });
+}
+
+function sendIdempotencyClaim(reply: FastifyReply, claim: Exclude<IdempotencyClaim, { kind: 'CLAIMED' }>) {
+  switch (claim.kind) {
+    case 'REPLAY':
+      return reply.header('Idempotency-Replayed', 'true').status(claim.status).send(claim.body);
+    case 'IN_PROGRESS':
+      return reply
+        .header('Retry-After', '1')
+        .status(409)
+        .send(apiErrorSchema.parse({ error: { code: 'IDEMPOTENCY_IN_PROGRESS', message: '相同操作仍在执行' } }));
+    case 'TERMINAL':
+      return reply.status(claim.status).send(claim.body);
+  }
+}
+
+function toGenerationApiError(error: unknown): ApiError {
+  try {
+    rethrowGenerationError(error);
+  } catch (mapped) {
+    if (mapped instanceof ApiError) return mapped;
+    throw mapped;
+  }
+}
+
 export async function registerDailyPlanningRoutes(
   app: FastifyInstance,
   options: DailyPlanningRouteOptions,
@@ -161,15 +217,53 @@ export async function registerDailyPlanningRoutes(
       '每日计划生成请求不符合要求',
     );
 
+    let claim: IdempotencyClaim;
+    try {
+      claim = options.idempotencyService.claim({
+        ownerId,
+        key: idempotencyKey(request),
+        operation: 'daily_plan.generate',
+        resourceId: input.preflightId,
+        body: input,
+      });
+    } catch (error) {
+      if (error instanceof IdempotencyConflictError) {
+        throw new ApiError(409, error.code, 'Idempotency-Key 已用于不同语义的操作');
+      }
+      throw error;
+    }
+    if (claim.kind !== 'CLAIMED') return sendIdempotencyClaim(reply, claim);
+
     try {
       const proposal = await options.dailyPlanningService.generateApprovedPreflight({
         ownerId,
         preflightId: input.preflightId,
         expectedPreflightVersion: input.expectedPreflightVersion,
       });
-      return reply.status(201).send(dailyPlanProposalResponseSchema.parse({ data: proposal }));
+      const body = dailyPlanProposalResponseSchema.parse({ data: proposal });
+      if (!options.idempotencyService.complete({ ...claim, status: 201, body })) {
+        return sendIdempotencyClaim(reply, {
+          kind: 'TERMINAL',
+          status: 503,
+          body: apiErrorSchema.parse({
+            error: {
+              code: 'DAILY_PLAN_PROVIDER_INTERRUPTED',
+              message: '每日计划生成结果已过期，请重新发起。',
+            },
+          }),
+        });
+      }
+      return reply.status(201).send(body);
     } catch (error) {
-      return rethrowGenerationError(error);
+      const mapped = toGenerationApiError(error);
+      const body = apiErrorBody(mapped);
+      options.idempotencyService.fail({
+        ...claim,
+        status: mapped.statusCode,
+        body,
+        failureCode: mapped.code,
+      });
+      return reply.status(mapped.statusCode).send(body);
     }
   });
 
@@ -223,7 +317,7 @@ export async function registerDailyPlanningRoutes(
     }
   });
 
-  app.post('/v1/daily-plans/proposals/:proposalId/decisions', { preHandler: authGuard }, (request) => {
+  app.post('/v1/daily-plans/proposals/:proposalId/decisions', { preHandler: authGuard }, (request, reply) => {
     const ownerId = authenticatedOwnerId(request);
     const { proposalId } = parseRequestInput(
       dailyPlanProposalPathParamsSchema,
@@ -236,12 +330,39 @@ export async function registerDailyPlanningRoutes(
       '每日计划草案决定不符合要求',
     );
 
+    let result: ReturnType<IdempotencyService['executeLocal']>;
     try {
-      return dailyPlanReviewResponseSchema.parse({
-        data: options.dailyPlanReviewService.submitDecisions(ownerId, proposalId, input),
-      });
+      result = options.idempotencyService.executeLocal(
+        {
+          ownerId,
+          key: idempotencyKey(request),
+          operation: 'daily_plan.proposal.decision',
+          resourceId: proposalId,
+          body: input,
+        },
+        () => {
+          try {
+            return {
+              status: 200,
+              body: dailyPlanReviewResponseSchema.parse({
+                data: options.dailyPlanReviewService.submitDecisions(ownerId, proposalId, input),
+              }),
+            };
+          } catch (error) {
+            return rethrowReviewError(error);
+          }
+        },
+      );
     } catch (error) {
-      return rethrowReviewError(error);
+      if (error instanceof IdempotencyConflictError) {
+        throw new ApiError(409, error.code, 'Idempotency-Key 已用于不同语义的操作');
+      }
+      throw error;
     }
+    if ('kind' in result) {
+      return sendIdempotencyClaim(reply, result);
+    }
+    if (result.replayed) reply.header('Idempotency-Replayed', 'true');
+    return reply.status(result.status).send(result.body);
   });
 }

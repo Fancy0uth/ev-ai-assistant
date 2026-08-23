@@ -240,6 +240,7 @@ describe('v0.4 approved scheduling and manual Event routes', () => {
       method: 'POST',
       url: '/v1/daily-plans/generate',
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-v04-awaiting-preflight-01' },
       payload: { preflightId: preflight.id, expectedPreflightVersion: preflight.version },
     });
     expect(awaiting.statusCode).toBe(409);
@@ -315,6 +316,7 @@ describe('v0.4 approved scheduling and manual Event routes', () => {
       method: 'POST',
       url: `/v1/proposals/${rejected.proposalId}/decision`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-v04-reject-event-00001' },
       payload: { version: 1, decision: 'REJECT' },
     });
     expect(rejection.statusCode).toBe(200);
@@ -326,6 +328,7 @@ describe('v0.4 approved scheduling and manual Event routes', () => {
       method: 'POST',
       url: `/v1/proposals/${accepted.proposalId}/decision`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-v04-accept-event-00001' },
       payload: { version: 1, decision: 'ACCEPT' },
     });
     expect(acceptance.statusCode).toBe(200);
@@ -412,6 +415,7 @@ describe('v0.4 approved scheduling and manual Event routes', () => {
       method: 'POST',
       url: `/v1/proposals/${proposal.proposalId}/decision`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-v04-rollback-event-01' },
       payload: { version: 1, decision: 'ACCEPT' },
     });
 

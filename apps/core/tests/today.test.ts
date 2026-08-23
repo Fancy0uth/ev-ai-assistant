@@ -82,6 +82,7 @@ async function generateApprovedPlan(app: FastifyInstance, token: string, localDa
     method: 'POST',
     url: '/v1/daily-plans/generate',
     cookies: { ev_session: token },
+    headers: { 'idempotency-key': `v05-today-${approvedPreflight.id}` },
     payload: {
       preflightId: approvedPreflight.id,
       expectedPreflightVersion: approvedPreflight.version,

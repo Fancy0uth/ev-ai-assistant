@@ -106,6 +106,7 @@ describe('versioned schedule proposal API', () => {
       method: 'POST',
       url: `/v1/proposals/${firstProposalId}/decision`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-proposal-accept-first-01' },
       payload: { version: 1, decision: 'ACCEPT' },
     });
     expect(accepted.statusCode).toBe(200);
@@ -115,6 +116,17 @@ describe('versioned schedule proposal API', () => {
       version: 2,
     });
     expect(JSON.stringify(accepted.json())).not.toMatch(/ownerId|password|token|session/i);
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: `/v1/proposals/${firstProposalId}/decision`,
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-proposal-accept-first-01' },
+      payload: { version: 1, decision: 'ACCEPT' },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(replay.json()).toEqual(accepted.json());
 
     const day = await app.inject({
       method: 'GET',
@@ -140,6 +152,7 @@ describe('versioned schedule proposal API', () => {
       method: 'POST',
       url: `/v1/proposals/${firstProposalId}/decision`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-proposal-stale-second-01' },
       payload: { version: 1, decision: 'ACCEPT' },
     });
     expect(stale.statusCode).toBe(409);
@@ -161,6 +174,7 @@ describe('versioned schedule proposal API', () => {
       method: 'POST',
       url: `/v1/proposals/${rejectedProposalId}/decision`,
       cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-proposal-reject-first-01' },
       payload: { version: 1, decision: 'REJECT' },
     });
     expect(rejected.statusCode).toBe(200);

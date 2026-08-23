@@ -35,7 +35,9 @@ import { createNutritionService } from './modules/nutrition/service';
 import { registerProviderRoutes } from './modules/providers/routes';
 import { createProviderService } from './modules/providers/service';
 import { createProviderCredentialService } from './modules/providers/credential-service';
+import { createIdempotencyService } from './modules/providers/idempotency-service';
 import type { DeepSeekConnectionTester } from './modules/providers/deepseek-connection';
+import { createProviderReliabilityRepository } from './modules/providers/reliability-repository';
 import { createWindowsDpapiSecretStore, type SecretStorePort } from './modules/providers/secret-store';
 import { createTaskRepository } from './modules/tasks/repository';
 import { registerTaskRoutes } from './modules/tasks/routes';
@@ -132,6 +134,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.secretStore ?? createWindowsDpapiSecretStore(),
     options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
   );
+  const idempotencyService = createIdempotencyService({
+    database,
+    repository: createProviderReliabilityRepository(database),
+  });
   const dailyPlanRepository = createDailyPlanRunRepository(database);
   const dailyPlanningContextService = createDailyPlanningContextService(dailyPlanRepository, {
     newId: () => crypto.randomUUID(),
@@ -190,13 +196,14 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerLearningRoutes(app, { authService, learningService });
   await registerMemoryRoutes(app, { authService, memoryService });
   await registerProjectScopeRoutes(app, { authService, projectScopeService });
-  await registerProposalRoutes(app, { authService, proposalService });
+  await registerProposalRoutes(app, { authService, proposalService, idempotencyService });
   await registerProviderRoutes(app, { authService, providerService, providerCredentialService });
   await registerDailyPlanningRoutes(app, {
     authService,
     dailyPlanningService,
     dailyPlanPreflightService,
     dailyPlanReviewService,
+    idempotencyService,
   });
   await registerDayPlanningRoutes(app, { authService, dayPlanningService });
   await registerTodayRoutes(app, {
