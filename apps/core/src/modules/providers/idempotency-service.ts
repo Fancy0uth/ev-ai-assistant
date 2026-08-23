@@ -5,14 +5,10 @@ import type {
   IdempotencyRecord,
   ProviderReliabilityRepository,
 } from './reliability-repository';
+import { INTERRUPTED_DAILY_PLAN_SNAPSHOT } from '../daily-planning/execution-unit-of-work';
 
 const DEFAULT_LEASE_MS = 20_000;
-const INTERRUPTED_RESPONSE = {
-  error: {
-    code: 'DAILY_PLAN_PROVIDER_INTERRUPTED',
-    message: '每日计划生成已中断，请使用新的操作重新发起。',
-  },
-};
+const INTERRUPTED_RESPONSE = INTERRUPTED_DAILY_PLAN_SNAPSHOT.body;
 
 export class IdempotencyConflictError extends Error {
   readonly code = 'IDEMPOTENCY_CONFLICT';
@@ -70,6 +66,7 @@ export interface IdempotencyServiceOptions {
   newId?: () => string;
   newLeaseToken?: () => string;
   leaseMs?: number;
+  terminalizeExpiredExecution?: (record: IdempotencyRecord, nowIso: string) => boolean;
 }
 
 function canonicalize(value: unknown): unknown {
@@ -178,7 +175,9 @@ export function createIdempotencyService(options: IdempotencyServiceOptions): Id
       };
     }
 
-    const terminal = options.repository.fail({
+    const terminal =
+      options.terminalizeExpiredExecution?.(existing, nowIso) ??
+      options.repository.fail({
       ownerId: input.ownerId,
       recordId: existing.id,
       leaseToken: existing.leaseToken as string,
@@ -186,7 +185,7 @@ export function createIdempotencyService(options: IdempotencyServiceOptions): Id
       response: INTERRUPTED_RESPONSE,
       failureCode: 'DAILY_PLAN_PROVIDER_INTERRUPTED',
       updatedAt: nowIso,
-    });
+      });
     if (!terminal) return { kind: 'IN_PROGRESS' };
     return { kind: 'TERMINAL', status: 503, body: INTERRUPTED_RESPONSE };
   });

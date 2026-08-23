@@ -141,17 +141,27 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
   );
   const providerReliabilityRepository = createProviderReliabilityRepository(database);
-  const idempotencyService = createIdempotencyService({
-    database,
-    repository: providerReliabilityRepository,
-    ...(options.providerReliabilityNow ? { now: options.providerReliabilityNow } : {}),
-  });
   const dailyPlanRepository = createDailyPlanRunRepository(database);
   const dailyPlanExecutionUnitOfWork = createDailyPlanExecutionUnitOfWork({
     database,
     dailyPlanRepository,
     reliabilityRepository: providerReliabilityRepository,
     ...(options.dailyPlanTerminalFault ? { fault: options.dailyPlanTerminalFault } : {}),
+  });
+  const reliabilityNow = options.providerReliabilityNow ?? (() => new Date());
+  try {
+    dailyPlanExecutionUnitOfWork.sweepExpired(reliabilityNow().toISOString());
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+  const idempotencyService = createIdempotencyService({
+    database,
+    repository: providerReliabilityRepository,
+    now: reliabilityNow,
+    terminalizeExpiredExecution(record, nowIso) {
+      return dailyPlanExecutionUnitOfWork.terminalizeExpired(record, nowIso);
+    },
   });
   const dailyPlanningContextService = createDailyPlanningContextService(dailyPlanRepository, {
     newId: () => crypto.randomUUID(),
