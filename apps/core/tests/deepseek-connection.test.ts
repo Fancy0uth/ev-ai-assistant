@@ -61,6 +61,7 @@ describe('DeepSeek connection tester', () => {
     });
     expect(JSON.parse(String(capturedInit?.body))).toEqual({
       model: 'deepseek-v4-flash',
+      stream: false,
       messages: [
         {
           role: 'user',

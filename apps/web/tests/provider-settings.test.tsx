@@ -63,6 +63,8 @@ describe('ProviderSettingsPage', () => {
     expect(screen.getByRole('button', { name: '测试连接' })).toBeDisabled();
     expect(screen.getByLabelText('DeepSeek API Key')).toHaveAttribute('type', 'password');
     expect(screen.getByLabelText('DeepSeek API Key')).toHaveAttribute('autocomplete', 'off');
+    expect(screen.getByText('每日计划模型：deepseek-v4-flash（仅允许 deepseek-v4-flash / deepseek-v4-pro）')).toBeInTheDocument();
+    expect(screen.getByText('真实连接测试只会在你主动点击后发送最小请求；本页面不会自动调用 Provider。')).toBeInTheDocument();
     expect(requestCoreMock).toHaveBeenCalledWith(
       'providers/deepseek/credential',
       expect.objectContaining({ method: 'GET', signal: expect.anything() }),

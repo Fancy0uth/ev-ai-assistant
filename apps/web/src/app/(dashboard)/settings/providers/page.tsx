@@ -188,6 +188,8 @@ export default function ProviderSettingsPage() {
       <p className="section-kicker">LOCAL PROVIDER CONTROL</p>
       <h1 id="provider-settings-heading">DeepSeek 设置</h1>
       <p>密钥只保留在这台设备上。保存后浏览器不会显示或保留该密钥。</p>
+      <p>每日计划模型：deepseek-v4-flash（仅允许 deepseek-v4-flash / deepseek-v4-pro）</p>
+      <p>真实连接测试只会在你主动点击后发送最小请求；本页面不会自动调用 Provider。</p>
 
       {error ? <p className="dashboard-alert" role="alert">{error}</p> : null}
       <p className="provider-credential-live" aria-live="polite" aria-busy={isLoading}>
@@ -240,7 +242,7 @@ export default function ProviderSettingsPage() {
                 disabled={isBusy}
               />
             </label>
-            <p className="provider-credential-form__hint">保存不会自动发起连接测试。</p>
+            <p className="provider-credential-form__hint">保存不会自动发起连接测试；未配置、配额耗尽或返回不完整时，每日计划会安全停止而不会生成伪造草案。</p>
             <div className="provider-credential-actions">
               <button type="submit" disabled={isBusy || !apiKey.trim()}>
                 {isSaving ? '正在保存…' : isConfigured ? '替换密钥' : '保存密钥'}
