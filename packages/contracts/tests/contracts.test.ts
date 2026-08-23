@@ -148,6 +148,7 @@ describe('task contracts', () => {
       status: 'IN_PROGRESS',
       targetDate: '2026-08-10',
       completedAt: null,
+      scheduling: null,
       version: 3,
       createdAt: '2026-08-10T09:00:00.000Z',
       updatedAt: '2026-08-10T10:00:00.000Z',
