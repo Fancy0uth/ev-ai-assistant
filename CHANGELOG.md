@@ -13,7 +13,10 @@
 
 ### Added
 
-- Provider Reliability 的统一版本、DeepSeek 模型/finish reason/usage 允许字段契约；后续切片将以此为 SQLite v18、幂等与脱敏日志的唯一边界。
+- SQLite v18 的 Owner-scoped 幂等记录、Daily Plan Run lease/recovery 元数据与仅允许字段的 Provider 调用日志；既有 Owner、Task、Run、Proposal 与 Provider metadata 保持可读。
+- 三个高影响写入口的 `Idempotency-Key` 契约（replay、in-progress、conflict、Owner 隔离）以及 Web BFF 请求/响应 header allowlist。
+- DeepSeek Daily Plan 的集中 Provider policy：冻结 endpoint/模型、非流式结构化结果、finish reason/usage allowlist、超时、配额、lease token、一次恢复和晚到响应拒绝。
+- Provider Reliability 的隔离浏览器证据：真实 Web prepare → approve → generate 路径、同键 replay、语义冲突、未配置 Provider 和桌面/iPhone 视口。
 
 - 日程/课表、学习、健身、饮食、记忆和项目的真实 Dashboard 路由与响应式工作区。
 - 学期、课程资料、课表导入请求、日计划 Proposal、恢复 check-in、已确认餐食和只读项目 scope 的本地数据层。
@@ -32,6 +35,8 @@
 - E2E 不再遗留 Next 自动改写的类型声明或成功测试的构建缓存。
 - Provider 架构支持 Owner 配置的 DeepSeek 调用，并为后续受限本地 Codex adapter 保留契约；自动化测试始终使用 Fake Provider。
 - 日期切换后旧的每日计划生成错误不再覆盖当前日期页面。
+- Web preflight 对 schema-valid 但 action、run、日期、版本或 payload 语义不一致的响应 fail closed；不再只凭 HTTP 成功继续。
+- 过时的 Daily Plan E2E 已对齐三步审核门与 v0.5 强制幂等键；Contracts 冲突响应 fixture 已对齐 `scheduling: null` 的规范输出。
 
 ## [0.1.0] — 技术预览
 

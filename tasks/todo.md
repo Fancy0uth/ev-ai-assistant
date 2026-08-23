@@ -14,12 +14,12 @@
 
 ## v0.5：Provider Reliability
 
-- [ ] V5-01：冻结运行包络契约并完成无损 migration v18。
-- [ ] V5-02：端到端实现 `Idempotency-Key` 与 BFF 白名单转发。
-- [ ] V5-03：实现陈旧 Run 恢复、超时、配额和有界重试。
-- [ ] V5-04：持久化脱敏 Provider 调用日志与分层 health 元数据。
-- [ ] V5-05：建立单一版本事实并同步 0.5.0 package/health/run 元数据。
-- [ ] V5-06：分别证明 test-only Fake 与经审批真实 DeepSeek/DPAPI 验收通路。
+- [x] V5-01：冻结运行包络契约并完成无损 migration v18。
+- [x] V5-02：端到端实现 `Idempotency-Key` 与 BFF 白名单转发。
+- [x] V5-03：实现陈旧 Run 恢复、超时、配额和有界重试。
+- [x] V5-04：持久化脱敏 Provider 调用日志与分层 health 元数据。
+- [x] V5-05：建立单一版本事实并同步 0.5.0 package/health/run 元数据。
+- [ ] V5-06：test-only Fake、DPAPI port 与脱敏自动证据已完成；真实 DeepSeek 人工验收仍为 `NOT RUN — APPROVAL REQUIRED`。
 
 ## v0.6：Learning and Schedule Loop
 
