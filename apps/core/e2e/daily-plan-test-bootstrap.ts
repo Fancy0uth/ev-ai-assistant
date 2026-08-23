@@ -1,4 +1,5 @@
 import { join, resolve } from 'node:path';
+import { writeFile } from 'node:fs/promises';
 import type { DailyPlanModelOutput } from '@ev/contracts';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
@@ -10,6 +11,7 @@ const TEST_BOOTSTRAP_FLAG = 'EV_E2E_DAILY_PLAN_TEST_BOOTSTRAP';
 const TEST_CREDENTIAL_MARKER = 'daily-plan-e2e-credential';
 const TEST_PROVIDER_KEY = 'daily-plan-e2e-provider-key';
 const TEST_CREDENTIAL_SKIP_QUERY = 'e2eWithoutTestCredential';
+const TEST_PROVIDER_EVIDENCE_FILE = 'daily-plan-fake-provider-evidence.json';
 
 if (process.env[TEST_BOOTSTRAP_FLAG] !== '1' || process.env.NODE_ENV !== 'test') {
   throw new Error('The daily plan E2E bootstrap may run only with its explicit test-only environment.');
@@ -20,6 +22,19 @@ const runDirectory = process.env.EV_E2E_RUN_DIR;
 if (!runDirectory || resolve(config.dataDir) !== resolve(runDirectory)) {
   throw new Error('The daily plan E2E bootstrap requires the runner-owned EV_E2E_RUN_DIR.');
 }
+
+const testProviderEvidencePath = join(runDirectory, TEST_PROVIDER_EVIDENCE_FILE);
+const testProviderInvocations: Array<{
+  localDate: string;
+  timeRequests: Array<{
+    safeTitle: string;
+    durationMinutes: number;
+    availability: {
+      earliestStartLocalTime: string | null;
+      latestEndLocalTime: string | null;
+    };
+  }>;
+}> = [];
 
 class TestOnlyDailyPlanCredentialPort implements SecretStorePort {
   async protect(plaintext: string): Promise<string> {
@@ -41,6 +56,15 @@ class TestOnlyDailyPlanningProvider implements DailyPlanningProvider {
     if (input.timeRequests.some((request) => request.durationMinutes !== 60)) {
       throw new Error('The daily plan E2E provider supports only deterministic one-hour fixtures.');
     }
+    testProviderInvocations.push({
+      localDate: input.localDate,
+      timeRequests: input.timeRequests.map((request) => ({
+        safeTitle: request.safeTitle,
+        durationMinutes: request.durationMinutes,
+        availability: request.availability,
+      })),
+    });
+    await writeFile(testProviderEvidencePath, JSON.stringify(testProviderInvocations), 'utf8');
 
     const actions = input.timeRequests.map((request, index) => {
       const startHour = 12 + index * 2;

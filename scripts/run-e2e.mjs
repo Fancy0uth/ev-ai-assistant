@@ -76,7 +76,7 @@ async function waitForReady(url, process) {
 
 function runPlaywright() {
   return new Promise((resolve) => {
-    const child = start(process.execPath, [join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test'], {
+    const child = start(process.execPath, [join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', ...process.argv.slice(2)], {
       EV_E2E_MANAGED: '1',
       EV_E2E_RUN_DIR: dataDirectory,
     }, join(root, 'apps', 'web'));
