@@ -191,6 +191,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     taskService,
     calendarRepository,
     proposalService,
+    dailyPlanReviewService,
+    providerCredentialService,
   });
 
   return app;

@@ -5,12 +5,42 @@ import { todaySnapshotSchema } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
+import type { DailyPlanningProvider } from '../src/modules/daily-planning/provider';
+import type { SecretStorePort } from '../src/modules/providers/secret-store';
 import { createTaskRepository } from '../src/modules/tasks/repository';
 import { openDatabase } from '../src/storage/database';
 
 const credentials = {
   username: '本地主人',
   password: 'correct horse battery staple',
+};
+
+const testApiKey = 'test-only-today-daily-plan-api-key';
+
+class InMemorySecretStore implements SecretStorePort {
+  private readonly values = new Map<string, string>();
+
+  async protect(plaintext: string): Promise<string> {
+    const protectedValue = `today-snapshot-credential-${this.values.size + 1}`;
+    this.values.set(protectedValue, plaintext);
+    return protectedValue;
+  }
+
+  async unprotect(protectedValue: string): Promise<string> {
+    const value = this.values.get(protectedValue);
+    if (!value) throw new Error('credential missing');
+    return value;
+  }
+}
+
+const planningProvider: DailyPlanningProvider = {
+  async generate() {
+    return {
+      schemaVersion: 'DAILY_PLAN_MODEL_V1',
+      summary: '今天没有可排入时间轴的新增事项。',
+      actions: [],
+    };
+  },
 };
 
 function readSessionToken(setCookieHeader: string | string[] | undefined): string {
@@ -70,7 +100,8 @@ describe('Today snapshot API', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const snapshot = todaySnapshotSchema.parse(response.json()).data;
+    const responseBody = response.json();
+    const snapshot = todaySnapshotSchema.parse(responseBody).data;
     expect(snapshot.date).toBe('2026-08-07');
     expect(snapshot.tasks).toHaveLength(3);
     expect(snapshot.status).toMatchObject({
@@ -83,6 +114,11 @@ describe('Today snapshot API', () => {
     expect(snapshot.agents).toEqual({
       deepSeek: 'NOT_CONFIGURED',
       codex: 'NOT_CONFIGURED',
+    });
+    expect(responseBody.data.dailyPlan).toEqual({
+      status: 'NOT_CONFIGURED',
+      proposalId: null,
+      pendingItemCount: 0,
     });
   });
 
@@ -123,6 +159,50 @@ describe('Today snapshot API', () => {
         localDate: '2026-08-07',
       }),
     ]);
+  });
+
+  it('summarizes the latest reviewable daily plan instead of presenting an unconfigured placeholder', async () => {
+    const date = '2026-08-07';
+    app = await buildApp({
+      logger: false,
+      secretStore: new InMemorySecretStore(),
+      dailyPlanningProvider: planningProvider,
+    });
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/setup',
+      payload: credentials,
+    });
+    const token = readSessionToken(setup.headers['set-cookie']);
+
+    const credential = await app.inject({
+      method: 'PUT',
+      url: '/v1/providers/deepseek/credential',
+      cookies: { ev_session: token },
+      payload: { apiKey: testApiKey },
+    });
+    expect(credential.statusCode).toBe(200);
+
+    const generated = await app.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      payload: { localDate: date },
+    });
+    expect(generated.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/today?date=${date}`,
+      cookies: { ev_session: token },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.dailyPlan).toMatchObject({
+      status: 'PENDING_REVIEW',
+      proposalId: generated.json().data.id,
+      pendingItemCount: 0,
+    });
   });
 
   it('calculates Today from every task for the signed-in owner and date', async () => {

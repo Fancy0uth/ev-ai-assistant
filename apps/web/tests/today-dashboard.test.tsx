@@ -128,7 +128,7 @@ describe('TodayDashboard', () => {
     await user.type(screen.getByLabelText('新任务'), task.title);
     await user.click(screen.getByRole('button', { name: '添加到今天' }));
 
-    expect(await screen.findAllByText(task.title)).toHaveLength(2);
+    expect(await screen.findAllByText(task.title)).toHaveLength(3);
     expect(screen.getAllByText('规则引擎')).toHaveLength(1);
     expect(screen.queryByText('Milestone 0.6')).not.toBeInTheDocument();
     const renderedIds = Array.from(document.querySelectorAll('[id]'), ({ id }) => id);
@@ -142,9 +142,51 @@ describe('TodayDashboard', () => {
     render(<TodayDashboard initialDate="2026-08-07" />);
 
     expect(await screen.findByText('恢复状态')).toBeInTheDocument();
-    expect(screen.getByText('注意恢复')).toBeInTheDocument();
+    expect(screen.getAllByText('注意恢复')).toHaveLength(2);
     expect(screen.getByText('25 / 100')).toBeInTheDocument();
     expect(screen.getByText('来自本地打卡，不构成医疗判断')).toBeInTheDocument();
+  });
+
+  it('puts today\'s schedule, concrete actions, recovery summary, and plan review entry in the control console', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      data: {
+        ...recoverySnapshot.data,
+        tasks: [task],
+        events: [
+          {
+            id: '00000000-0000-4000-8000-000000000222',
+            calendarRuleId: null,
+            title: '深度学习课程',
+            kind: 'COURSE',
+            localDate: '2026-08-07',
+            startLocalTime: '09:00',
+            endLocalTime: '10:40',
+            isHard: true,
+            status: 'CONFIRMED',
+            version: 1,
+            createdAt: '2026-08-07T01:00:00.000Z',
+            updatedAt: '2026-08-07T01:00:00.000Z',
+          },
+        ],
+        dailyPlan: {
+          status: 'PENDING_REVIEW',
+          proposalId: '00000000-0000-4000-8000-000000000333',
+          pendingItemCount: 2,
+        },
+      },
+    })));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(await screen.findByRole('heading', { name: '今天的控制台' })).toBeInTheDocument();
+    expect(screen.getByText('深度学习课程')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: `在控制台处理开发任务：${task.title}` })).toHaveAttribute('href', '/projects');
+    expect(document.querySelector('.day-console__recovery')).toHaveTextContent('注意恢复');
+    expect(screen.getByText(/有 2 项建议等待你的审核/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '查看并确认今日计划' })).toHaveAttribute(
+      'href',
+      '/daily-plan?date=2026-08-07',
+    );
   });
 
   it('links each daily domain to its dedicated workspace instead of a generic todo flow', async () => {
@@ -230,7 +272,7 @@ describe('TodayDashboard', () => {
 
     await user.click(screen.getByRole('button', { name: '重新加载今天的数据' }));
 
-    expect(await screen.findAllByText(task.title)).toHaveLength(2);
+    expect(await screen.findAllByText(task.title)).toHaveLength(3);
     expect(screen.queryByText('任务已保存，但今天的数据刷新失败')).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/tasks')).toHaveLength(1);
@@ -369,7 +411,7 @@ describe('TodayDashboard', () => {
     render(<TodayDashboard initialDate="2026-08-07" />);
 
     expect(unbrokenTaskTitle).toHaveLength(200);
-    expect(await screen.findAllByText(unbrokenTaskTitle)).toHaveLength(2);
+    expect(await screen.findAllByText(unbrokenTaskTitle)).toHaveLength(3);
     expect(screen.getByText(unbrokenTaskTitle, { selector: '.task-row__titleline p' }).closest('.task-row__content')).not.toBeNull();
     expect(screen.getByText(unbrokenTaskTitle, { selector: '.priority-list p' }).closest('.priority-list li')).not.toBeNull();
 
@@ -410,6 +452,23 @@ describe('TodayDashboard', () => {
     expect(mobileComposerRule).toContain('.composer-submit');
     expect(mobileComposerRule).toContain('min-height: 2.75rem;');
     expect(mobileComposerRule).toContain('font-size: 1rem;');
+  });
+
+  it('keeps the daily control console readable on desktop and stacked on iPhone widths', () => {
+    const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
+    const controlGridRule = dashboardCss.match(
+      /\.day-console__grid\s*\{\s*display: grid;[\s\S]*?\n\}/,
+    )?.[0];
+    const dailyPlanCardRule = dashboardCss.match(
+      /\.daily-plan-status-card\s*\{\s*display: grid;[\s\S]*?\n\}/,
+    )?.[0];
+    const mobileControlGridRule = dashboardCss.match(
+      /@media \(max-width: 42rem\) \{\s*\.day-console__grid\s*\{[\s\S]*?\n\s*\}/,
+    )?.[0];
+
+    expect(controlGridRule).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(dailyPlanCardRule).toContain('display: grid;');
+    expect(mobileControlGridRule).toContain('grid-template-columns: 1fr;');
   });
 
   it('routes an expired session to login instead of showing a fake dashboard', async () => {

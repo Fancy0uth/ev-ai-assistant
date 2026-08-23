@@ -49,6 +49,42 @@ export const dayViewSchema = z
 
 export const dayViewResponseSchema = z.object({ data: dayViewSchema }).strict();
 
+const dailyPlanWithoutProposalSchema = z
+  .object({
+    status: z.enum(['NOT_CONFIGURED', 'READY_TO_GENERATE', 'GENERATING', 'FAILED']),
+    proposalId: z.null(),
+    pendingItemCount: z.literal(0),
+  })
+  .strict();
+
+const dailyPlanWithPendingReviewSchema = z
+  .object({
+    status: z.enum(['PENDING_REVIEW', 'PARTIALLY_APPLIED']),
+    proposalId: z.uuid(),
+    pendingItemCount: z.number().int().min(0),
+  })
+  .strict();
+
+const dailyPlanTerminalSchema = z
+  .object({
+    status: z.enum(['APPLIED', 'REJECTED', 'STALE']),
+    proposalId: z.uuid(),
+    pendingItemCount: z.literal(0),
+  })
+  .strict();
+
+export const todayDailyPlanSummarySchema = z
+  .union([
+    dailyPlanWithoutProposalSchema,
+    dailyPlanWithPendingReviewSchema,
+    dailyPlanTerminalSchema,
+  ])
+  .default({
+    status: 'NOT_CONFIGURED',
+    proposalId: null,
+    pendingItemCount: 0,
+  });
+
 export const todaySnapshotSchema = z
   .object({
     data: z
@@ -60,6 +96,7 @@ export const todaySnapshotSchema = z
           signals: z.array(signalSchema).default([]),
           pendingProposals: z.array(proposalSchema).default([]),
           yesterday: yesterdaySummarySchema.nullable(),
+          dailyPlan: todayDailyPlanSummarySchema,
         agents: z
           .object({
             deepSeek: z.literal('NOT_CONFIGURED'),
@@ -74,3 +111,4 @@ export const todaySnapshotSchema = z
 export type DailyStatus = z.infer<typeof dailyStatusSchema>;
 export type TodaySnapshot = z.infer<typeof todaySnapshotSchema>;
 export type DayView = z.infer<typeof dayViewSchema>;
+export type TodayDailyPlanSummary = z.infer<typeof todayDailyPlanSummarySchema>;

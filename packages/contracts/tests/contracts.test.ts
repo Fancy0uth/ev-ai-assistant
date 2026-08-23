@@ -173,6 +173,61 @@ describe('task contracts', () => {
 });
 
 describe('today snapshot contract', () => {
+  it('exposes a strict, local-only summary for the current daily plan', () => {
+    const parsed = todaySnapshotSchema.parse({
+      data: {
+        date: '2026-08-07',
+        status: {
+          score: 78,
+          level: 'STEADY',
+          source: 'RULES_V1',
+          reasons: ['今天没有待处理任务'],
+          priorities: [],
+        },
+        tasks: [],
+        yesterday: null,
+        agents: { deepSeek: 'NOT_CONFIGURED', codex: 'NOT_CONFIGURED' },
+        dailyPlan: {
+          status: 'PENDING_REVIEW',
+          proposalId: '00000000-0000-4000-8000-000000000123',
+          pendingItemCount: 2,
+        },
+      },
+    });
+
+    expect(parsed.data.dailyPlan).toEqual({
+      status: 'PENDING_REVIEW',
+      proposalId: '00000000-0000-4000-8000-000000000123',
+      pendingItemCount: 2,
+    });
+    expect(
+      todaySnapshotSchema.safeParse({
+        ...parsed,
+        data: {
+          ...parsed.data,
+          dailyPlan: {
+            status: 'PENDING_REVIEW',
+            proposalId: null,
+            pendingItemCount: 1,
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      todaySnapshotSchema.safeParse({
+        ...parsed,
+        data: {
+          ...parsed.data,
+          dailyPlan: {
+            status: 'PENDING_REVIEW',
+            proposalId: '00000000-0000-4000-8000-000000000123',
+            pendingItemCount: 0,
+          },
+        },
+      }).success,
+    ).toBe(true);
+  });
+
   it('rejects a snapshot that pretends an unconfigured Agent is ready', () => {
     expect(
       todaySnapshotSchema.safeParse({
