@@ -274,10 +274,22 @@ function PreflightHookHarness({
 
 describe('V4-06 scheduling workspaces', () => {
   it('requires a separate approved preflight before generate and sends only reviewed mutable fields', async () => {
+    const approvedBase = preflightPayload('APPROVED', 2);
+    const [firstItem, secondItem] = approvedBase.data.items;
+    if (!firstItem || !secondItem) throw new Error('approved preflight fixture requires two items');
+    const approvedPayload: unknown = {
+      data: {
+        ...approvedBase.data,
+        items: [
+          { ...firstItem, safeTitle: 'Reviewed architecture', domain: 'STUDY', deadlineLocalDate: dateB, included: true },
+          { ...secondItem, included: false },
+        ],
+      },
+    };
     const fetchMock = vi.fn((url: string) => {
       if (url.includes('daily-plans/proposals')) return Promise.resolve(jsonResponse(emptyReviewList()));
       if (url === '/api/core/daily-plans/preflights') return Promise.resolve(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1), 201));
-      if (url === `/api/core/daily-plans/preflights/${preflightId}/approve`) return Promise.resolve(jsonResponse(preflightPayload('APPROVED', 2)));
+      if (url === `/api/core/daily-plans/preflights/${preflightId}/approve`) return Promise.resolve(jsonResponse(approvedPayload));
       if (url === '/api/core/daily-plans/generate') return Promise.resolve(jsonResponse(generatedProposalPayload(), 201));
       return Promise.reject(new Error(`unexpected ${url}`));
     });

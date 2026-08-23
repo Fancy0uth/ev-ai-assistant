@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 
 interface ManualEventProposalPanelProps {
   initialDate: string;
@@ -246,7 +247,11 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
     setStatusMessage(null);
     try {
       const input = proposalDecisionSchema.parse({ version: proposal.version, decision });
-      const payload = await requestCore(`proposals/${proposal.id}/decision`, { method: 'POST', body: JSON.stringify(input) });
+      const payload = await requestCore(`proposals/${proposal.id}/decision`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: { 'Idempotency-Key': createIdempotencyKey() },
+      });
       const next = proposalResponseSchema.parse(payload).data;
       const expectedStatus = decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
       if (next.id !== proposal.id || !isManualEventProposal(next) || next.status !== expectedStatus) {

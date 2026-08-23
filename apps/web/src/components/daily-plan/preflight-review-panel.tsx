@@ -103,8 +103,12 @@ export function PreflightReviewPanel({ controller }: PreflightReviewPanelProps) 
           >
             {state.phase === 'preparing'
               ? '正在准备外发内容…'
-              : state.phase === 'blocked' || state.phase === 'generated'
-                ? '重新准备'
+              : state.phase === 'blocked'
+                ? state.retryGenerate !== null
+                  ? '重试生成'
+                  : '重新准备'
+                : state.phase === 'generated'
+                  ? '重新准备'
                 : '准备外发内容'}
           </button>
         ) : null}

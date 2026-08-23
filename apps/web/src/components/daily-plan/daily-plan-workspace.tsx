@@ -14,17 +14,12 @@ import { CalendarDays, Check, X } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { PreflightReviewPanel } from './preflight-review-panel';
 import { useDailyPlanPreflight } from './use-daily-plan-preflight';
 
-interface DailyPlanWorkspaceProps {
-  initialDate: string;
-}
-
-interface FailureState {
-  code: string | null;
-  message: string;
-}
+interface DailyPlanWorkspaceProps { initialDate: string; }
+interface FailureState { code: string | null; message: string; }
 
 function failureState(error: unknown): FailureState {
   if (error instanceof CoreClientError) {
@@ -40,6 +35,10 @@ function conflictReview(error: unknown): DailyPlanReview | null {
   }
   const parsed = dailyPlanReviewSchema.safeParse(error.details.currentReview);
   return parsed.success ? parsed.data : null;
+}
+
+function isUncertainTransportFailure(error: unknown): boolean {
+  return error instanceof CoreClientError && (error.status === 0 || error.status === 502);
 }
 
 function itemStatusLabel(status: DailyPlanProposalItem['status']): string {
@@ -79,12 +78,10 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const updateStatusRef = useRef<HTMLParagraphElement>(null);
   const selectedDateRef = useRef(initialDate);
+  const decisionIdempotencyKeysRef = useRef(new Map<string, string>());
 
   const loadReviews = useCallback(async (date: string): Promise<DailyPlanReview[]> => {
-    const payload = await requestCore(
-      `daily-plans/proposals?localDate=${encodeURIComponent(date)}&page=1&pageSize=20`,
-      { method: 'GET' },
-    );
+    const payload = await requestCore(`daily-plans/proposals?localDate=${encodeURIComponent(date)}&page=1&pageSize=20`, { method: 'GET' });
     return dailyPlanReviewListResponseSchema.parse(payload).data.items;
   }, []);
 
@@ -159,15 +156,27 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
         expectedProposalVersion: review.proposal.version,
         decisions: [decision],
       });
+      const semanticAction = JSON.stringify({ action: 'daily_plan.proposal.decision', proposalId: review.proposal.id, input });
+      const idempotencyKey = decisionIdempotencyKeysRef.current.get(semanticAction) ?? createIdempotencyKey();
+      decisionIdempotencyKeysRef.current.set(semanticAction, idempotencyKey);
       const payload = await requestCore(`daily-plans/proposals/${review.proposal.id}/decisions`, {
         method: 'POST',
         body: JSON.stringify(input),
+        headers: { 'Idempotency-Key': idempotencyKey },
       });
       const nextReview = dailyPlanDecisionBatchResponseSchema.parse(payload).data;
       replaceReview(nextReview, '草案已按 Core 的最新结果更新。');
+      decisionIdempotencyKeysRef.current.delete(semanticAction);
     } catch (error) {
       const currentReview = conflictReview(error);
       if (currentReview) replaceReview(currentReview, '草案已由 Core 的最新版本替换。');
+      if (!isUncertainTransportFailure(error)) {
+        const input = dailyPlanDecisionBatchInputSchema.parse({
+          expectedProposalVersion: review.proposal.version,
+          decisions: [decision],
+        });
+        decisionIdempotencyKeysRef.current.delete(JSON.stringify({ action: 'daily_plan.proposal.decision', proposalId: review.proposal.id, input }));
+      }
       setFailure(failureState(error));
     } finally {
       setMutationKey(null);

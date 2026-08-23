@@ -5,8 +5,14 @@ interface RouteContext {
 const ALLOWED_CORE_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const CORE_ORIGIN_PATTERN =
   /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/?$/;
-const FORWARDED_REQUEST_HEADERS = ['content-type'] as const;
-const FORWARDED_RESPONSE_HEADERS = ['content-type', 'set-cookie'] as const;
+/** Explicitly bounded so browser clients cannot turn the BFF into a header proxy. */
+const FORWARDED_REQUEST_HEADERS = ['content-type', 'idempotency-key'] as const;
+const FORWARDED_RESPONSE_HEADERS = [
+  'content-type',
+  'set-cookie',
+  'idempotency-replayed',
+  'retry-after',
+] as const;
 
 function coreBaseUrl(): string {
   const value = process.env.EV_CORE_URL ?? 'http://127.0.0.1:4311';

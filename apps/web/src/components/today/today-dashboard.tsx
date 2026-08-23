@@ -11,6 +11,7 @@ import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { StatusOverview } from './status-overview';
 import { DayConsole } from './day-console';
 import { DailyPlanStatusCard } from './daily-plan-status-card';
@@ -150,6 +151,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
       await requestCore(`proposals/${proposalId}/decision`, {
         method: 'POST',
         body: JSON.stringify(input),
+        headers: { 'Idempotency-Key': createIdempotencyKey() },
       });
       await refresh();
     } catch (failure) {

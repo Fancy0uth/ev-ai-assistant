@@ -218,11 +218,64 @@ describe('DailyPlanWorkspace', () => {
         body: JSON.stringify({ preflightId, expectedPreflightVersion: 2 }),
       }),
     );
+    expect(new Headers(fetchMock.mock.calls[3]?.[1]?.headers).get('idempotency-key')).toMatch(/^web-/);
     expect(fetchMock).toHaveBeenNthCalledWith(
       5,
       '/api/core/daily-plans/proposals?localDate=2026-08-18&page=1&pageSize=20',
       expect.objectContaining({ method: 'GET' }),
     );
+  });
+
+  it('fails closed when a schema-valid generation response is not correlated to the approved preflight', async () => {
+    const mismatchedProposal = {
+      ...reviewPayload().proposal,
+      runId: '00000000-0000-4000-8000-000000000699',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(reviewList([])))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1), 201))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('APPROVED', 2)))
+      .mockResolvedValueOnce(jsonResponse({ data: mismatchedProposal }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<DailyPlanWorkspace initialDate="2026-08-18" />);
+
+    await screen.findByText('还没有该日期的每日计划');
+    await user.click(screen.getByRole('button', { name: '准备外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '批准外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '调用 Provider 生成草案' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Core 返回了无法安全继续的响应');
+    expect(screen.queryByText(mismatchedProposal.summary)).not.toBeInTheDocument();
+  });
+
+  it('reuses the same generate key only for an uncertain transport retry', async () => {
+    const generatedProposal = reviewPayload().proposal;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(reviewList([])))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1), 201))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('APPROVED', 2)))
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(jsonResponse({ data: generatedProposal }, 201))
+      .mockResolvedValueOnce(jsonResponse(reviewList([reviewPayload()])));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<DailyPlanWorkspace initialDate="2026-08-18" />);
+
+    await screen.findByText('还没有该日期的每日计划');
+    await user.click(screen.getByRole('button', { name: '准备外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '批准外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '调用 Provider 生成草案' }));
+    expect(await screen.findByRole('button', { name: '重试生成' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '重试生成' }));
+
+    await screen.findByText(generatedProposal.summary);
+    const firstGenerateHeaders = new Headers(fetchMock.mock.calls[3]?.[1]?.headers);
+    const retriedGenerateHeaders = new Headers(fetchMock.mock.calls[4]?.[1]?.headers);
+    expect(firstGenerateHeaders.get('idempotency-key')).toMatch(/^web-/);
+    expect(retriedGenerateHeaders.get('idempotency-key')).toBe(firstGenerateHeaders.get('idempotency-key'));
   });
 
   it('links a provider configuration failure to the provider settings page', async () => {
@@ -394,6 +447,7 @@ describe('DailyPlanWorkspace', () => {
       expectedProposalVersion: 1,
       decisions: [{ itemId, decision: 'APPLY', startLocalTime: '10:30', endLocalTime: '11:30' }],
     });
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('idempotency-key')).toMatch(/^web-/);
     expect(screen.getByRole('status', { name: '草案更新状态' })).toHaveFocus();
     expect(screen.queryByRole('button', { name: '采用安排' })).not.toBeInTheDocument();
   });

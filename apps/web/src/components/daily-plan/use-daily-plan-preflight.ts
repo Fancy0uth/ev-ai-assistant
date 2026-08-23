@@ -13,6 +13,7 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 
 export type PreflightOperation = 'prepare' | 'approve' | 'generate';
 
@@ -40,7 +41,13 @@ export type DailyPlanPreflightState =
   | { phase: 'approved'; localDate: string; preflight: DailyPlanPreflight }
   | { phase: 'generating'; localDate: string; preflight: DailyPlanPreflight }
   | { phase: 'generated'; localDate: string; proposalId: string }
-  | { phase: 'blocked'; localDate: string; operation: PreflightOperation; failure: PreflightFailure };
+  | {
+      phase: 'blocked';
+      localDate: string;
+      operation: PreflightOperation;
+      failure: PreflightFailure;
+      retryGenerate: GenerateCorrelation | null;
+    };
 
 export interface DailyPlanPreflightController {
   state: DailyPlanPreflightState;
@@ -58,6 +65,36 @@ interface UseDailyPlanPreflightOptions {
 interface InFlightOperation {
   operationId: number;
   controller: AbortController;
+}
+
+interface GenerateCorrelation {
+  action: 'generate';
+  preflight: DailyPlanPreflight;
+  preflightId: string;
+  runId: string;
+  localDate: string;
+  expectedPreflightVersion: number;
+  payloadFingerprint: string;
+  idempotencyKey: string;
+}
+
+function generatePayloadFingerprint(input: { preflightId: string; expectedPreflightVersion: number }): string {
+  return JSON.stringify({
+    action: 'generate',
+    preflightId: input.preflightId,
+    expectedPreflightVersion: input.expectedPreflightVersion,
+  });
+}
+
+function sameEditableItems(
+  expected: EditablePreflightItem[],
+  actual: DailyPlanPreflight,
+): boolean {
+  return JSON.stringify(expected) === JSON.stringify(toDraftItems(actual));
+}
+
+function isUncertainTransportFailure(error: unknown): boolean {
+  return error instanceof CoreClientError && (error.status === 0 || error.status === 502);
 }
 
 function toDraftItems(preflight: DailyPlanPreflight): EditablePreflightItem[] {
@@ -117,6 +154,7 @@ export function useDailyPlanPreflight({ localDate, onGenerated }: UseDailyPlanPr
   const epochRef = useRef(0);
   const operationIdRef = useRef(0);
   const inFlightRef = useRef<InFlightOperation | null>(null);
+  const generateCorrelationRef = useRef<GenerateCorrelation | null>(null);
   const onGeneratedRef = useRef(onGenerated);
 
   function transition(next: DailyPlanPreflightState): void {
@@ -128,6 +166,7 @@ export function useDailyPlanPreflight({ localDate, onGenerated }: UseDailyPlanPr
     epochRef.current += 1;
     inFlightRef.current?.controller.abort();
     inFlightRef.current = null;
+    generateCorrelationRef.current = null;
     transition({ phase: 'idle', localDate: nextDate });
   }
 
@@ -144,6 +183,7 @@ export function useDailyPlanPreflight({ localDate, onGenerated }: UseDailyPlanPr
       epochRef.current += 1;
       inFlightRef.current?.controller.abort();
       inFlightRef.current = null;
+      generateCorrelationRef.current = null;
       transition({ phase: 'idle', localDate });
     }
   }, [localDate, onGenerated]);
@@ -177,14 +217,22 @@ export function useDailyPlanPreflight({ localDate, onGenerated }: UseDailyPlanPr
     if (inFlightRef.current?.operationId === token.operationId) inFlightRef.current = null;
   }
 
-  function block(operation: PreflightOperation, token: { operationId: number; epoch: number; localDate: string; controller: AbortController }, failure: PreflightFailure): void {
+  function block(
+    operation: PreflightOperation,
+    token: { operationId: number; epoch: number; localDate: string; controller: AbortController },
+    failure: PreflightFailure,
+    retryGenerate: GenerateCorrelation | null = null,
+  ): void {
     if (!canCommit(token)) return;
-    transition({ phase: 'blocked', localDate: token.localDate, operation, failure });
+    transition({ phase: 'blocked', localDate: token.localDate, operation, failure, retryGenerate });
     if (failure.recovery === 'login') replace('/login');
   }
 
   async function prepare(): Promise<boolean> {
     const state = getCurrentState();
+    if (state.phase === 'blocked' && state.retryGenerate !== null) {
+      return generate();
+    }
     if (state.phase !== 'idle' && state.phase !== 'blocked' && state.phase !== 'generated') return false;
     const token = begin();
     if (!token) return false;
@@ -198,11 +246,12 @@ export function useDailyPlanPreflight({ localDate, onGenerated }: UseDailyPlanPr
         signal: token.controller.signal,
       });
       const preflight = dailyPlanPreflightResponseSchema.parse(payload).data;
-      if (preflight.status !== 'AWAITING_APPROVAL') {
+      if (preflight.status !== 'AWAITING_APPROVAL' || preflight.localDate !== token.localDate) {
         block('prepare', token, invalidResponseFailure());
         return false;
       }
       if (!canCommit(token)) return false;
+      generateCorrelationRef.current = null;
       transition({ phase: 'reviewing', localDate: token.localDate, preflight, draftItems: toDraftItems(preflight) });
       return true;
     } catch (error: unknown) {
@@ -237,7 +286,14 @@ export function useDailyPlanPreflight({ localDate, onGenerated }: UseDailyPlanPr
         signal: token.controller.signal,
       });
       const preflight = dailyPlanPreflightResponseSchema.parse(payload).data;
-      if (preflight.status !== 'APPROVED') {
+      if (
+        preflight.status !== 'APPROVED' ||
+        preflight.id !== state.preflight.id ||
+        preflight.runId !== state.preflight.runId ||
+        preflight.localDate !== state.preflight.localDate ||
+        preflight.version !== state.preflight.version + 1 ||
+        !sameEditableItems(state.draftItems, preflight)
+      ) {
         block('approve', token, invalidResponseFailure());
         return false;
       }
@@ -254,27 +310,68 @@ export function useDailyPlanPreflight({ localDate, onGenerated }: UseDailyPlanPr
 
   async function generate(): Promise<boolean> {
     const state = getCurrentState();
-    if (state.phase !== 'approved' || state.preflight.status !== 'APPROVED') return false;
+    const retry = state.phase === 'blocked' ? state.retryGenerate : null;
+    const preflight = state.phase === 'approved' ? state.preflight : retry?.preflight ?? null;
+    if (!preflight || preflight.status !== 'APPROVED') return false;
     const token = begin();
     if (!token) return false;
-    transition({ phase: 'generating', localDate: token.localDate, preflight: state.preflight });
+    if (preflight.localDate !== token.localDate) {
+      finish(token);
+      return false;
+    }
+    const input = dailyPlanPreflightGenerateInputSchema.parse({
+      preflightId: preflight.id,
+      expectedPreflightVersion: preflight.version,
+    });
+    const payloadFingerprint = generatePayloadFingerprint(input);
+    const correlation = retry ?? {
+      action: 'generate' as const,
+      preflight,
+      preflightId: preflight.id,
+      runId: preflight.runId,
+      localDate: preflight.localDate,
+      expectedPreflightVersion: preflight.version,
+      payloadFingerprint,
+      idempotencyKey: createIdempotencyKey(),
+    };
+    if (
+      correlation.action !== 'generate' ||
+      correlation.preflightId !== input.preflightId ||
+      correlation.runId !== preflight.runId ||
+      correlation.localDate !== token.localDate ||
+      correlation.expectedPreflightVersion !== input.expectedPreflightVersion ||
+      correlation.payloadFingerprint !== payloadFingerprint
+    ) {
+      block('generate', token, invalidResponseFailure());
+      finish(token);
+      return false;
+    }
+    generateCorrelationRef.current = correlation;
+    transition({ phase: 'generating', localDate: token.localDate, preflight });
     try {
-      const input = dailyPlanPreflightGenerateInputSchema.parse({
-        preflightId: state.preflight.id,
-        expectedPreflightVersion: state.preflight.version,
-      });
       const payload = await requestCore('daily-plans/generate', {
         method: 'POST',
         body: JSON.stringify(input),
+        headers: { 'Idempotency-Key': correlation.idempotencyKey },
         signal: token.controller.signal,
       });
       const proposal = dailyPlanProposalResponseSchema.parse(payload).data;
+      if (
+        proposal.runId !== correlation.runId ||
+        proposal.localDate !== correlation.localDate ||
+        proposal.baseScheduleVersion !== correlation.preflight.baseScheduleVersion ||
+        generateCorrelationRef.current !== correlation
+      ) {
+        block('generate', token, invalidResponseFailure());
+        return false;
+      }
       if (!canCommit(token)) return false;
       transition({ phase: 'generated', localDate: token.localDate, proposalId: proposal.id });
+      generateCorrelationRef.current = null;
       if (canCommit(token)) onGeneratedRef.current(proposal);
       return true;
     } catch (error: unknown) {
-      block('generate', token, failureFor(error));
+      block('generate', token, failureFor(error), isUncertainTransportFailure(error) ? correlation : null);
       return false;
     } finally {
       finish(token);
