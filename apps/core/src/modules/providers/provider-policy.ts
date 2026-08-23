@@ -18,6 +18,30 @@ export const PROVIDER_POLICY = {
   maxCompletionTokens: 2_000,
 } as const;
 
+const shanghaiDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+export function providerUsageLocalDate(instant: Date): string {
+  const parts = Object.fromEntries(
+    shanghaiDateFormatter
+      .formatToParts(instant)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export function providerTokenReservation(inputChars: number): number {
+  return Math.min(
+    PROVIDER_POLICY.maxTokensPerOwnerDay,
+    inputChars + PROVIDER_POLICY.maxCompletionTokens,
+  );
+}
+
 export class ProviderPolicyError extends Error {
   constructor(readonly code: 'DAILY_PLAN_PROVIDER_QUOTA_EXCEEDED' | 'DAILY_PLAN_PROVIDER_RESPONSE_REJECTED') {
     super(code);

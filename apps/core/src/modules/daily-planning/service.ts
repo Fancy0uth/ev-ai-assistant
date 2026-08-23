@@ -8,6 +8,8 @@ import { CredentialNotConfiguredError } from '../providers/credential-service';
 import {
   PROVIDER_POLICY,
   ProviderPolicyError,
+  providerTokenReservation,
+  providerUsageLocalDate,
   validateProviderResult,
 } from '../providers/provider-policy';
 import type { ProviderReliabilityRepository } from '../providers/reliability-repository';
@@ -210,21 +212,11 @@ export function createDailyPlanningService(
         if (execution.attemptCount > PROVIDER_POLICY.maxCallsPerRun) {
           throw new DailyPlanningProviderQuotaError();
         }
-        const priorUsage = dependencies.reliabilityRepository?.usageForOwnerDate(
-          input.ownerId,
-          claimed.preflight.localDate,
-        );
-        if (
-          priorUsage &&
-          (priorUsage.attempts >= PROVIDER_POLICY.maxCallsPerOwnerDay ||
-            priorUsage.totalTokens >= PROVIDER_POLICY.maxTokensPerOwnerDay)
-        ) {
-          throw new DailyPlanningProviderQuotaError();
-        }
-        await dependencies.credentialService.withApiKey(input.ownerId, async (apiKey) => {
-          providerCallId = newId();
-          dependencies.reliabilityRepository?.startProviderCall({
-            id: providerCallId,
+        if (dependencies.reliabilityRepository) {
+          const providerStartedAt = now();
+          const candidateCallId = newId();
+          const reserved = dependencies.reliabilityRepository.reserveProviderCall({
+            id: candidateCallId,
             ownerId: input.ownerId,
             runId: claimed.run.id,
             idempotencyRecordId: execution.idempotencyRecordId,
@@ -233,20 +225,20 @@ export function createDailyPlanningService(
             model: 'deepseek-v4-flash',
             attemptNo: execution.attemptCount,
             inputChars,
-            localDate: claimed.preflight.localDate,
-            startedAt: now().toISOString(),
+            localDate: providerUsageLocalDate(providerStartedAt),
+            startedAt: providerStartedAt.toISOString(),
+            reservedTokens: providerTokenReservation(inputChars),
+            maxAttemptsPerDay: PROVIDER_POLICY.maxCallsPerOwnerDay,
+            maxTokensPerDay: PROVIDER_POLICY.maxTokensPerOwnerDay,
           });
+          if (!reserved) throw new DailyPlanningProviderQuotaError();
+          providerCallId = candidateCallId;
+        }
+        await dependencies.credentialService.withApiKey(input.ownerId, async (apiKey) => {
           providerResult = await dependencies.provider.generate(apiKey, safeProviderInput);
         });
         if (!providerResult) throw new DailyPlanningProviderUnavailableError();
         validateProviderResult(providerResult);
-        if (
-          priorUsage &&
-          providerResult.usage.totalTokens !== null &&
-          priorUsage.totalTokens + providerResult.usage.totalTokens > PROVIDER_POLICY.maxTokensPerOwnerDay
-        ) {
-          throw new DailyPlanningProviderQuotaError();
-        }
         const modelOutput = dailyPlanModelOutputSchema.parse(providerResult.output);
         const validatedItems = validateDailyPlanOutput(packet, modelOutput);
         const timestamp = now().toISOString();

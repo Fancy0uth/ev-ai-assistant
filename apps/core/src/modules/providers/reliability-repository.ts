@@ -64,6 +64,12 @@ export interface ProviderCallFinishInput {
   durationMs: number;
 }
 
+export interface ProviderCallReservationInput extends ProviderCallStartInput {
+  reservedTokens: number;
+  maxAttemptsPerDay: number;
+  maxTokensPerDay: number;
+}
+
 interface IdempotencyRow {
   id: string;
   owner_id: string;
@@ -133,6 +139,7 @@ export interface ProviderReliabilityRepository {
     updatedAt: string;
   }): boolean;
   startProviderCall(input: ProviderCallStartInput): void;
+  reserveProviderCall(input: ProviderCallReservationInput): boolean;
   finishProviderCall(input: ProviderCallFinishInput): boolean;
   usageForOwnerDate(ownerId: string, localDate: string): { attempts: number; totalTokens: number };
 }
@@ -177,19 +184,49 @@ export function createProviderReliabilityRepository(
       status, failure_code, finish_reason, prompt_tokens, completion_tokens, total_tokens,
       input_chars, output_chars, policy_version, contract_version, app_version, local_date,
       started_at, finished_at, duration_ms
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, 'STARTED', null, null, null, null, null, ?, null,
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, 'STARTED', null, null, null, null, ?, ?, null,
       'PROVIDER_POLICY_V1', 'DAILY_PLAN_V1', ?, ?, ?, null, null)`,
   );
   const finishProviderCallStatement = database.prepare(
     `update provider_call_logs
      set status = ?, failure_code = ?, finish_reason = ?, prompt_tokens = ?,
-         completion_tokens = ?, total_tokens = ?, output_chars = ?, finished_at = ?, duration_ms = ?
+         completion_tokens = ?, total_tokens = coalesce(?, total_tokens), output_chars = ?, finished_at = ?, duration_ms = ?
      where id = ? and status = 'STARTED'`,
   );
   const usageForOwnerDateStatement = database.prepare(
     `select count(*) as attempts, coalesce(sum(total_tokens), 0) as total_tokens
      from provider_call_logs
      where owner_id = ? and local_date = ? and status in ('STARTED', 'SUCCEEDED', 'FAILED')`,
+  );
+  const reserveProviderCallTransaction = database.transaction(
+    (input: ProviderCallReservationInput): boolean => {
+      const usage = usageForOwnerDateStatement.get(input.ownerId, input.localDate) as {
+        attempts: number;
+        total_tokens: number;
+      };
+      if (
+        usage.attempts >= input.maxAttemptsPerDay ||
+        usage.total_tokens + input.reservedTokens > input.maxTokensPerDay
+      ) {
+        return false;
+      }
+      startProviderCallStatement.run(
+        input.id,
+        input.ownerId,
+        input.runId,
+        input.idempotencyRecordId,
+        input.provider,
+        input.operation,
+        input.model,
+        input.attemptNo,
+        input.reservedTokens,
+        input.inputChars,
+        APP_VERSION,
+        input.localDate,
+        input.startedAt,
+      );
+      return true;
+    },
   );
 
   return {
@@ -267,11 +304,16 @@ export function createProviderReliabilityRepository(
         input.operation,
         input.model,
         input.attemptNo,
+        null,
         input.inputChars,
         APP_VERSION,
         input.localDate,
         input.startedAt,
       );
+    },
+
+    reserveProviderCall(input) {
+      return reserveProviderCallTransaction.immediate(input);
     },
 
     finishProviderCall(input) {

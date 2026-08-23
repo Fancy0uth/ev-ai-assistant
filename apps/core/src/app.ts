@@ -75,6 +75,7 @@ export interface AppOptions {
   memoryProjectionRoot?: string;
   enableDailyPlanAutomation?: boolean;
   dailyPlanAutomationNow?: () => Date;
+  providerReliabilityNow?: () => Date;
   logger?: boolean;
   secureCookies?: boolean;
 }
@@ -143,6 +144,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const idempotencyService = createIdempotencyService({
     database,
     repository: providerReliabilityRepository,
+    ...(options.providerReliabilityNow ? { now: options.providerReliabilityNow } : {}),
   });
   const dailyPlanRepository = createDailyPlanRunRepository(database);
   const dailyPlanExecutionUnitOfWork = createDailyPlanExecutionUnitOfWork({
@@ -171,6 +173,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     reliabilityRepository: providerReliabilityRepository,
     executionUnitOfWork: dailyPlanExecutionUnitOfWork,
     newId: () => crypto.randomUUID(),
+    ...(options.providerReliabilityNow ? { now: options.providerReliabilityNow } : {}),
   });
   const dailyPlanAutomationService = createDailyPlanAutomationService({
     dailyPlanPreflightService,

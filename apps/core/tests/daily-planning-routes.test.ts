@@ -18,6 +18,8 @@ import {
   type DailyPlanningProviderResult,
 } from '../src/modules/daily-planning/provider';
 import { SecretStoreUnavailableError, type SecretStorePort } from '../src/modules/providers/secret-store';
+import { PROVIDER_POLICY, providerUsageLocalDate } from '../src/modules/providers/provider-policy';
+import { createProviderReliabilityRepository } from '../src/modules/providers/reliability-repository';
 import { openDatabase } from '../src/storage/database';
 
 const credentials = {
@@ -32,6 +34,7 @@ const otherOwnerTimeRequestId = '00000000-0000-4000-8000-000000000703';
 
 class FakeSecretStore implements SecretStorePort {
   private readonly values = new Map<string, string>();
+  unprotectCalls = 0;
 
   async protect(plaintext: string): Promise<string> {
     this.values.set('daily-plan-route-credential', plaintext);
@@ -39,6 +42,7 @@ class FakeSecretStore implements SecretStorePort {
   }
 
   async unprotect(protectedValue: string): Promise<string> {
+    this.unprotectCalls += 1;
     const plaintext = this.values.get(protectedValue);
     if (plaintext === undefined) throw new SecretStoreUnavailableError();
     return plaintext;
@@ -50,10 +54,12 @@ class FakeDailyPlanningProvider implements DailyPlanningProvider {
   response: unknown = validModelOutput();
   error: Error | undefined;
   beforeGenerate: (() => void) | undefined;
+  waitForGenerate: Promise<void> | undefined;
 
   async generate(_apiKey: string, input: DailyPlanningProviderInput): Promise<DailyPlanningProviderResult> {
     this.inputs.push(input);
     this.beforeGenerate?.();
+    if (this.waitForGenerate) await this.waitForGenerate;
     if (this.error) throw this.error;
     return {
       output: this.response,
@@ -88,17 +94,27 @@ function readSessionToken(setCookieHeader: string | string[] | undefined): strin
   return match[1];
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 describe('daily planning generation route', () => {
   let app: FastifyInstance | undefined;
   let controlDatabase: Database.Database | undefined;
   let databasePath: string;
   let directory: string;
   let provider: FakeDailyPlanningProvider;
+  let secretStore: FakeSecretStore;
 
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'ev-daily-planning-routes-'));
     databasePath = join(directory, 'app.sqlite');
     provider = new FakeDailyPlanningProvider();
+    secretStore = new FakeSecretStore();
   });
 
   afterEach(async () => {
@@ -116,7 +132,7 @@ describe('daily planning generation route', () => {
       databasePath,
       dailyPlanningProvider: provider,
       logger: false,
-      secretStore: new FakeSecretStore(),
+      secretStore,
       ...overrides,
     });
     const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
@@ -150,7 +166,7 @@ describe('daily planning generation route', () => {
     expect(response.statusCode).toBe(200);
   }
 
-  async function prepareAndApprove(token: string): Promise<{
+  async function prepareAndApprove(token: string, targetDate = localDate): Promise<{
     preflightId: string;
     expectedPreflightVersion: number;
   }> {
@@ -158,7 +174,7 @@ describe('daily planning generation route', () => {
       method: 'POST',
       url: '/v1/daily-plans/preflights',
       cookies: { ev_session: token },
-      payload: { localDate },
+      payload: { localDate: targetDate },
     });
     expect(prepared.statusCode).toBe(201);
     const preflight = dailyPlanPreflightResponseSchema.parse(prepared.json()).data;
@@ -239,6 +255,45 @@ describe('daily planning generation route', () => {
         .prepare('select state, response_status from idempotency_records where idempotency_key = ?')
         .get(idempotencyKey),
     ).toEqual({ state: 'IN_PROGRESS', response_status: null });
+  }
+
+  function seedFinishedUsage(ownerId: string, usageDate: string, totals: number[]): void {
+    const database = controlDatabase ?? openDatabase(databasePath);
+    controlDatabase = database;
+    const reliability = createProviderReliabilityRepository(database);
+    totals.forEach((totalTokens, index) => {
+      const id = `seed-provider-call-${index}-${totalTokens}`;
+      expect(
+        reliability.reserveProviderCall({
+          id,
+          ownerId,
+          runId: null,
+          idempotencyRecordId: null,
+          provider: 'DEEPSEEK',
+          operation: 'daily_plan.generate',
+          model: 'deepseek-v4-flash',
+          attemptNo: 1,
+          inputChars: 10,
+          localDate: usageDate,
+          startedAt: '2026-08-24T00:00:00.000Z',
+          reservedTokens: totalTokens,
+          maxAttemptsPerDay: PROVIDER_POLICY.maxCallsPerOwnerDay,
+          maxTokensPerDay: PROVIDER_POLICY.maxTokensPerOwnerDay,
+        }),
+      ).toBe(true);
+      expect(
+        reliability.finishProviderCall({
+          id,
+          status: 'SUCCEEDED',
+          failureCode: null,
+          finishReason: 'stop',
+          usage: { promptTokens: totalTokens, completionTokens: 0, totalTokens },
+          outputChars: 10,
+          finishedAt: '2026-08-24T00:00:01.000Z',
+          durationMs: 1_000,
+        }),
+      ).toBe(true);
+    });
   }
 
   it('requires an authenticated owner session', async () => {
@@ -405,6 +460,102 @@ describe('daily planning generation route', () => {
 
     expect(response.statusCode).toBe(500);
     expectGenerationTerminalBundleRolledBack(key);
+  });
+
+  it('atomically reserves the twentieth Shanghai-day call and rejects the concurrent twenty-first before key access', async () => {
+    const invocation = new Date('2026-08-24T02:00:00.000Z');
+    const { token, ownerId } = await createAuthenticatedApp({
+      providerReliabilityNow: () => invocation,
+    });
+    await saveCredential(token);
+    provider.response = {
+      schemaVersion: 'DAILY_PLAN_MODEL_V1',
+      summary: 'No-op quota concurrency plan.',
+      actions: [],
+    };
+    const firstInput = await prepareAndApprove(token, '2026-09-01');
+    const secondInput = await prepareAndApprove(token, '2026-09-02');
+    seedFinishedUsage(ownerId, '2026-08-24', Array.from({ length: 19 }, () => 1));
+
+    const entered = deferred();
+    const release = deferred();
+    provider.beforeGenerate = entered.resolve;
+    provider.waitForGenerate = release.promise;
+    const firstRequest = app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-quota-concurrent-call-20' },
+      payload: firstInput,
+    });
+    await entered.promise;
+
+    const rejected = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v05-quota-concurrent-call-21' },
+      payload: secondInput,
+    });
+    expect(rejected.statusCode).toBe(429);
+    expect(apiErrorSchema.parse(rejected.json()).error.code).toBe('DAILY_PLAN_PROVIDER_QUOTA_EXCEEDED');
+    expect(provider.inputs).toHaveLength(1);
+    expect(secretStore.unprotectCalls).toBe(1);
+    const started = controlDatabase!
+      .prepare("select local_date, total_tokens from provider_call_logs where status = 'STARTED'")
+      .get() as { local_date: string; total_tokens: number };
+    expect(started.local_date).toBe('2026-08-24');
+    expect(started.total_tokens).toBeGreaterThan(PROVIDER_POLICY.maxCompletionTokens);
+
+    release.resolve();
+    expect((await firstRequest).statusCode).toBe(201);
+    expect(
+      controlDatabase!
+        .prepare("select total_tokens from provider_call_logs where status = 'SUCCEEDED' order by started_at desc limit 1")
+        .get(),
+    ).toEqual({ total_tokens: 15 });
+  });
+
+  it('rejects concurrent calls at 99k daily tokens before decrypting a key or invoking Provider', async () => {
+    const invocation = new Date('2026-08-24T02:00:00.000Z');
+    const { token, ownerId } = await createAuthenticatedApp({
+      providerReliabilityNow: () => invocation,
+    });
+    await saveCredential(token);
+    provider.response = {
+      schemaVersion: 'DAILY_PLAN_MODEL_V1',
+      summary: 'No-op quota boundary plan.',
+      actions: [],
+    };
+    const firstInput = await prepareAndApprove(token, '2026-10-01');
+    const secondInput = await prepareAndApprove(token, '2026-10-02');
+    seedFinishedUsage(ownerId, '2026-08-24', [99_000]);
+
+    const responses = await Promise.all([
+      app!.inject({
+        method: 'POST',
+        url: '/v1/daily-plans/generate',
+        cookies: { ev_session: token },
+        headers: { 'idempotency-key': 'v05-quota-token-call-a' },
+        payload: firstInput,
+      }),
+      app!.inject({
+        method: 'POST',
+        url: '/v1/daily-plans/generate',
+        cookies: { ev_session: token },
+        headers: { 'idempotency-key': 'v05-quota-token-call-b' },
+        payload: secondInput,
+      }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual([429, 429]);
+    expect(provider.inputs).toHaveLength(0);
+    expect(secretStore.unprotectCalls).toBe(0);
+  });
+
+  it('derives the quota date at the Asia/Shanghai natural-day boundary', () => {
+    expect(providerUsageLocalDate(new Date('2026-08-23T15:59:59.999Z'))).toBe('2026-08-23');
+    expect(providerUsageLocalDate(new Date('2026-08-23T16:00:00.000Z'))).toBe('2026-08-24');
   });
 
   it('maps a missing credential to a safe provider-not-configured conflict', async () => {
