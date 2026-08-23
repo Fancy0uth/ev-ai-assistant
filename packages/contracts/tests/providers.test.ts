@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  APP_VERSION,
+  deepSeekFinishReasonSchema,
+  deepSeekModelSchema,
+  deepSeekUsageSchema,
   deepSeekConnectionTestResultSchema,
   deepSeekCredentialDeleteInputSchema,
   deepSeekCredentialStatusResponseSchema,
@@ -16,6 +20,22 @@ const publicCredentialStatus = {
 };
 
 describe('DeepSeek credential contracts', () => {
+  it('freezes the v0.5 reliability version and DeepSeek allowlists', () => {
+    expect(APP_VERSION).toBe('0.5.0');
+    expect(deepSeekModelSchema.safeParse('deepseek-v4-flash').success).toBe(true);
+    expect(deepSeekModelSchema.safeParse('deepseek-v4-pro').success).toBe(true);
+    expect(deepSeekModelSchema.safeParse('deepseek-chat').success).toBe(false);
+    expect(deepSeekFinishReasonSchema.safeParse('stop').success).toBe(true);
+    expect(deepSeekFinishReasonSchema.safeParse('unexpected').success).toBe(false);
+    expect(
+      deepSeekUsageSchema.parse({
+        promptTokens: 12,
+        completionTokens: 5,
+        totalTokens: 17,
+      }),
+    ).toEqual({ promptTokens: 12, completionTokens: 5, totalTokens: 17 });
+  });
+
   it('accepts a trimmed valid key write so usable DeepSeek credentials are not rejected', () => {
     expect(deepSeekCredentialWriteInputSchema.parse({ apiKey: '  ds-test-key  ' })).toEqual({
       apiKey: 'ds-test-key',

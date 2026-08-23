@@ -1,17 +1,19 @@
 # Changelog
 
-## [0.2.0] — Unreleased（待合并）
+## [0.5.0] — Unreleased（待合并）
 
-此版本仍待合并，尚未发布。
+此版本仍待合并，尚未发布。真实 DeepSeek 人工验收为 `NOT RUN — APPROVAL REQUIRED`；自动测试只使用显式注入的 Fake Provider。
 
 ### Changed
 
-- Core 的 live health 响应报告版本 `0.2.0`。
+- Core 的 live health 响应报告版本 `0.5.0`。
 - README 说明了本地单 Owner Dashboard 技术预览的启动方式与能力边界。
 - Today 从“任务摘要”扩展为日程、行动、恢复 Signal 和 Proposal 的本地控制台入口。
 - 每日计划的生产自动触发改为 Shanghai 07:00 一次性 timer 与当天首次访问补偿；旧通用 `daily_plan_jobs` 定时器不再由 Core 启动。
 
 ### Added
+
+- Provider Reliability 的统一版本、DeepSeek 模型/finish reason/usage 允许字段契约；后续切片将以此为 SQLite v18、幂等与脱敏日志的唯一边界。
 
 - 日程/课表、学习、健身、饮食、记忆和项目的真实 Dashboard 路由与响应式工作区。
 - 学期、课程资料、课表导入请求、日计划 Proposal、恢复 check-in、已确认餐食和只读项目 scope 的本地数据层。

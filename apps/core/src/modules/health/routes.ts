@@ -1,4 +1,4 @@
-import { healthResponseSchema, readinessResponseSchema } from '@ev/contracts';
+import { APP_VERSION, healthResponseSchema, readinessResponseSchema } from '@ev/contracts';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 
@@ -10,7 +10,7 @@ export async function registerHealthRoutes(
     return healthResponseSchema.parse({
       status: 'ok',
       service: 'ev-core',
-      version: '0.2.0',
+      version: APP_VERSION,
     });
   });
 

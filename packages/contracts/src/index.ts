@@ -11,6 +11,7 @@ export * from './nutrition';
 export * from './proposals';
 export * from './projects';
 export * from './providers';
+export * from './reliability';
 export * from './tasks';
 export * from './today';
 export * from './wellbeing';
