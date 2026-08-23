@@ -109,12 +109,15 @@ describe('daily planning generation route', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  async function createAuthenticatedApp(): Promise<{ token: string; ownerId: string }> {
+  async function createAuthenticatedApp(
+    overrides: Parameters<typeof buildApp>[0] = {},
+  ): Promise<{ token: string; ownerId: string }> {
     app = await buildApp({
       databasePath,
       dailyPlanningProvider: provider,
       logger: false,
       secretStore: new FakeSecretStore(),
+      ...overrides,
     });
     const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
     expect(setup.statusCode).toBe(201);
@@ -214,6 +217,28 @@ describe('daily planning generation route', () => {
     ]) {
       expect(body).not.toContain(prohibited);
     }
+  }
+
+  function expectGenerationTerminalBundleRolledBack(idempotencyKey: string): void {
+    const database = controlDatabase ?? openDatabase(databasePath);
+    controlDatabase = database;
+    expect(database.prepare('select count(*) as count from daily_plan_proposals').get()).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare('select status from daily_plan_preflights order by created_at desc limit 1')
+        .get(),
+    ).toEqual({ status: 'CLAIMED' });
+    expect(
+      database.prepare('select status from daily_plan_runs order by created_at desc limit 1').get(),
+    ).toEqual({ status: 'GENERATING' });
+    expect(
+      database.prepare('select status from provider_call_logs order by started_at desc limit 1').get(),
+    ).toEqual({ status: 'STARTED' });
+    expect(
+      database
+        .prepare('select state, response_status from idempotency_records where idempotency_key = ?')
+        .get(idempotencyKey),
+    ).toEqual({ state: 'IN_PROGRESS', response_status: null });
   }
 
   it('requires an authenticated owner session', async () => {
@@ -334,6 +359,52 @@ describe('daily planning generation route', () => {
     });
     expect(conflict.statusCode).toBe(409);
     expect(apiErrorSchema.parse(conflict.json()).error.code).toBe('IDEMPOTENCY_CONFLICT');
+  });
+
+  it('rolls back every success terminal when a fault occurs after Provider-log finalization', async () => {
+    const key = 'v05-terminal-uow-success-fault';
+    const { token, ownerId } = await createAuthenticatedApp({
+      dailyPlanTerminalFault(checkpoint) {
+        if (checkpoint.phase === 'PROVIDER_TERMINAL') throw new Error('success terminal fault');
+      },
+    });
+    createTimeRequest(ownerId, ownerTimeRequestId, 'atomic success terminal');
+    await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
+
+    const response = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': key },
+      payload: generationInput,
+    });
+
+    expect(response.statusCode).toBe(500);
+    expectGenerationTerminalBundleRolledBack(key);
+  });
+
+  it('rolls back every failure terminal when a fault occurs after Provider-log finalization', async () => {
+    const key = 'v05-terminal-uow-failure-fault';
+    const { token } = await createAuthenticatedApp({
+      dailyPlanTerminalFault(checkpoint) {
+        if (checkpoint.phase === 'PROVIDER_TERMINAL') throw new Error('failure terminal fault');
+      },
+    });
+    await saveCredential(token);
+    const generationInput = await prepareAndApprove(token);
+    provider.error = new DailyPlanningProviderUnavailableError();
+
+    const response = await app!.inject({
+      method: 'POST',
+      url: '/v1/daily-plans/generate',
+      cookies: { ev_session: token },
+      headers: { 'idempotency-key': key },
+      payload: generationInput,
+    });
+
+    expect(response.statusCode).toBe(500);
+    expectGenerationTerminalBundleRolledBack(key);
   });
 
   it('maps a missing credential to a safe provider-not-configured conflict', async () => {

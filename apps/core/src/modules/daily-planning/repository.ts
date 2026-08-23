@@ -98,6 +98,10 @@ export type DailyPlanPreflightClaimResult =
       context: DailyPlanningReadContext;
     };
 
+export type DailyPlanPreflightCompletionResult =
+  | { kind: 'completed'; proposal: DailyPlanProposal }
+  | { kind: 'stale' };
+
 export interface DailyPlanProviderExecutionLease {
   leaseToken: string;
   leaseExpiresAt: string;
@@ -193,6 +197,14 @@ export interface DailyPlanRunRepository {
     completedAt: string;
     leaseToken?: string;
   }): DailyPlanProposal;
+  commitClaimedPreflight(input: {
+    ownerId: string;
+    preflightId: string;
+    expectedVersion: number;
+    proposal: DailyPlanProposal;
+    completedAt: string;
+    leaseToken?: string;
+  }): DailyPlanPreflightCompletionResult;
   failClaimedPreflight(input: {
     ownerId: string;
     preflightId: string;
@@ -227,7 +239,7 @@ export interface DailyPlanRunRepository {
 }
 
 export class DailyPlanBaseVersionStaleError extends Error {
-  constructor() {
+  constructor(readonly executionFinalized = false) {
     super('DAILY_PLAN_BASE_VERSION_STALE');
     this.name = 'DailyPlanBaseVersionStaleError';
   }
@@ -1428,6 +1440,13 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         throw new DailyPlanBaseVersionStaleError();
       }
       return result.proposal;
+    },
+
+    commitClaimedPreflight(input) {
+      const result = completeClaimedPreflightTransaction(input);
+      return 'stale' in result
+        ? { kind: 'stale' }
+        : { kind: 'completed', proposal: result.proposal };
     },
 
     failClaimedPreflight(input) {

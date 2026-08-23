@@ -56,6 +56,10 @@ import { createDailyPlanRunRepository } from './modules/daily-planning/repositor
 import { createDailyPlanReviewService } from './modules/daily-planning/review-service';
 import { createDailyPlanPreflightService } from './modules/daily-planning/preflight-service';
 import { createDailyPlanningService } from './modules/daily-planning/service';
+import {
+  createDailyPlanExecutionUnitOfWork,
+  type DailyPlanTerminalFaultCheckpoint,
+} from './modules/daily-planning/execution-unit-of-work';
 import { registerDailyPlanningRoutes } from './routes/daily-planning';
 
 export interface AppOptions {
@@ -66,6 +70,7 @@ export interface AppOptions {
   secretStore?: SecretStorePort;
   deepSeekConnectionTester?: DeepSeekConnectionTester;
   dailyPlanningProvider?: DailyPlanningProvider;
+  dailyPlanTerminalFault?: (checkpoint: DailyPlanTerminalFaultCheckpoint) => void;
   databasePath?: string;
   memoryProjectionRoot?: string;
   enableDailyPlanAutomation?: boolean;
@@ -140,6 +145,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     repository: providerReliabilityRepository,
   });
   const dailyPlanRepository = createDailyPlanRunRepository(database);
+  const dailyPlanExecutionUnitOfWork = createDailyPlanExecutionUnitOfWork({
+    database,
+    dailyPlanRepository,
+    reliabilityRepository: providerReliabilityRepository,
+    ...(options.dailyPlanTerminalFault ? { fault: options.dailyPlanTerminalFault } : {}),
+  });
   const dailyPlanningContextService = createDailyPlanningContextService(dailyPlanRepository, {
     newId: () => crypto.randomUUID(),
   });
@@ -158,6 +169,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     credentialService: providerCredentialService,
     provider: options.dailyPlanningProvider ?? createDeepSeekDailyPlanningProvider(),
     reliabilityRepository: providerReliabilityRepository,
+    executionUnitOfWork: dailyPlanExecutionUnitOfWork,
     newId: () => crypto.randomUUID(),
   });
   const dailyPlanAutomationService = createDailyPlanAutomationService({

@@ -12,6 +12,10 @@ import {
 } from '../providers/provider-policy';
 import type { ProviderReliabilityRepository } from '../providers/reliability-repository';
 import type {
+  DailyPlanExecutionUnitOfWork,
+  SafeHttpSnapshot,
+} from './execution-unit-of-work';
+import type {
   ApprovedDailyPlanningPacket,
 } from './context-service';
 import { buildApprovedDailyPlanningPacket } from './context-service';
@@ -44,6 +48,7 @@ export interface DailyPlanningServiceDependencies {
   credentialService: DailyPlanningCredentialPort;
   provider: DailyPlanningProvider;
   reliabilityRepository?: ProviderReliabilityRepository;
+  executionUnitOfWork?: DailyPlanExecutionUnitOfWork;
   newId?: () => string;
   now?: () => Date;
 }
@@ -58,6 +63,8 @@ export interface DailyPlanningService {
       leaseToken: string;
       attemptCount: number;
       recovered: boolean;
+      snapshotForProposal?: (proposal: DailyPlanProposal) => SafeHttpSnapshot;
+      snapshotForError?: (error: unknown) => SafeHttpSnapshot;
     };
   }): Promise<DailyPlanProposal>;
 }
@@ -69,7 +76,10 @@ export type DailyPlanGenerationFailureCode =
   | 'DAILY_PLAN_PROVIDER_RESPONSE_REJECTED';
 
 export class DailyPlanGenerationError extends Error {
-  constructor(readonly code: DailyPlanGenerationFailureCode) {
+  constructor(
+    readonly code: DailyPlanGenerationFailureCode,
+    readonly executionFinalized = false,
+  ) {
     super(code);
     this.name = 'DailyPlanGenerationError';
   }
@@ -192,6 +202,7 @@ export function createDailyPlanningService(
       const inputChars = JSON.stringify(safeProviderInput).length;
       let providerCallId: string | undefined;
       let providerResult: Awaited<ReturnType<DailyPlanningProvider['generate']>> | undefined;
+      let terminalizationStarted = false;
       try {
         if (inputChars > PROVIDER_POLICY.maxInputChars) {
           throw new ProviderPolicyError('DAILY_PLAN_PROVIDER_RESPONSE_REJECTED');
@@ -252,12 +263,47 @@ export function createDailyPlanningService(
           createdAt: timestamp,
           updatedAt: timestamp,
         });
+        const completedAt = now().toISOString();
+        if (
+          dependencies.executionUnitOfWork &&
+          execution.idempotencyRecordId &&
+          execution.snapshotForProposal &&
+          execution.snapshotForError
+        ) {
+          terminalizationStarted = true;
+          const terminal = dependencies.executionUnitOfWork.complete({
+            ownerId: input.ownerId,
+            idempotencyRecordId: execution.idempotencyRecordId,
+            leaseToken: execution.leaseToken,
+            preflightId: input.preflightId,
+            expectedPreflightVersion: claimed.preflight.version,
+            proposal,
+            completedAt,
+            providerCall: providerCallId
+              ? {
+                  id: providerCallId,
+                  status: 'SUCCEEDED',
+                  failureCode: null,
+                  finishReason: providerResult.finishReason,
+                  usage: providerResult.usage,
+                  outputChars: providerResult.outputChars,
+                  finishedAt: completedAt,
+                  durationMs: Math.max(0, now().getTime() - startedAt.getTime()),
+                }
+              : null,
+            successSnapshot: execution.snapshotForProposal(proposal),
+            staleSnapshot: execution.snapshotForError(new DailyPlanBaseVersionStaleError()),
+          });
+          if (terminal.kind === 'stale') throw new DailyPlanBaseVersionStaleError(true);
+          return terminal.proposal;
+        }
+
         const completed = dependencies.repository.completeClaimedPreflight({
           ownerId: input.ownerId,
           preflightId: input.preflightId,
           expectedVersion: claimed.preflight.version,
           proposal,
-          completedAt: now().toISOString(),
+          completedAt,
           leaseToken: execution.leaseToken,
         });
         if (providerCallId) {
@@ -274,7 +320,45 @@ export function createDailyPlanningService(
         }
         return completed;
       } catch (error) {
+        if (terminalizationStarted) throw error;
         const mapped = failure(error);
+        if (
+          dependencies.executionUnitOfWork &&
+          execution.idempotencyRecordId &&
+          execution.snapshotForError
+        ) {
+          const completedAt = now().toISOString();
+          const terminalError = new DailyPlanGenerationError(mapped.code, true);
+          terminalizationStarted = true;
+          dependencies.executionUnitOfWork.fail({
+            ownerId: input.ownerId,
+            idempotencyRecordId: execution.idempotencyRecordId,
+            leaseToken: execution.leaseToken,
+            preflightId: input.preflightId,
+            expectedPreflightVersion: claimed.preflight.version,
+            runFailureCode: mapped.runCode,
+            terminalReason: mapped.code,
+            completedAt,
+            providerCall: providerCallId
+              ? {
+                  id: providerCallId,
+                  status: 'FAILED',
+                  failureCode: mapped.code,
+                  finishReason: providerResult?.finishReason ?? null,
+                  usage: providerResult?.usage ?? {
+                    promptTokens: null,
+                    completionTokens: null,
+                    totalTokens: null,
+                  },
+                  outputChars: providerResult?.outputChars ?? null,
+                  finishedAt: completedAt,
+                  durationMs: Math.max(0, now().getTime() - startedAt.getTime()),
+                }
+              : null,
+            failureSnapshot: execution.snapshotForError(terminalError),
+          });
+          throw terminalError;
+        }
         if (providerCallId) {
           dependencies.reliabilityRepository?.finishProviderCall({
             id: providerCallId,

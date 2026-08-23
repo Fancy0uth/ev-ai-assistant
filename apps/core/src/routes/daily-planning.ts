@@ -162,6 +162,22 @@ function toGenerationApiError(error: unknown): ApiError {
   }
 }
 
+function generationExecutionWasFinalized(error: unknown): boolean {
+  return (
+    (error instanceof DailyPlanBaseVersionStaleError && error.executionFinalized) ||
+    (error instanceof DailyPlanGenerationError && error.executionFinalized)
+  );
+}
+
+function generationFailureSnapshot(error: unknown) {
+  const mapped = toGenerationApiError(error);
+  return {
+    status: mapped.statusCode,
+    body: apiErrorBody(mapped),
+    failureCode: mapped.code,
+  };
+}
+
 export async function registerDailyPlanningRoutes(
   app: FastifyInstance,
   options: DailyPlanningRouteOptions,
@@ -244,25 +260,24 @@ export async function registerDailyPlanningRoutes(
           leaseToken: claim.leaseToken,
           attemptCount: claim.attemptCount,
           recovered: claim.recovered,
+          snapshotForProposal(proposal) {
+            return {
+              status: 201,
+              body: dailyPlanProposalResponseSchema.parse({ data: proposal }),
+              failureCode: 'NONE',
+            };
+          },
+          snapshotForError: generationFailureSnapshot,
         },
       });
       const body = dailyPlanProposalResponseSchema.parse({ data: proposal });
-      if (!options.idempotencyService.complete({ ...claim, status: 201, body })) {
-        return sendIdempotencyClaim(reply, {
-          kind: 'TERMINAL',
-          status: 503,
-          body: apiErrorSchema.parse({
-            error: {
-              code: 'DAILY_PLAN_PROVIDER_INTERRUPTED',
-              message: '每日计划生成结果已过期，请重新发起。',
-            },
-          }),
-        });
-      }
       return reply.status(201).send(body);
     } catch (error) {
       const mapped = toGenerationApiError(error);
       const body = apiErrorBody(mapped);
+      if (generationExecutionWasFinalized(error)) {
+        return reply.status(mapped.statusCode).send(body);
+      }
       const finalized = options.idempotencyService.fail({
         ...claim,
         status: mapped.statusCode,
