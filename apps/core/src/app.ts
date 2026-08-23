@@ -40,6 +40,7 @@ import { createWindowsDpapiSecretStore, type SecretStorePort } from './modules/p
 import { createTaskRepository } from './modules/tasks/repository';
 import { registerTaskRoutes } from './modules/tasks/routes';
 import { createTaskService } from './modules/tasks/service';
+import { createTaskSchedulingUnitOfWork } from './modules/tasks/task-scheduling-unit-of-work';
 import { registerTodayRoutes } from './modules/today/routes';
 import { openDatabase } from './storage/database';
 import type { AgentProvider } from './modules/agent/provider';
@@ -91,8 +92,16 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     createAgentRepository(database),
     options.agentProvider ? { provider: options.agentProvider } : {},
   );
-  const taskService = createTaskService(createTaskRepository(database));
+  const taskRepository = createTaskRepository(database);
   const calendarRepository = createCalendarRepository(database);
+  const taskService = createTaskService(taskRepository, {
+    schedulingUnitOfWork: createTaskSchedulingUnitOfWork(database, {
+      taskRepository,
+      calendarRepository,
+      newId: () => crypto.randomUUID(),
+      now: () => new Date(),
+    }),
+  });
   const calendarService = createCalendarService(calendarRepository);
   const fitnessService = createFitnessService(calendarRepository);
   const learningService = createLearningService(database, calendarRepository);
