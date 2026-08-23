@@ -12,7 +12,7 @@
 
 | 顺序 | 版本 | 退出结果 | 独立计划 | Sol review |
 | --- | --- | --- | --- | --- |
-| 1 | v0.4 | UI Task/Action→TimeRequest、调用前语义 preflight、手工 Event、真实详情路由、UI-origin 闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.4-action-scheduling-foundation.md) | `docs/reviews/2026-08-23-v0.4-sol-smoke-review.md` |
+| 1 | v0.4 | 兼容排程输入、ACTIVE/CLOSED TimeRequest、Task/Calendar Unit of Work、事务外 preflight Provider、手工 Event、详情路由与 UI-origin 闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.4-action-scheduling-foundation.md) | `docs/reviews/2026-08-23-v0.4-sol-smoke-review.md` |
 | 2 | v0.5 | 真实 DeepSeek/DPAPI、幂等、Run 恢复、超时/配额、脱敏日志、版本一致 | [计划](../docs/superpowers/plans/2026-08-23-v0.5-provider-reliability.md) | `docs/reviews/2026-08-23-v0.5-sol-smoke-review.md` |
 | 3 | v0.6 | 课程/课表/学习闭环、真实视觉、低置信编辑、公开来源检索 | [计划](../docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md) | `docs/reviews/2026-08-23-v0.6-sol-smoke-review.md` |
 | 4 | v0.7 | 健身/恢复与权威营养数据闭环，无医疗诊断 | [计划](../docs/superpowers/plans/2026-08-23-v0.7-fitness-nutrition-loop.md) | `docs/reviews/2026-08-23-v0.7-sol-smoke-review.md` |
