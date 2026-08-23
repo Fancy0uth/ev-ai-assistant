@@ -36,9 +36,12 @@ export function providerUsageLocalDate(instant: Date): string {
 }
 
 export function providerTokenReservation(inputChars: number): number {
+  // UTF-8 bytes are a conservative upper bound for tokenizer output. Four
+  // bytes per JavaScript code unit intentionally over-reserves multilingual
+  // input instead of assuming one character is one token.
   return Math.min(
     PROVIDER_POLICY.maxTokensPerOwnerDay,
-    inputChars + PROVIDER_POLICY.maxCompletionTokens,
+    inputChars * 4 + PROVIDER_POLICY.maxCompletionTokens,
   );
 }
 

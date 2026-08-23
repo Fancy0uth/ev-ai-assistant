@@ -645,7 +645,7 @@ describe('daily-plan storage migrations', () => {
             lease_expires_at: null,
             deadline_at: null,
             terminal_reason: null,
-            app_version: '0.5.0',
+            app_version: null,
             idempotency_record_id: null,
           })),
         });

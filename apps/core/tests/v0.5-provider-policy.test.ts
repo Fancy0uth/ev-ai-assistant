@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROVIDER_POLICY,
   ProviderPolicyError,
+  providerTokenReservation,
   validateProviderResult,
 } from '../src/modules/providers/provider-policy';
 
@@ -28,5 +29,11 @@ describe('v0.5 provider execution policy', () => {
         outputChars: 20,
       }),
     ).toThrow(ProviderPolicyError);
+  });
+
+  it('reserves a conservative input-token ceiling plus the full completion allowance', () => {
+    expect(providerTokenReservation(100)).toBe(2_400);
+    expect(providerTokenReservation(PROVIDER_POLICY.maxInputChars)).toBe(82_000);
+    expect(providerTokenReservation(30_000)).toBe(PROVIDER_POLICY.maxTokensPerOwnerDay);
   });
 });

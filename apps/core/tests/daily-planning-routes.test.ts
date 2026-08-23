@@ -416,11 +416,11 @@ describe('daily planning generation route', () => {
     expect(apiErrorSchema.parse(conflict.json()).error.code).toBe('IDEMPOTENCY_CONFLICT');
   });
 
-  it('rolls back every success terminal when a fault occurs after Provider-log finalization', async () => {
+  it('rolls back every success terminal when a fault occurs after idempotency finalization', async () => {
     const key = 'v05-terminal-uow-success-fault';
     const { token, ownerId } = await createAuthenticatedApp({
       dailyPlanTerminalFault(checkpoint) {
-        if (checkpoint.phase === 'PROVIDER_TERMINAL') throw new Error('success terminal fault');
+        if (checkpoint.phase === 'IDEMPOTENCY_TERMINAL') throw new Error('success terminal fault');
       },
     });
     createTimeRequest(ownerId, ownerTimeRequestId, 'atomic success terminal');
@@ -439,11 +439,11 @@ describe('daily planning generation route', () => {
     expectGenerationTerminalBundleRolledBack(key);
   });
 
-  it('rolls back every failure terminal when a fault occurs after Provider-log finalization', async () => {
+  it('rolls back every failure terminal when a fault occurs after idempotency finalization', async () => {
     const key = 'v05-terminal-uow-failure-fault';
     const { token } = await createAuthenticatedApp({
       dailyPlanTerminalFault(checkpoint) {
-        if (checkpoint.phase === 'PROVIDER_TERMINAL') throw new Error('failure terminal fault');
+        if (checkpoint.phase === 'IDEMPOTENCY_TERMINAL') throw new Error('failure terminal fault');
       },
     });
     await saveCredential(token);

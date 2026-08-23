@@ -273,6 +273,50 @@ describe('v0.5 expired Provider execution convergence', () => {
     expect(secretStore.unprotectCalls).toBe(0);
   });
 
+  it('fails startup closed and rolls back when the correlated preflight cannot be finalized', async () => {
+    await openApp();
+    const { ownerId, token } = await setupOwner();
+    const preflight = await approvedPreflight(token);
+    await app!.close();
+    app = undefined;
+
+    const seeded = seedExecution({
+      ownerId,
+      preflightId: preflight.id,
+      expectedPreflightVersion: preflight.version,
+      idempotencyKey: 'v05-startup-sweeper-corrupt-01',
+      attemptCount: 1,
+    });
+    seeded.database.pragma('foreign_keys = OFF');
+    seeded.database.prepare('delete from daily_plan_preflights where id = ?').run(preflight.id);
+    seeded.database.close();
+    databases.splice(databases.indexOf(seeded.database), 1);
+    current = new Date(t0.getTime() + PROVIDER_POLICY.leaseMs + 1_000);
+
+    let startupError: unknown;
+    try {
+      await openApp();
+    } catch (error) {
+      startupError = error;
+    }
+    expect(startupError).toBeInstanceOf(Error);
+    expect((startupError as Error).message).toContain('Expired Daily Plan preflight could not be finalized');
+
+    const control = openDatabase(databasePath);
+    databases.push(control);
+    expect(
+      control.prepare('select status from daily_plan_runs where id = ?').get(seeded.claimed.run.id),
+    ).toEqual({ status: 'GENERATING' });
+    expect(
+      control.prepare('select state from idempotency_records where id = ?').get(seeded.recordId),
+    ).toEqual({ state: 'IN_PROGRESS' });
+    expect(
+      control.prepare('select status from provider_call_logs where id = ?').get(seeded.providerCallId),
+    ).toEqual({ status: 'STARTED' });
+    expect(provider.calls).toBe(0);
+    expect(secretStore.unprotectCalls).toBe(0);
+  });
+
   it('uses the same terminal unit for an attempt-two request-path expiry and replays it', async () => {
     await openApp();
     const { ownerId, token } = await setupOwner();

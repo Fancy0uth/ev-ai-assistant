@@ -28,7 +28,7 @@ export const INTERRUPTED_DAILY_PLAN_SNAPSHOT: SafeHttpSnapshot = {
 };
 
 export interface DailyPlanTerminalFaultCheckpoint {
-  phase: 'BUSINESS_TERMINAL' | 'PROVIDER_TERMINAL';
+  phase: 'BUSINESS_TERMINAL' | 'PROVIDER_TERMINAL' | 'IDEMPOTENCY_TERMINAL';
   outcome: 'SUCCEEDED' | 'FAILED';
 }
 
@@ -102,6 +102,7 @@ export function createDailyPlanExecutionUnitOfWork(options: {
             updatedAt: input.completedAt,
           });
       if (!finalized) throw new Error('Generation idempotency snapshot could not be committed');
+      options.fault?.({ phase: 'IDEMPOTENCY_TERMINAL', outcome: 'SUCCEEDED' });
       return business;
     },
   );
@@ -137,6 +138,7 @@ export function createDailyPlanExecutionUnitOfWork(options: {
       ) {
         throw new Error('Generation idempotency failure snapshot could not be committed');
       }
+      options.fault?.({ phase: 'IDEMPOTENCY_TERMINAL', outcome: 'FAILED' });
     },
   );
   const findCorrelatedRun = options.database.prepare(
@@ -242,7 +244,11 @@ export function createDailyPlanExecutionUnitOfWork(options: {
         ) {
           throw new Error('Expired Daily Plan run could not be finalized');
         }
-        consumeExpiredPreflight.run(nowIso, nowIso, run.id, record.ownerId);
+        if (
+          consumeExpiredPreflight.run(nowIso, nowIso, run.id, record.ownerId).changes !== 1
+        ) {
+          throw new Error('Expired Daily Plan preflight could not be finalized');
+        }
       }
       failExpiredProviderCalls.run(nowIso, nowIso, record.ownerId, record.id);
       if (

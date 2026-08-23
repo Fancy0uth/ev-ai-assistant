@@ -964,7 +964,11 @@ const migrations: readonly Migration[] = [
         output_chars integer check (output_chars is null or output_chars between 0 and 20000),
         policy_version text not null check (policy_version = 'PROVIDER_POLICY_V1'),
         contract_version text not null check (contract_version = 'DAILY_PLAN_V1'),
-        app_version text not null,
+        app_version text not null check (
+          length(app_version) between 5 and 64
+          and app_version glob '[0-9]*.[0-9]*.[0-9]*'
+          and app_version not glob '*[^0-9A-Za-z.+-]*'
+        ),
         local_date text not null,
         started_at text not null,
         finished_at text,
@@ -982,7 +986,13 @@ const migrations: readonly Migration[] = [
       alter table daily_plan_runs add column lease_expires_at text;
       alter table daily_plan_runs add column deadline_at text;
       alter table daily_plan_runs add column terminal_reason text;
-      alter table daily_plan_runs add column app_version text;
+      alter table daily_plan_runs add column app_version text check (
+        app_version is null or (
+          length(app_version) between 5 and 64
+          and app_version glob '[0-9]*.[0-9]*.[0-9]*'
+          and app_version not glob '*[^0-9A-Za-z.+-]*'
+        )
+      );
       alter table daily_plan_runs add column idempotency_record_id text;
       create index daily_plan_runs_owner_lease_idx
         on daily_plan_runs(owner_id, lease_expires_at)
