@@ -43,6 +43,8 @@
 - 启动和第二次过期请求会用同一恢复 UoW 收敛 Run、preflight、STARTED log 与幂等记录，且不会在启动阶段调用 Provider。
 - v18 的 app version 字段允许历史 semver/null，旧 v17 Run 不再虚报当前版本，0.6 写入无需重建 v18 表。
 - Manual Event 与 Today Proposal 的不确定重试会在 transport 0、BFF 502 或响应解析失败时复用同一语义幂等键。
+- 启动恢复会沿 idempotency resource → Owner preflight → Run/STARTED log 验证完整 correlation；执行已开始但关联损坏时整笔回滚并拒绝启动，不再留下部分终态。
+- Today Proposal 只有在 2xx 响应通过 schema、id、递增 version 和 decision terminal status 校验后才释放幂等键；malformed 或语义不一致响应可安全复用原键重试。
 
 ## [0.1.0] — 技术预览
 
