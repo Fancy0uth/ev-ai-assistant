@@ -15,6 +15,7 @@ const proposalId = '00000000-0000-4000-8000-000000000601';
 const runId = '00000000-0000-4000-8000-000000000602';
 const itemId = '00000000-0000-4000-8000-000000000603';
 const timeRequestId = '00000000-0000-4000-8000-000000000604';
+const preflightId = '00000000-0000-4000-8000-000000000605';
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -76,6 +77,36 @@ function reviewList(items: ReturnType<typeof reviewPayload>[]) {
   };
 }
 
+function preflightPayload(status: 'AWAITING_APPROVAL' | 'APPROVED', version: number) {
+  return {
+    data: {
+      id: preflightId,
+      runId,
+      contractVersion: 'DAILY_PLAN_PREFLIGHT_V1',
+      localDate: '2026-08-18',
+      status,
+      baseScheduleVersion: 1,
+      items: [{
+        contextRef: 'TIME_REQUEST_1',
+        safeTitle: '完成本地验证',
+        domain: 'WORK',
+        deadlineLocalDate: '2026-08-18',
+        durationMinutes: 60,
+        priority: 'HIGH',
+        availability: { earliestStartLocalTime: '10:00', latestEndLocalTime: '17:00' },
+        isFixed: false,
+        included: true,
+      }],
+      version,
+      createdAt: '2026-08-18T01:00:00.000Z',
+      updatedAt: '2026-08-18T01:00:00.000Z',
+      approvedAt: status === 'APPROVED' ? '2026-08-18T01:01:00.000Z' : null,
+      claimedAt: null,
+      consumedAt: null,
+    },
+  };
+}
+
 function explanationPayload() {
   return {
     data: {
@@ -133,20 +164,23 @@ function deferred<T>() {
 }
 
 describe('DailyPlanWorkspace', () => {
-  it('loads the selected ISO date and only generates a plan after explicit confirmation', async () => {
+  it('loads the selected ISO date and only generates a plan after prepare and approval', async () => {
     const generatedProposal = reviewPayload().proposal;
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(reviewList([])))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1), 201))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('APPROVED', 2)))
       .mockResolvedValueOnce(jsonResponse({ data: generatedProposal }, 201))
       .mockResolvedValueOnce(jsonResponse(reviewList([reviewPayload()])));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
-
     render(<DailyPlanWorkspace initialDate="2026-08-18" />);
 
     expect(await screen.findByText('还没有该日期的每日计划')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '生成每日计划' }));
+    await user.click(screen.getByRole('button', { name: '准备外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '批准外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '调用 Provider 生成草案' }));
 
     expect(await screen.findByText('优先处理唯一待安排的时间请求。')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -156,11 +190,36 @@ describe('DailyPlanWorkspace', () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/core/daily-plans/generate',
+      '/api/core/daily-plans/preflights',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ localDate: '2026-08-18' }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
+      `/api/core/daily-plans/preflights/${preflightId}/approve`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          expectedPreflightVersion: 1,
+          items: [{
+            contextRef: 'TIME_REQUEST_1',
+            safeTitle: '完成本地验证',
+            domain: 'WORK',
+            deadlineLocalDate: '2026-08-18',
+            included: true,
+          }],
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/core/daily-plans/generate',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ preflightId, expectedPreflightVersion: 2 }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
       '/api/core/daily-plans/proposals?localDate=2026-08-18&page=1&pageSize=20',
       expect.objectContaining({ method: 'GET' }),
     );
@@ -170,6 +229,8 @@ describe('DailyPlanWorkspace', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(reviewList([])))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('AWAITING_APPROVAL', 1), 201))
+      .mockResolvedValueOnce(jsonResponse(preflightPayload('APPROVED', 2)))
       .mockResolvedValueOnce(
         jsonResponse(
           {
@@ -183,10 +244,11 @@ describe('DailyPlanWorkspace', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
-
     render(<DailyPlanWorkspace initialDate="2026-08-18" />);
     await screen.findByText('还没有该日期的每日计划');
-    await user.click(screen.getByRole('button', { name: '生成每日计划' }));
+    await user.click(screen.getByRole('button', { name: '准备外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '批准外发内容' }));
+    await user.click(await screen.findByRole('button', { name: '调用 Provider 生成草案' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('尚未配置每日计划 Provider 凭据');
     expect(screen.getByRole('link', { name: '前往 Provider 设置' })).toHaveAttribute(
@@ -236,7 +298,7 @@ describe('DailyPlanWorkspace', () => {
     );
   });
 
-  it('keeps date B visible after a delayed date A generation list resolves', async () => {
+  it('keeps date B visible after a delayed date A review list resolves', async () => {
     const dateAReview = reviewPayload();
     const dateBReview = {
       ...reviewPayload(),
@@ -249,20 +311,15 @@ describe('DailyPlanWorkspace', () => {
     const delayedDateAList = deferred<Response>();
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse(reviewList([])))
-      .mockResolvedValueOnce(jsonResponse({ data: dateAReview.proposal }, 201))
       .mockImplementationOnce(() => delayedDateAList.promise)
       .mockResolvedValueOnce(jsonResponse(reviewList([dateBReview])));
     vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
 
     render(<DailyPlanWorkspace initialDate="2026-08-18" />);
-    await screen.findByText('还没有该日期的每日计划');
-    await user.click(screen.getByRole('button', { name: '生成每日计划' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     fireEvent.change(screen.getByLabelText('计划日期'), { target: { value: '2026-08-19' } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('日期 B 的每日计划必须保留。')).toBeInTheDocument();
 
     await act(async () => {
@@ -276,7 +333,7 @@ describe('DailyPlanWorkspace', () => {
     });
   });
 
-  it('does not surface a date A generation error after the user switches to date B', async () => {
+  it('does not surface a date A review error after the user switches to date B', async () => {
     const dateBReview = {
       ...reviewPayload(),
       proposal: {
@@ -288,16 +345,12 @@ describe('DailyPlanWorkspace', () => {
     const delayedGeneration = deferred<Response>();
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse(reviewList([])))
       .mockImplementationOnce(() => delayedGeneration.promise)
       .mockResolvedValueOnce(jsonResponse(reviewList([dateBReview])));
     vi.stubGlobal('fetch', fetchMock);
-    const user = userEvent.setup();
 
     render(<DailyPlanWorkspace initialDate="2026-08-18" />);
-    await screen.findByText('还没有该日期的每日计划');
-    await user.click(screen.getByRole('button', { name: '生成每日计划' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     fireEvent.change(screen.getByLabelText('计划日期'), { target: { value: '2026-08-19' } });
     expect(await screen.findByText('日期 B 的审核状态不应被旧错误覆盖。')).toBeInTheDocument();

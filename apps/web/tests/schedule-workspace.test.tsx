@@ -13,10 +13,12 @@ describe('ScheduleWorkspace', () => {
       id: '00000000-0000-4000-8000-000000000411', title: '2026 秋季学期', timezone: 'Asia/Shanghai',
       weekOneMonday: '2026-08-31', version: 1, createdAt: '2026-08-17T03:00:00.000Z', updatedAt: '2026-08-17T03:00:00.000Z',
     };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ data: [] }))
-      .mockResolvedValueOnce(jsonResponse({ data: term }, 201));
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/core/terms' && init?.method === 'GET') return Promise.resolve(jsonResponse({ data: [] }));
+      if (url === '/api/core/proposals?status=PENDING' && init?.method === 'GET') return Promise.resolve(jsonResponse({ data: [] }));
+      if (url === '/api/core/terms' && init?.method === 'POST') return Promise.resolve(jsonResponse({ data: term }, 201));
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
 

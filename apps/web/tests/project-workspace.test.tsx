@@ -31,6 +31,10 @@ describe('ProjectWorkspace', () => {
     await user.type(screen.getByLabelText('本机项目目录'), 'C:\\work\\assistant');
     await user.click(screen.getByRole('button', { name: '登记只读项目范围' }));
     expect(await screen.findByRole('button', { name: '选择项目：本地助手' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '查看项目详情：本地助手' })).toHaveAttribute(
+      'href',
+      `/projects/${scope.id}`,
+    );
     await user.click(screen.getByRole('button', { name: '读取只读规划快照' }));
 
     expect(await screen.findByText('PRD.md')).toBeInTheDocument();

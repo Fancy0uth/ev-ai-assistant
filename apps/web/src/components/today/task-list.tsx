@@ -12,7 +12,6 @@ interface TaskListProps {
 
 const areaCopy = { WORK: '开发', STUDY: '学习', LIFE: '生活' } as const;
 const priorityCopy = { HIGH: '高', MEDIUM: '中', LOW: '低' } as const;
-const areaWorkspace = { WORK: '/projects', STUDY: '/learning', LIFE: '/nutrition' } as const;
 
 export function TaskList({ tasks, updatingTaskId, onStatusChange }: TaskListProps) {
   return (
@@ -74,11 +73,11 @@ export function TaskList({ tasks, updatingTaskId, onStatusChange }: TaskListProp
                     <span>v{task.version}</span>
                   </div>
                   <Link
-                    aria-label={`处理${areaCopy[task.area]}任务：${task.title}`}
+                    aria-label={`查看任务详情：${task.title}`}
                     className="task-module-link"
-                    href={areaWorkspace[task.area]}
+                    href={`/tasks/${task.id}`}
                   >
-                    进入{areaCopy[task.area]}模块
+                    查看任务详情
                   </Link>
                 </div>
                 <button

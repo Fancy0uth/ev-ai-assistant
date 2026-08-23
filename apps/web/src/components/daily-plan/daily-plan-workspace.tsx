@@ -3,8 +3,6 @@
 import {
   dailyPlanDecisionBatchInputSchema,
   dailyPlanDecisionBatchResponseSchema,
-  dailyPlanGenerationInputSchema,
-  dailyPlanProposalResponseSchema,
   dailyPlanReviewExplanationResponseSchema,
   dailyPlanReviewListResponseSchema,
   dailyPlanReviewSchema,
@@ -12,10 +10,12 @@ import {
   type DailyPlanReviewExplanation,
   type DailyPlanReview,
 } from '@ev/contracts';
-import { CalendarDays, Check, Sparkles, X } from 'lucide-react';
+import { CalendarDays, Check, X } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { PreflightReviewPanel } from './preflight-review-panel';
+import { useDailyPlanPreflight } from './use-daily-plan-preflight';
 
 interface DailyPlanWorkspaceProps {
   initialDate: string;
@@ -74,7 +74,6 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
   const [localDate, setLocalDate] = useState(initialDate);
   const [reviews, setReviews] = useState<DailyPlanReview[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [mutationKey, setMutationKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<FailureState | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
@@ -88,6 +87,21 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
     );
     return dailyPlanReviewListResponseSchema.parse(payload).data.items;
   }, []);
+
+  const onGenerated = useCallback((proposal: { localDate: string }) => {
+    const generatedDate = proposal.localDate;
+    void loadReviews(generatedDate)
+      .then((nextReviews) => {
+        if (generatedDate !== selectedDateRef.current) return;
+        setReviews(nextReviews);
+        setUpdateMessage('每日计划已生成，等待你的审核。');
+      })
+      .catch((error: unknown) => {
+        if (generatedDate === selectedDateRef.current) setFailure(failureState(error));
+      });
+  }, [loadReviews]);
+
+  const preflight = useDailyPlanPreflight({ localDate, onGenerated });
 
   useEffect(() => {
     let isActive = true;
@@ -128,29 +142,6 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
     setReviews([]);
     setFailure(null);
     setUpdateMessage(null);
-  }
-
-  async function generatePlan(): Promise<void> {
-    const date = localDate;
-    setFailure(null);
-    setUpdateMessage(null);
-    setIsGenerating(true);
-    try {
-      const payload = await requestCore('daily-plans/generate', {
-        method: 'POST',
-        body: JSON.stringify(dailyPlanGenerationInputSchema.parse({ localDate: date })),
-      });
-      dailyPlanProposalResponseSchema.parse(payload);
-      const nextReviews = await loadReviews(date);
-      if (date === selectedDateRef.current) {
-        setReviews(nextReviews);
-        setUpdateMessage('每日计划已生成，等待你的审核。');
-      }
-    } catch (error) {
-      if (date === selectedDateRef.current) setFailure(failureState(error));
-    } finally {
-      setIsGenerating(false);
-    }
   }
 
   async function submitDecision(
@@ -201,13 +192,7 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
         </label>
       </header>
 
-      <div className="daily-plan-workspace__actions">
-        <button disabled={isGenerating || isLoading} type="button" onClick={() => void generatePlan()}>
-          <Sparkles aria-hidden="true" size={16} />
-          {isGenerating ? '正在生成…' : '生成每日计划'}
-        </button>
-        <p>仅在你选择日期并点击生成后才会请求 Provider。</p>
-      </div>
+      <PreflightReviewPanel controller={preflight} />
 
       {failure ? (
         <div className="daily-plan-workspace__failure" role="alert">

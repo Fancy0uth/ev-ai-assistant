@@ -1,4 +1,5 @@
 import type { TodaySnapshot } from '@ev/contracts';
+import Link from 'next/link';
 
 type Snapshot = TodaySnapshot['data'];
 
@@ -82,7 +83,9 @@ export function StatusOverview({ snapshot }: { snapshot: Snapshot }) {
                 <span className={`priority-flag priority-flag--${priority.priority.toLowerCase()}`}>
                   {priority.priority}
                 </span>
-                <p>{priority.title}</p>
+                <Link aria-label={`查看优先任务详情：${priority.title}`} href={`/tasks/${priority.id}`}>
+                  {priority.title}
+                </Link>
                 <small>{priority.area}</small>
               </li>
             ))}

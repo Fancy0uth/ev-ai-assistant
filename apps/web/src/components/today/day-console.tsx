@@ -7,12 +7,6 @@ import Link from 'next/link';
 type Snapshot = TodaySnapshot['data'];
 
 const areaCopy: Record<TaskArea, string> = { WORK: '开发', STUDY: '学习', LIFE: '生活' };
-const areaWorkspace: Record<TaskArea, string> = {
-  WORK: '/projects',
-  STUDY: '/learning',
-  LIFE: '/nutrition',
-};
-
 function recoveryLabel(value: number): string {
   if (value <= 34) return '注意恢复';
   if (value <= 59) return '适度安排';
@@ -55,7 +49,9 @@ export function DayConsole({
                   <time>{event.startLocalTime}</time>
                   <span className={event.isHard ? 'day-timeline__line day-timeline__line--hard' : 'day-timeline__line'} />
                   <div>
-                    <strong>{event.title}</strong>
+                    <Link aria-label={`查看日程详情：${event.title}`} href={`/schedule/events/${event.id}`}>
+                      <strong>{event.title}</strong>
+                    </Link>
                     <small>
                       {event.endLocalTime} · {event.kind === 'COURSE' ? '课程' : event.kind === 'WORKOUT' ? '训练' : '安排'}
                     </small>
@@ -78,8 +74,8 @@ export function DayConsole({
                     <strong>{task.title}</strong>
                     <small>{areaCopy[task.area]} · {task.priority} 优先级</small>
                   </div>
-                  <Link aria-label={`在控制台处理${areaCopy[task.area]}任务：${task.title}`} href={areaWorkspace[task.area]}>
-                    处理
+                  <Link aria-label={`在控制台查看任务详情：${task.title}`} href={`/tasks/${task.id}`}>
+                    查看详情
                   </Link>
                 </li>
               ))}

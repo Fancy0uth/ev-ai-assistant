@@ -151,6 +151,7 @@ describe('TodayDashboard', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       data: {
         ...recoverySnapshot.data,
+        status: populatedSnapshot.data.status,
         tasks: [task],
         events: [
           {
@@ -180,7 +181,12 @@ describe('TodayDashboard', () => {
 
     expect(await screen.findByRole('heading', { name: '今天的控制台' })).toBeInTheDocument();
     expect(screen.getByText('深度学习课程')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: `在控制台处理开发任务：${task.title}` })).toHaveAttribute('href', '/projects');
+    expect(screen.getByRole('link', { name: `在控制台查看任务详情：${task.title}` })).toHaveAttribute('href', `/tasks/${task.id}`);
+    expect(screen.getByRole('link', { name: `查看日程详情：深度学习课程` })).toHaveAttribute(
+      'href',
+      '/schedule/events/00000000-0000-4000-8000-000000000222',
+    );
+    expect(screen.getByRole('link', { name: `查看优先任务详情：${task.title}` })).toHaveAttribute('href', `/tasks/${task.id}`);
     expect(document.querySelector('.day-console__recovery')).toHaveTextContent('注意恢复');
     expect(screen.getByText(/有 2 项建议等待你的审核/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '查看并确认今日计划' })).toHaveAttribute(
@@ -227,14 +233,14 @@ describe('TodayDashboard', () => {
     expect(screen.getByRole('link', { name: '打开记忆模块' })).toHaveAttribute('href', '/memory');
   });
 
-  it('gives a concrete work task a direct route into its domain workspace', async () => {
+  it('gives a concrete work task a direct route to its real task detail', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(populatedSnapshot)));
 
     render(<TodayDashboard initialDate="2026-08-07" />);
 
-    expect(await screen.findByRole('link', { name: `处理开发任务：${task.title}` })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: `查看任务详情：${task.title}` })).toHaveAttribute(
       'href',
-      '/projects',
+      `/tasks/${task.id}`,
     );
   });
 
@@ -437,7 +443,7 @@ describe('TodayDashboard', () => {
     expect(unbrokenTaskTitle).toHaveLength(200);
     expect(await screen.findAllByText(unbrokenTaskTitle)).toHaveLength(3);
     expect(screen.getByText(unbrokenTaskTitle, { selector: '.task-row__titleline p' }).closest('.task-row__content')).not.toBeNull();
-    expect(screen.getByText(unbrokenTaskTitle, { selector: '.priority-list p' }).closest('.priority-list li')).not.toBeNull();
+    expect(screen.getByText(unbrokenTaskTitle, { selector: '.priority-list a' }).closest('.priority-list li')).not.toBeNull();
 
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
     const taskContentRule = dashboardCss.match(/\.task-row__content\s*\{[\s\S]*?\n\}/)?.[0];
@@ -446,7 +452,7 @@ describe('TodayDashboard', () => {
     const mobileTitlelineRule = mobileDashboardCss.match(/\.task-row__titleline\s*\{[\s\S]*?\n\s*\}/)?.[0];
     const mobileTaskTitleRule = mobileDashboardCss.match(/\.task-row__titleline p\s*\{[\s\S]*?\n\s*\}/)?.[0];
     const priorityItemRule = dashboardCss.match(/\.priority-list li\s*\{[\s\S]*?\n\}/)?.[0];
-    const priorityTitleRule = dashboardCss.match(/\.priority-list p\s*\{[\s\S]*?\n\}/)?.[0];
+    const priorityTitleRule = dashboardCss.match(/\.priority-list p,[\s\S]*?\.priority-list a\s*\{[\s\S]*?\n\}/)?.[0];
 
     expect(taskContentRule).toContain('min-width: 0;');
     expect(taskTitleRule).toContain('overflow: hidden;');

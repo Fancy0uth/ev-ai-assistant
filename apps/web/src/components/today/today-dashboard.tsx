@@ -211,7 +211,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
       <DailyPlanStatusCard date={snapshot.date} dailyPlan={snapshot.dailyPlan} />
       <StatusOverview snapshot={snapshot} />
       <ModuleQuickLinks />
-      <TaskComposer isPending={mutationKey === 'create'} onCreate={createTask} />
+      <TaskComposer isPending={mutationKey === 'create'} targetDate={initialDate} onCreate={createTask} />
       <TaskList
         tasks={snapshot.tasks}
         updatingTaskId={mutationKey}

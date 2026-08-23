@@ -7,6 +7,7 @@ import {
   type ProjectScope,
 } from '@ev/contracts';
 import { FileSearch, FolderSearch, Save } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 
@@ -90,7 +91,7 @@ export function ProjectWorkspace() {
           <p className="section-kicker">PROJECT SCOPE</p>
           {scopes.length === 0 ? <><h2>还没有项目范围</h2><p>登记后才能让本地 Agent 看见经过限制的规划文件。</p></> : <>
             <h2>选择项目</h2>
-            <ul className="course-list">{scopes.map((scope) => <li key={scope.id}><button aria-pressed={scope.id === scopeId} type="button" onClick={() => { setScopeId(scope.id); setSnapshot(null); }}>选择项目：{scope.label}</button></li>)}</ul>
+            <ul className="course-list">{scopes.map((scope) => <li key={scope.id}><button aria-pressed={scope.id === scopeId} type="button" onClick={() => { setScopeId(scope.id); setSnapshot(null); }}>选择项目：{scope.label}</button><Link aria-label={`查看项目详情：${scope.label}`} href={`/projects/${scope.id}`}>查看详情</Link></li>)}</ul>
             <button className="project-read-button" disabled={!scopeId || isReading} type="button" onClick={() => void readSnapshot()}><FileSearch aria-hidden="true" size={16} /> {isReading ? '正在读取…' : '读取只读规划快照'}</button>
           </>}
         </aside>

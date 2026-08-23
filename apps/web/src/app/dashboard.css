@@ -277,6 +277,430 @@
   border-radius: var(--radius-md);
 }
 
+.preflight-review-panel,
+.manual-event-proposal-panel,
+.entity-detail {
+  margin-top: var(--space-5);
+  padding: var(--space-5);
+  background: var(--paper-50);
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-md);
+}
+
+.preflight-review-panel__header,
+.manual-event-proposal-panel__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.preflight-review-panel h2,
+.manual-event-proposal-panel h2,
+.entity-detail h1 {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-950);
+  letter-spacing: -0.025em;
+}
+
+.preflight-review-panel__header > div > p:last-child,
+.manual-event-proposal-panel__header > div > p:last-child,
+.entity-detail > p {
+  max-width: 52rem;
+  margin: var(--space-2) 0 0;
+  color: #59635f;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.preflight-review-panel button,
+.manual-event-proposal-panel button,
+.entity-detail a {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  color: #ffffff;
+  background: var(--ink-950);
+  border: 1px solid var(--ink-950);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.preflight-review-panel button:hover:not(:disabled),
+.manual-event-proposal-panel button:hover:not(:disabled),
+.entity-detail a:hover {
+  background: var(--cyan-600);
+  border-color: var(--cyan-600);
+}
+
+.preflight-review-panel button:disabled,
+.manual-event-proposal-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.preflight-review-panel button[aria-busy="true"],
+.manual-event-proposal-panel button[aria-busy="true"] {
+  cursor: wait;
+}
+
+.preflight-review-form,
+.manual-event-proposal-form {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.preflight-review-form__items,
+.manual-event-proposal-list,
+.entity-detail__files {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preflight-review-item,
+.manual-event-proposal-card,
+.entity-detail__files li {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--paper-100);
+  border: 1px solid var(--paper-200);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-review-item legend,
+.manual-event-proposal-card h3,
+.entity-detail__files h2 {
+  max-width: 100%;
+  color: var(--ink-900);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.preflight-review-item__include,
+.task-composer__scheduling-toggle,
+.task-composer__fixed-toggle,
+.manual-event-proposal-form__hard {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-700);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.preflight-review-item__include input,
+.task-composer__scheduling-toggle input,
+.task-composer__fixed-toggle input,
+.manual-event-proposal-form__hard input {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  accent-color: var(--cyan-600);
+}
+
+.preflight-review-item__fields,
+.manual-event-proposal-form,
+.task-composer__scheduling,
+.entity-detail__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.preflight-review-item__fields,
+.entity-detail__facts {
+  margin-top: var(--space-3);
+}
+
+.preflight-review-item__fields label,
+.manual-event-proposal-form > label,
+.task-composer__scheduling > label {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+  color: var(--ink-700);
+  font-size: 0.625rem;
+  font-weight: 750;
+}
+
+.preflight-review-item__fields input,
+.preflight-review-item__fields select,
+.manual-event-proposal-form input,
+.manual-event-proposal-form select,
+.task-composer__scheduling input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 var(--space-3);
+  color: var(--ink-950);
+  background: #ffffff;
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+}
+
+.preflight-review-item__facts div,
+.entity-detail__facts div {
+  min-width: 0;
+}
+
+.preflight-review-item__facts dt,
+.entity-detail__facts dt {
+  color: #73807a;
+  font-size: 0.5625rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.preflight-review-item__facts dd,
+.entity-detail__facts dd {
+  min-width: 0;
+  margin: var(--space-1) 0 0;
+  color: var(--ink-800);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.preflight-review-form__hint,
+.preflight-review-panel__privacy,
+.manual-event-proposal-panel__empty {
+  margin: 0;
+  color: #65706b;
+  font-size: 0.6875rem;
+  line-height: 1.55;
+}
+
+.preflight-review-panel__privacy {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--paper-200);
+}
+
+.preflight-review-panel__approved,
+.manual-event-proposal-card,
+.manual-event-proposal-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.preflight-review-panel__approved,
+.manual-event-proposal-panel__status {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  color: #356c51;
+  background: #e2efe6;
+  border-left: 0.1875rem solid var(--green-500);
+  border-radius: var(--radius-sm);
+}
+
+.preflight-review-panel__approved p,
+.manual-event-proposal-panel__status,
+.manual-event-proposal-card p {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.preflight-review-panel__failure,
+.manual-event-proposal-panel__failure,
+.entity-detail--error {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  color: #762a26;
+  background: var(--red-100);
+  border-left: 0.1875rem solid var(--red-600);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.manual-event-proposal-panel__failure,
+.manual-event-proposal-panel__status {
+  overflow-wrap: anywhere;
+}
+
+.manual-event-proposal-card--pending {
+  border-color: #e3c887;
+}
+
+.manual-event-proposal-card--accepted {
+  border-color: #b8d5c1;
+}
+
+.manual-event-proposal-card--rejected,
+.manual-event-proposal-card--expired {
+  border-color: #e6beb8;
+}
+
+.manual-event-proposal-card__actions button:first-child {
+  color: #762a26;
+  background: #ffffff;
+  border-color: #e4bbb5;
+}
+
+.manual-event-proposal-card > a,
+.entity-detail > a {
+  margin-top: var(--space-4);
+}
+
+.entity-detail--loading {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.entity-detail--loading span {
+  display: block;
+  height: 8rem;
+  background: var(--paper-200);
+  border-radius: var(--radius-sm);
+}
+
+.entity-detail--not-found h1,
+.entity-detail--error p {
+  margin: 0;
+}
+
+.entity-detail__files {
+  margin-top: var(--space-5);
+}
+
+.entity-detail__files h2 {
+  margin: 0;
+}
+
+.entity-detail__files pre {
+  max-width: 100%;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  overflow: auto;
+  color: var(--ink-800);
+  background: #ffffff;
+  border: 1px solid var(--paper-200);
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.task-composer__target-date {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #65706b;
+  font-size: 0.6875rem;
+}
+
+.task-composer__scheduling-toggle {
+  grid-column: 1 / -1;
+}
+
+.task-composer__scheduling {
+  grid-column: 1 / -1;
+}
+
+.task-composer input,
+.task-composer select {
+  min-height: 2.75rem;
+}
+
+.course-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.course-list li > a {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  padding: 0 var(--space-3);
+  color: var(--cyan-700);
+  border: 1px solid var(--cyan-300);
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.preflight-review-panel button:focus-visible,
+.preflight-review-panel input:focus-visible,
+.preflight-review-panel select:focus-visible,
+.manual-event-proposal-panel button:focus-visible,
+.manual-event-proposal-panel input:focus-visible,
+.manual-event-proposal-panel select:focus-visible,
+.entity-detail a:focus-visible,
+.entity-detail button:focus-visible,
+.course-list li > a:focus-visible,
+.task-composer__scheduling-toggle:focus-within,
+.task-composer__fixed-toggle:focus-within {
+  outline: 0.1875rem solid var(--cyan-600);
+  outline-offset: 0.125rem;
+}
+
+@media (width <= 42rem) {
+  .preflight-review-panel,
+  .manual-event-proposal-panel,
+  .entity-detail {
+    padding: var(--space-4);
+  }
+
+  .preflight-review-panel__header,
+  .manual-event-proposal-panel__header,
+  .preflight-review-panel__approved,
+  .manual-event-proposal-card,
+  .manual-event-proposal-card__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .preflight-review-item__fields,
+  .manual-event-proposal-form,
+  .task-composer__scheduling,
+  .entity-detail__facts,
+  .entity-detail--loading {
+    grid-template-columns: 1fr;
+  }
+
+  .preflight-review-panel button,
+  .manual-event-proposal-panel button,
+  .entity-detail a,
+  .manual-event-proposal-card > a,
+  .course-list li > a {
+    width: 100%;
+  }
+
+  .preflight-review-item__fields input,
+  .preflight-review-item__fields select,
+  .manual-event-proposal-form input,
+  .manual-event-proposal-form select,
+  .task-composer__scheduling input,
+  .preflight-review-panel button,
+  .manual-event-proposal-panel button,
+  .entity-detail a,
+  .course-list li > a {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+
+  .course-list li {
+    grid-template-columns: 1fr;
+  }
+}
+
 .day-console {
   margin-top: var(--space-4);
   padding: var(--space-5);
@@ -691,13 +1115,15 @@
   padding: var(--space-2) 0;
 }
 
-.priority-list p {
+.priority-list p,
+.priority-list a {
   min-width: 0;
   overflow: hidden;
   margin: 0;
   color: var(--ink-800);
   font-size: 0.75rem;
   font-weight: 650;
+  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3700,5 +4126,61 @@
 
   .daily-plan-status-card a {
     width: 100%;
+  }
+}
+
+/* V4-06 scheduling review and entity detail responsive overrides. */
+.task-composer input,
+.task-composer select {
+  min-height: 2.75rem;
+}
+
+@media (max-width: 42rem) {
+  .preflight-review-panel__header,
+  .manual-event-proposal-panel__header,
+  .preflight-review-panel__approved,
+  .manual-event-proposal-card,
+  .manual-event-proposal-card__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .preflight-review-item__fields,
+  .manual-event-proposal-form,
+  .task-composer__scheduling,
+  .entity-detail__facts,
+  .entity-detail--loading {
+    grid-template-columns: 1fr;
+  }
+
+  .preflight-review-panel button,
+  .manual-event-proposal-panel button,
+  .entity-detail a,
+  .manual-event-proposal-card > a,
+  .course-list li > a {
+    width: 100%;
+  }
+
+  .preflight-review-item__fields input,
+  .preflight-review-item__fields select,
+  .manual-event-proposal-form input,
+  .manual-event-proposal-form select,
+  .task-composer__scheduling input,
+  .preflight-review-panel button,
+  .manual-event-proposal-panel button,
+  .entity-detail a,
+  .course-list li > a {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+
+  .daily-plan-workspace__date-control input,
+  .daily-plan-item-card__time-inputs input,
+  .daily-plan-item-card__reason input,
+  .daily-plan-workspace__actions button,
+  .daily-plan-item-card__actions button,
+  .daily-plan-workspace__failure a {
+    min-height: 2.75rem;
+    font-size: 1rem;
   }
 }

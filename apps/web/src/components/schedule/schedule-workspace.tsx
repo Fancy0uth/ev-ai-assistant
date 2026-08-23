@@ -4,6 +4,7 @@ import { courseImportResponseSchema, termListResponseSchema, termResponseSchema,
 import { CalendarPlus, FileImage, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { ManualEventProposalPanel } from './manual-event-proposal-panel';
 
 function failureMessage(error: unknown): string {
   return error instanceof CoreClientError ? error.message : '本地日程操作暂时未完成，请稍后重试。';
@@ -20,6 +21,17 @@ function imageAsBase64(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+function todayInShanghai(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
 export function ScheduleWorkspace() {
@@ -133,6 +145,7 @@ export function ScheduleWorkspace() {
 
       {failure ? <p className="domain-form__error domain-workspace__error" role="alert">{failure}</p> : null}
       {importResult ? <ImportResult result={importResult} /> : null}
+      <ManualEventProposalPanel initialDate={todayInShanghai()} />
     </section>
   );
 }
