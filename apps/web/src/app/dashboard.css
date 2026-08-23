@@ -3280,6 +3280,63 @@
   line-height: 1.6;
 }
 
+.daily-plan-explanation {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--paper-200);
+}
+
+.daily-plan-explanation summary {
+  min-height: 2.625rem;
+  padding: var(--space-3) 0;
+  color: var(--cyan-700);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.daily-plan-explanation summary:focus-visible {
+  outline: 0.1875rem solid var(--cyan-600);
+  outline-offset: 0.125rem;
+}
+
+.daily-plan-explanation > p {
+  margin: 0 0 var(--space-3);
+  color: #59635f;
+  font-size: 0.75rem;
+}
+
+.daily-plan-explanation__content {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0 0 var(--space-4);
+}
+
+.daily-plan-explanation__content > p,
+.daily-plan-explanation__content p {
+  margin: 0;
+  color: #59635f;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.daily-plan-explanation__content ul,
+.daily-plan-explanation__content ol {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #47534e;
+  font-size: 0.6875rem;
+  line-height: 1.55;
+}
+
+.daily-plan-explanation__content ol li {
+  padding: var(--space-3);
+  background: #ffffff;
+  border: 1px solid var(--paper-200);
+  border-radius: var(--radius-sm);
+}
+
 .daily-plan-review-card__items {
   display: grid;
   gap: var(--space-3);

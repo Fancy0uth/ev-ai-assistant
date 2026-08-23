@@ -1,4 +1,5 @@
 import type {
+  DailyPlanReviewExplanation,
   DailyPlanDecisionInput,
   DailyPlanProposalItem,
   DailyPlanReview,
@@ -27,6 +28,7 @@ interface DailyPlanDecisionBatchInput {
 
 export interface DailyPlanReviewService {
   getReview(ownerId: string, proposalId: string): DailyPlanReview;
+  getExplanation(ownerId: string, proposalId: string): DailyPlanReviewExplanation;
   listProposals(ownerId: string, query: DailyPlanProposalListQuery): DailyPlanProposalList;
   submitDecisions(
     ownerId: string,
@@ -82,6 +84,109 @@ function eventKindFor(source: TimeRequestSource): EventKind {
 
 function toMinutes(localTime: LocalTime): number {
   return Number(localTime.slice(0, 2)) * 60 + Number(localTime.slice(3, 5));
+}
+
+function overlaps(
+  first: { startLocalTime: LocalTime; endLocalTime: LocalTime },
+  second: { startLocalTime: LocalTime; endLocalTime: LocalTime },
+): boolean {
+  return (
+    toMinutes(first.startLocalTime) < toMinutes(second.endLocalTime) &&
+    toMinutes(first.endLocalTime) > toMinutes(second.startLocalTime)
+  );
+}
+
+function verificationFor(
+  execution: DailyPlanReviewExecutionContext,
+  item: DailyPlanProposalItem,
+): DailyPlanReviewExplanation['items'][number]['verification'] {
+  const request = execution.timeRequests.find((candidate) => candidate.id === item.timeRequestId);
+  if (!request) return { status: 'TIME_REQUEST_MISSING', conflicts: [] };
+  if (request.version !== item.timeRequestVersion) {
+    return { status: 'TIME_REQUEST_VERSION_CHANGED', conflicts: [] };
+  }
+
+  if (item.operation === 'SCHEDULE_TIME_REQUEST') {
+    const placement = {
+      startLocalTime: item.startLocalTime,
+      endLocalTime: item.endLocalTime,
+    };
+    if (toMinutes(placement.endLocalTime) - toMinutes(placement.startLocalTime) !== request.durationMinutes) {
+      return { status: 'DURATION_MISMATCH', conflicts: [] };
+    }
+    if (
+      (request.earliestStartLocalTime !== null &&
+        toMinutes(placement.startLocalTime) < toMinutes(request.earliestStartLocalTime)) ||
+      (request.latestEndLocalTime !== null &&
+        toMinutes(placement.endLocalTime) > toMinutes(request.latestEndLocalTime))
+    ) {
+      return { status: 'OUTSIDE_AVAILABILITY', conflicts: [] };
+    }
+
+    const ownScheduledEventIds = new Set(
+      execution.review.decisions
+        .filter((decision) => decision.itemId === item.id && decision.scheduledEventId !== null)
+        .map((decision) => decision.scheduledEventId),
+    );
+    const conflicts = execution.events
+      .filter((event) => !ownScheduledEventIds.has(event.id) && overlaps(placement, event))
+      .map((event) => ({
+        eventId: event.id,
+        kind: event.isHard ? ('HARD_EVENT' as const) : ('CONFIRMED_EVENT' as const),
+        startLocalTime: event.startLocalTime,
+        endLocalTime: event.endLocalTime,
+      }));
+    if (conflicts.length > 0) {
+      return {
+        status: conflicts.some((conflict) => conflict.kind === 'HARD_EVENT')
+          ? 'HARD_EVENT_CONFLICT'
+          : 'CONFIRMED_EVENT_CONFLICT',
+        conflicts,
+      };
+    }
+  }
+
+  return {
+    status:
+      execution.scheduleVersion === execution.review.proposal.baseScheduleVersion
+        ? 'CURRENT'
+        : 'SCHEDULE_VERSION_CHANGED',
+    conflicts: [],
+  };
+}
+
+function explanationFor(execution: DailyPlanReviewExecutionContext): DailyPlanReviewExplanation {
+  const requestsById = new Map(execution.timeRequests.map((request) => [request.id, request]));
+  const { proposal } = execution.review;
+
+  return {
+    proposalId: proposal.id,
+    localDate: proposal.localDate,
+    baseScheduleVersion: proposal.baseScheduleVersion,
+    currentScheduleVersion: execution.scheduleVersion,
+    contextManifest: execution.contextManifest,
+    items: proposal.items.map((item) => {
+      const request = requestsById.get(item.timeRequestId);
+      return {
+        itemId: item.id,
+        ordinal: item.ordinal,
+        timeRequest: request
+          ? {
+              id: request.id,
+              title: request.title,
+              source: request.source,
+              durationMinutes: request.durationMinutes,
+              priority: request.priority,
+              earliestStartLocalTime: request.earliestStartLocalTime,
+              latestEndLocalTime: request.latestEndLocalTime,
+              isFixed: request.isFixed,
+              version: request.version,
+            }
+          : null,
+        verification: verificationFor(execution, item),
+      };
+    }),
+  };
 }
 
 function hasTimeOverride(decision: DailyPlanDecisionInput): boolean {
@@ -245,6 +350,10 @@ export function createDailyPlanReviewService(
         throw new DailyPlanProposalNotFoundError();
       }
       return review;
+    },
+
+    getExplanation(ownerId, proposalId) {
+      return explanationFor(getExecutionContext(ownerId, proposalId));
     },
 
     listProposals(ownerId, query) {

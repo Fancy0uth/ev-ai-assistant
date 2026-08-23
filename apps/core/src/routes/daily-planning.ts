@@ -3,6 +3,7 @@ import {
   dailyPlanGenerationInputSchema,
   dailyPlanProposalListQuerySchema,
   dailyPlanProposalResponseSchema,
+  dailyPlanReviewExplanationResponseSchema,
   dailyPlanReviewListResponseSchema,
   dailyPlanReviewResponseSchema,
   dailyPlanReviewSchema,
@@ -135,6 +136,23 @@ export async function registerDailyPlanningRoutes(
     try {
       return dailyPlanReviewResponseSchema.parse({
         data: options.dailyPlanReviewService.getReview(ownerId, proposalId),
+      });
+    } catch (error) {
+      return rethrowReviewError(error);
+    }
+  });
+
+  app.get('/v1/daily-plans/proposals/:proposalId/explanation', { preHandler: authGuard }, (request) => {
+    const ownerId = authenticatedOwnerId(request);
+    const { proposalId } = parseRequestInput(
+      dailyPlanProposalPathParamsSchema,
+      request.params,
+      '每日计划草案路径参数不符合要求',
+    );
+
+    try {
+      return dailyPlanReviewExplanationResponseSchema.parse({
+        data: options.dailyPlanReviewService.getExplanation(ownerId, proposalId),
       });
     } catch (error) {
       return rethrowReviewError(error);

@@ -76,6 +76,49 @@ function reviewList(items: ReturnType<typeof reviewPayload>[]) {
   };
 }
 
+function explanationPayload() {
+  return {
+    data: {
+      proposalId,
+      localDate: '2026-08-18',
+      baseScheduleVersion: 1,
+      currentScheduleVersion: 2,
+      contextManifest: {
+        contractVersion: 'DAILY_PLAN_V1',
+        purpose: 'DAILY_PLAN_GENERATION',
+        localDate: '2026-08-18',
+        createdAt: '2026-08-18T01:00:00.000Z',
+        sentAt: '2026-08-18T01:00:01.000Z',
+        entries: [
+          {
+            category: 'OPEN_TIME_REQUESTS',
+            fieldCategories: ['TIME_RANGE', 'DURATION_MINUTES', 'PRIORITY', 'AVAILABILITY_WINDOW'],
+            entityCount: 1,
+          },
+        ],
+      },
+      items: [
+        {
+          itemId,
+          ordinal: 1,
+          timeRequest: {
+            id: timeRequestId,
+            title: '完成本地验证',
+            source: 'PROJECT_AGENT',
+            durationMinutes: 60,
+            priority: 'HIGH',
+            earliestStartLocalTime: '10:00',
+            latestEndLocalTime: '17:00',
+            isFixed: false,
+            version: 1,
+          },
+          verification: { status: 'SCHEDULE_VERSION_CHANGED', conflicts: [] },
+        },
+      ],
+    },
+  };
+}
+
 function requestBody(fetchMock: ReturnType<typeof vi.fn>, call: number): unknown {
   const init = fetchMock.mock.calls[call]?.[1] as RequestInit | undefined;
   return JSON.parse(String(init?.body));
@@ -168,6 +211,31 @@ describe('DailyPlanWorkspace', () => {
     expect(mobileControlRule).toContain('min-height: 2.75rem;');
   });
 
+  it('loads local context and current schedule validation only when a review explanation is expanded', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(reviewList([reviewPayload()])))
+      .mockResolvedValueOnce(jsonResponse(explanationPayload()));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<DailyPlanWorkspace initialDate="2026-08-18" />);
+    await screen.findByText('优先处理唯一待安排的时间请求。');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByText('查看本次上下文与校验'));
+
+    expect(await screen.findByText('草案基于日程版本 v1；当前为 v2。')).toBeInTheDocument();
+    expect(screen.getByText('待安排请求：1 条（时间范围、时长、优先级、可用时间）')).toBeInTheDocument();
+    expect(screen.getByText('完成本地验证')).toBeInTheDocument();
+    expect(screen.getByText('日程版本已变化，请在采用前重新核对。')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/api/core/daily-plans/proposals/${proposalId}/explanation`,
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('keeps date B visible after a delayed date A generation list resolves', async () => {
     const dateAReview = reviewPayload();
     const dateBReview = {
@@ -205,6 +273,48 @@ describe('DailyPlanWorkspace', () => {
     await waitFor(() => {
       expect(screen.getByText('日期 B 的每日计划必须保留。')).toBeInTheDocument();
       expect(screen.queryByText(dateAReview.proposal.summary)).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not surface a date A generation error after the user switches to date B', async () => {
+    const dateBReview = {
+      ...reviewPayload(),
+      proposal: {
+        ...reviewPayload().proposal,
+        localDate: '2026-08-19',
+        summary: '日期 B 的审核状态不应被旧错误覆盖。',
+      },
+    };
+    const delayedGeneration = deferred<Response>();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(reviewList([])))
+      .mockImplementationOnce(() => delayedGeneration.promise)
+      .mockResolvedValueOnce(jsonResponse(reviewList([dateBReview])));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<DailyPlanWorkspace initialDate="2026-08-18" />);
+    await screen.findByText('还没有该日期的每日计划');
+    await user.click(screen.getByRole('button', { name: '生成每日计划' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    fireEvent.change(screen.getByLabelText('计划日期'), { target: { value: '2026-08-19' } });
+    expect(await screen.findByText('日期 B 的审核状态不应被旧错误覆盖。')).toBeInTheDocument();
+
+    await act(async () => {
+      delayedGeneration.resolve(
+        jsonResponse(
+          { error: { code: 'DAILY_PLAN_PROVIDER_UNAVAILABLE', message: '每日计划 Provider 暂不可用' } },
+          503,
+        ),
+      );
+      await delayedGeneration.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('日期 B 的审核状态不应被旧错误覆盖。')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
   });
 

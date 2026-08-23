@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 import {
   apiErrorSchema,
   dailyPlanProposalResponseSchema,
+  dailyPlanReviewExplanationResponseSchema,
   dailyPlanReviewListResponseSchema,
   dailyPlanReviewResponseSchema,
   dailyPlanReviewSchema,
@@ -214,6 +215,10 @@ describe('daily plan review routes', () => {
         url: '/v1/daily-plans/proposals/not-a-uuid',
       }),
       app.inject({
+        method: 'GET',
+        url: '/v1/daily-plans/proposals/not-a-uuid/explanation',
+      }),
+      app.inject({
         method: 'POST',
         url: '/v1/daily-plans/proposals/not-a-uuid/decisions',
         payload: { unexpected: true },
@@ -284,6 +289,7 @@ describe('daily plan review routes', () => {
 
     for (const request of [
       { method: 'GET' as const, url: `/v1/daily-plans/proposals/${proposal.id}` },
+      { method: 'GET' as const, url: `/v1/daily-plans/proposals/${proposal.id}/explanation` },
       {
         method: 'POST' as const,
         url: `/v1/daily-plans/proposals/${proposal.id}/decisions`,
@@ -297,6 +303,84 @@ describe('daily plan review routes', () => {
       expect(response.statusCode).toBe(404);
       expect(apiErrorSchema.parse(response.json()).error.code).toBe('DAILY_PLAN_PROPOSAL_NOT_FOUND');
     }
+  });
+
+  it('returns a strict, owner-scoped explanation without disclosing provider credentials', async () => {
+    const { token, ownerId } = await createAuthenticatedApp();
+    const proposal = await createProposal(token, ownerId);
+    createScheduleChange(ownerId);
+
+    const response = await app!.inject({
+      method: 'GET',
+      url: `/v1/daily-plans/proposals/${proposal.id}/explanation`,
+      cookies: { ev_session: token },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const explanation = dailyPlanReviewExplanationResponseSchema.parse(response.json()).data;
+    expect(explanation).toMatchObject({
+      proposalId: proposal.id,
+      localDate,
+      baseScheduleVersion: proposal.baseScheduleVersion,
+      currentScheduleVersion: proposal.baseScheduleVersion + 1,
+      items: [
+        {
+          itemId: proposal.items[0]!.id,
+          timeRequest: {
+            id: timeRequestId,
+            title: 'owner review request',
+            source: 'PROJECT_AGENT',
+            durationMinutes: 60,
+            priority: 'HIGH',
+          },
+          verification: { status: 'SCHEDULE_VERSION_CHANGED', conflicts: [] },
+        },
+      ],
+    });
+    expect(JSON.stringify(response.json())).not.toContain(testApiKey);
+    expect(JSON.stringify(response.json())).not.toContain('protectedValue');
+  });
+
+  it('reports a current fixed-event conflict with its local time range', async () => {
+    const { token, ownerId } = await createAuthenticatedApp();
+    const proposal = await createProposal(token, ownerId);
+    calendar().createEvent({
+      id: '00000000-0000-4000-8000-000000000705',
+      ownerId,
+      calendarRuleId: null,
+      title: 'conflicting fixed event',
+      kind: 'MEETING',
+      localDate,
+      startLocalTime: '10:30',
+      endLocalTime: '11:30',
+      isHard: true,
+      status: 'CONFIRMED',
+      version: 1,
+      createdAt: '2026-08-18T07:00:00.000Z',
+      updatedAt: '2026-08-18T07:00:00.000Z',
+    });
+
+    const response = await app!.inject({
+      method: 'GET',
+      url: `/v1/daily-plans/proposals/${proposal.id}/explanation`,
+      cookies: { ev_session: token },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(dailyPlanReviewExplanationResponseSchema.parse(response.json()).data.items[0]).toMatchObject({
+      itemId: proposal.items[0]!.id,
+      verification: {
+        status: 'HARD_EVENT_CONFLICT',
+        conflicts: [
+          {
+            eventId: '00000000-0000-4000-8000-000000000705',
+            kind: 'HARD_EVENT',
+            startLocalTime: '10:30',
+            endLocalTime: '11:30',
+          },
+        ],
+      },
+    });
   });
 
   it('returns a safe local-validation error for an invalid time override', async () => {

@@ -20,6 +20,7 @@ import {
   createAgentSessionSchema,
   createTaskSchema,
   credentialsSchema,
+  dailyPlanReviewExplanationResponseSchema,
   healthResponseSchema,
   sendAgentMessageSchema,
   sessionResponseSchema,
@@ -244,6 +245,61 @@ describe('today snapshot contract', () => {
           yesterday: null,
           agents: { deepSeek: 'READY', codex: 'NOT_CONFIGURED' },
         },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('daily plan explanation contract', () => {
+  it('accepts a local-only explanation and rejects an unexpected credential field', () => {
+    const payload = {
+      data: {
+        proposalId: '00000000-0000-4000-8000-000000000301',
+        localDate: '2026-08-18',
+        baseScheduleVersion: 1,
+        currentScheduleVersion: 2,
+        contextManifest: {
+          contractVersion: 'DAILY_PLAN_V1',
+          purpose: 'DAILY_PLAN_GENERATION',
+          localDate: '2026-08-18',
+          createdAt: '2026-08-18T01:00:00.000Z',
+          sentAt: '2026-08-18T01:00:01.000Z',
+          entries: [
+            {
+              category: 'OPEN_TIME_REQUESTS',
+              fieldCategories: ['TIME_RANGE', 'DURATION_MINUTES', 'PRIORITY', 'AVAILABILITY_WINDOW'],
+              entityCount: 1,
+            },
+          ],
+        },
+        items: [
+          {
+            itemId: '00000000-0000-4000-8000-000000000302',
+            ordinal: 1,
+            timeRequest: {
+              id: '00000000-0000-4000-8000-000000000303',
+              title: '完成本地验证',
+              source: 'PROJECT_AGENT',
+              durationMinutes: 60,
+              priority: 'HIGH',
+              earliestStartLocalTime: '10:00',
+              latestEndLocalTime: '17:00',
+              isFixed: false,
+              version: 1,
+            },
+            verification: {
+              status: 'SCHEDULE_VERSION_CHANGED',
+              conflicts: [],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(dailyPlanReviewExplanationResponseSchema.parse(payload)).toEqual(payload);
+    expect(
+      dailyPlanReviewExplanationResponseSchema.safeParse({
+        data: { ...payload.data, apiKey: 'must-never-be-public' },
       }).success,
     ).toBe(false);
   });

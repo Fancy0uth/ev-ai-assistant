@@ -5,9 +5,11 @@ import {
   dailyPlanDecisionBatchResponseSchema,
   dailyPlanGenerationInputSchema,
   dailyPlanProposalResponseSchema,
+  dailyPlanReviewExplanationResponseSchema,
   dailyPlanReviewListResponseSchema,
   dailyPlanReviewSchema,
   type DailyPlanProposalItem,
+  type DailyPlanReviewExplanation,
   type DailyPlanReview,
 } from '@ev/contracts';
 import { CalendarDays, Check, Sparkles, X } from 'lucide-react';
@@ -145,7 +147,7 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
         setUpdateMessage('每日计划已生成，等待你的审核。');
       }
     } catch (error) {
-      setFailure(failureState(error));
+      if (date === selectedDateRef.current) setFailure(failureState(error));
     } finally {
       setIsGenerating(false);
     }
@@ -286,6 +288,7 @@ function DailyPlanReviewCard({
         <span className="daily-plan-review-card__version">v{proposal.version}</span>
       </header>
       <p className="daily-plan-review-card__summary">{proposal.summary}</p>
+      <DailyPlanExplanationDetails proposalId={proposal.id} />
       {proposal.items.length === 0 ? (
         <p className="daily-plan-review-card__empty">这个草案没有需要审核的安排。</p>
       ) : (
@@ -302,6 +305,123 @@ function DailyPlanReviewCard({
         </ol>
       )}
     </article>
+  );
+}
+
+function contextCategoryLabel(category: DailyPlanReviewExplanation['contextManifest']['entries'][number]['category']): string {
+  switch (category) {
+    case 'FIXED_EVENTS':
+      return '固定日程';
+    case 'CONFIRMED_SOFT_BLOCKS':
+      return '已确认时间块';
+    case 'OPEN_TIME_REQUESTS':
+      return '待安排请求';
+    case 'RECOVERY_CONSTRAINTS':
+      return '恢复约束';
+    case 'SCHEDULE_PREFERENCES':
+      return '日程偏好';
+  }
+}
+
+function contextFieldLabel(field: DailyPlanReviewExplanation['contextManifest']['entries'][number]['fieldCategories'][number]): string {
+  switch (field) {
+    case 'LOCAL_DATE':
+      return '日期';
+    case 'TIME_RANGE':
+      return '时间范围';
+    case 'DURATION_MINUTES':
+      return '时长';
+    case 'PRIORITY':
+      return '优先级';
+    case 'STATUS':
+      return '状态';
+    case 'TARGET_DATE':
+      return '目标日期';
+    case 'AVAILABILITY_WINDOW':
+      return '可用时间';
+    case 'RECOVERY_LEVEL':
+      return '恢复程度';
+    case 'PREFERENCE_WINDOW':
+      return '偏好时段';
+  }
+}
+
+function verificationLabel(status: DailyPlanReviewExplanation['items'][number]['verification']['status']): string {
+  switch (status) {
+    case 'CURRENT':
+      return '当前本地日程校验通过。';
+    case 'SCHEDULE_VERSION_CHANGED':
+      return '日程版本已变化，请在采用前重新核对。';
+    case 'TIME_REQUEST_MISSING':
+      return '原时间请求已不存在，不能直接采用。';
+    case 'TIME_REQUEST_VERSION_CHANGED':
+      return '时间请求已更新，请重新核对。';
+    case 'DURATION_MISMATCH':
+      return '建议时长与当前时间请求不一致。';
+    case 'OUTSIDE_AVAILABILITY':
+      return '建议时间已超出当前可用时间。';
+    case 'HARD_EVENT_CONFLICT':
+      return '建议时间与固定日程冲突。';
+    case 'CONFIRMED_EVENT_CONFLICT':
+      return '建议时间与已确认时间块冲突。';
+  }
+}
+
+function DailyPlanExplanationDetails({ proposalId }: { proposalId: string }) {
+  const [explanation, setExplanation] = useState<DailyPlanReviewExplanation | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  async function loadExplanation(isOpen: boolean): Promise<void> {
+    if (!isOpen || explanation !== null || isLoading) return;
+
+    setFailure(null);
+    setIsLoading(true);
+    try {
+      const payload = await requestCore(`daily-plans/proposals/${proposalId}/explanation`, {
+        method: 'GET',
+      });
+      setExplanation(dailyPlanReviewExplanationResponseSchema.parse(payload).data);
+    } catch {
+      setFailure('暂时无法读取本次上下文与本地校验结果，请稍后重试。');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <details className="daily-plan-explanation" onToggle={(event) => void loadExplanation(event.currentTarget.open)}>
+      <summary>查看本次上下文与校验</summary>
+      {isLoading ? <p aria-live="polite">正在读取本地校验结果…</p> : null}
+      {failure ? <p role="alert">{failure}</p> : null}
+      {explanation ? (
+        <div className="daily-plan-explanation__content">
+          <p>草案基于日程版本 v{explanation.baseScheduleVersion}；当前为 v{explanation.currentScheduleVersion}。</p>
+          <ul aria-label="本次上下文类别">
+            {explanation.contextManifest.entries.map((entry) => (
+              <li key={entry.category}>
+                {contextCategoryLabel(entry.category)}：{entry.entityCount} 条（{entry.fieldCategories.map(contextFieldLabel).join('、')}）
+              </li>
+            ))}
+          </ul>
+          <ol aria-label="草案项本地校验">
+            {explanation.items.map((item) => (
+              <li key={item.itemId}>
+                <strong>{item.timeRequest?.title ?? `请求 ${item.ordinal}`}</strong>
+                <p>{verificationLabel(item.verification.status)}</p>
+                {item.verification.conflicts.length > 0 ? (
+                  <p>
+                    冲突时段：{item.verification.conflicts
+                      .map((conflict) => `${conflict.startLocalTime}–${conflict.endLocalTime}`)
+                      .join('、')}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </details>
   );
 }
 

@@ -80,6 +80,7 @@ export interface DailyPlanProposalList {
 
 export interface DailyPlanReviewExecutionContext {
   review: DailyPlanReview;
+  contextManifest: DailyPlanContextManifest;
   scheduleVersion: number;
   events: DailyPlanningReviewEventContext[];
   timeRequests: DailyPlanningReviewTimeRequestContext[];
@@ -878,6 +879,10 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
       if (!proposalRow) {
         return undefined;
       }
+      const runRow = findRun.get(proposalRow.run_id, ownerId) as DailyPlanRunRow | undefined;
+      if (!runRow) {
+        throw new Error('daily planning run is missing for proposal');
+      }
       const scheduleVersion = readScheduleVersion.get(ownerId) as ScheduleVersionRow | undefined;
       if (!scheduleVersion) {
         throw new Error('daily planning schedule version is missing');
@@ -910,6 +915,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           proposalRow,
           findProposalDecisions.all(proposalId, ownerId) as ProposalDecisionRow[],
         ),
+        contextManifest: toDailyPlanRun(runRow).contextManifest,
         scheduleVersion: scheduleVersion.version,
         events,
         timeRequests,

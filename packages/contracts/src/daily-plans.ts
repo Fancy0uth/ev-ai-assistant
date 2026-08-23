@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { localTimeSchema } from './calendar';
+import { localTimeSchema, timeRequestSourceSchema } from './calendar';
 
 const nonBlankText = (maximum: number) =>
   z
@@ -417,6 +417,73 @@ export const dailyPlanReviewResponseSchema = z
   })
   .strict();
 
+export const dailyPlanReviewExplanationVerificationStatusSchema = z.enum([
+  'CURRENT',
+  'SCHEDULE_VERSION_CHANGED',
+  'TIME_REQUEST_MISSING',
+  'TIME_REQUEST_VERSION_CHANGED',
+  'DURATION_MISMATCH',
+  'OUTSIDE_AVAILABILITY',
+  'HARD_EVENT_CONFLICT',
+  'CONFIRMED_EVENT_CONFLICT',
+]);
+
+export const dailyPlanReviewExplanationConflictSchema = z
+  .object({
+    eventId: z.uuid(),
+    kind: z.enum(['HARD_EVENT', 'CONFIRMED_EVENT']),
+    startLocalTime: localTimeSchema,
+    endLocalTime: localTimeSchema,
+  })
+  .strict();
+
+const dailyPlanReviewExplanationTimeRequestSchema = z
+  .object({
+    id: z.uuid(),
+    title: nonBlankText(200),
+    source: timeRequestSourceSchema,
+    durationMinutes: z.number().int().positive().max(24 * 60),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+    earliestStartLocalTime: localTimeSchema.nullable(),
+    latestEndLocalTime: localTimeSchema.nullable(),
+    isFixed: z.boolean(),
+    version: positiveVersionSchema,
+  })
+  .strict();
+
+export const dailyPlanReviewExplanationSchema = z
+  .object({
+    proposalId: z.uuid(),
+    localDate: z.iso.date(),
+    baseScheduleVersion: positiveVersionSchema,
+    currentScheduleVersion: positiveVersionSchema,
+    contextManifest: dailyPlanContextManifestSchema,
+    items: z
+      .array(
+        z
+          .object({
+            itemId: z.uuid(),
+            ordinal: z.number().int().min(1).max(24),
+            timeRequest: dailyPlanReviewExplanationTimeRequestSchema.nullable(),
+            verification: z
+              .object({
+                status: dailyPlanReviewExplanationVerificationStatusSchema,
+                conflicts: z.array(dailyPlanReviewExplanationConflictSchema).max(48),
+              })
+              .strict(),
+          })
+          .strict(),
+      )
+      .max(24),
+  })
+  .strict();
+
+export const dailyPlanReviewExplanationResponseSchema = z
+  .object({
+    data: dailyPlanReviewExplanationSchema,
+  })
+  .strict();
+
 export const dailyPlanReviewListResponseSchema = z
   .object({
     data: z
@@ -525,4 +592,5 @@ export type DailyPlanProposalResponse = z.infer<typeof dailyPlanProposalResponse
 export type DailyPlanDecisionInput = z.input<typeof dailyPlanDecisionInputSchema>;
 export type DailyPlanDecisionRecord = z.infer<typeof dailyPlanDecisionRecordSchema>;
 export type DailyPlanReview = z.infer<typeof dailyPlanReviewSchema>;
+export type DailyPlanReviewExplanation = z.infer<typeof dailyPlanReviewExplanationSchema>;
 export type DailyPlanRun = z.infer<typeof dailyPlanRunSchema>;
