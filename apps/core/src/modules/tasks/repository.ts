@@ -57,19 +57,16 @@ export interface TaskRepository<TTask extends Task = Task> {
 }
 
 function toTask(row: TaskRow): NormalizedTask {
-  const schedulingValues = [
-    row.scheduling_duration_minutes,
-    row.scheduling_earliest_start_local_time,
-    row.scheduling_latest_end_local_time,
-    row.scheduling_is_fixed,
-  ];
-  const hasScheduling = schedulingValues.some((value) => value !== null);
-  const hasCompleteScheduling = schedulingValues.every((value) => value !== null);
-  if (hasScheduling && !hasCompleteScheduling) {
+  const hasDuration = row.scheduling_duration_minutes !== null;
+  const hasFixed = row.scheduling_is_fixed !== null;
+  const hasWindow =
+    row.scheduling_earliest_start_local_time !== null ||
+    row.scheduling_latest_end_local_time !== null;
+  if (hasDuration !== hasFixed || (!hasDuration && hasWindow)) {
     throw new Error('TASK_SCHEDULING_INCONSISTENT_STORAGE');
   }
 
-  const scheduling = hasCompleteScheduling
+  const scheduling = hasDuration
     ? {
         durationMinutes: row.scheduling_duration_minutes!,
         earliestStartLocalTime: row.scheduling_earliest_start_local_time,

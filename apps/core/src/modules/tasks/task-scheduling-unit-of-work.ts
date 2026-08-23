@@ -169,6 +169,7 @@ export function createTaskSchedulingUnitOfWork(
       if (activeRequest) {
         const updated = options.calendarRepository.updateActiveTimeRequest(ownerId, activeRequest.id, {
           expectedVersion: activeRequest.version,
+          source: sourceForArea(task.area),
           title: task.title,
           targetDate: task.targetDate!,
           durationMinutes: scheduling.durationMinutes,

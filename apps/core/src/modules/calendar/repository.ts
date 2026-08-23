@@ -52,6 +52,7 @@ export interface NewActiveTimeRequest {
 
 export interface ActiveTimeRequestUpdate {
   expectedVersion: number;
+  source?: TimeRequest['source'];
   title: string;
   targetDate: string;
   durationMinutes: number;
@@ -323,7 +324,7 @@ export function createCalendarRepository(database: Database.Database): CalendarR
   );
   const updateActiveTimeRequest = database.prepare(
     `update time_requests
-     set title = ?, target_date = ?, duration_minutes = ?, priority = ?,
+     set source = coalesce(?, source), title = ?, target_date = ?, duration_minutes = ?, priority = ?,
          earliest_start_local_time = ?, latest_end_local_time = ?, is_fixed = ?,
          origin_kind = ?, origin_id = ?, origin_version = ?, updated_at = ?, version = version + 1
      where id = ? and owner_id = ? and version = ? and lifecycle_status = 'ACTIVE'`,
@@ -529,6 +530,7 @@ export function createCalendarRepository(database: Database.Database): CalendarR
 
     updateActiveTimeRequest(ownerId, id, input) {
       const result = updateActiveTimeRequest.run(
+        input.source ?? null,
         input.title,
         input.targetDate,
         input.durationMinutes,

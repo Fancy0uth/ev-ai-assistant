@@ -146,6 +146,126 @@ describe('TaskSchedulingUnitOfWork', () => {
     expect(harness.nowCalls).toHaveLength(1);
   });
 
+  it('normalizes nullable scheduling windows through Task create, find, list, and update', () => {
+    const harness = createHarness();
+    const created = harness.taskRepository.create({
+      id: '00000000-0000-4000-8000-000000000731',
+      ownerId,
+      title: '可空窗口排程',
+      area: 'WORK',
+      priority: 'MEDIUM',
+      status: 'OPEN',
+      targetDate: localDate,
+      completedAt: null,
+      scheduling: {
+        durationMinutes: 60,
+        earliestStartLocalTime: null,
+        latestEndLocalTime: null,
+        isFixed: false,
+      },
+      version: 1,
+      createdAt: initialTimestamp,
+      updatedAt: initialTimestamp,
+    });
+
+    expect(created.scheduling).toEqual({
+      durationMinutes: 60,
+      earliestStartLocalTime: null,
+      latestEndLocalTime: null,
+      isFixed: false,
+    });
+    expect(harness.taskRepository.findById(ownerId, created.id)).toEqual(created);
+    expect(harness.taskRepository.list(ownerId, { page: 1, pageSize: 20 }).items).toEqual([
+      created,
+    ]);
+
+    const updated = harness.taskRepository.update(ownerId, created.id, {
+      title: created.title,
+      area: created.area,
+      priority: created.priority,
+      status: created.status,
+      targetDate: created.targetDate,
+      completedAt: created.completedAt,
+      scheduling: {
+        durationMinutes: 60,
+        earliestStartLocalTime: '10:00',
+        latestEndLocalTime: null,
+        isFixed: true,
+      },
+      updatedAt: nextTimestamp,
+      expectedVersion: 1,
+    });
+
+    expect(updated).toMatchObject({
+      scheduling: {
+        durationMinutes: 60,
+        earliestStartLocalTime: '10:00',
+        latestEndLocalTime: null,
+        isFixed: true,
+      },
+      version: 2,
+      updatedAt: nextTimestamp,
+    });
+    expect(harness.taskRepository.findById(ownerId, created.id)).toEqual(updated);
+    expect(harness.taskRepository.list(ownerId, { page: 1, pageSize: 20 }).items).toEqual([
+      updated,
+    ]);
+  });
+
+  it.each([
+    {
+      label: 'one required anchor is null',
+      durationMinutes: 60,
+      earliestStartLocalTime: null,
+      latestEndLocalTime: null,
+      isFixed: null,
+    },
+    {
+      label: 'a window exists without either required anchor',
+      durationMinutes: null,
+      earliestStartLocalTime: '09:00',
+      latestEndLocalTime: null,
+      isFixed: null,
+    },
+  ])('rejects raw partial-corrupt scheduling storage when $label', (row) => {
+    const harness = createHarness();
+    const id = row.label.startsWith('one')
+      ? '00000000-0000-4000-8000-000000000732'
+      : '00000000-0000-4000-8000-000000000733';
+    harness.database
+      .prepare(
+        `insert into tasks (
+           id, owner_id, title, area, priority, status, target_date, completed_at,
+           scheduling_duration_minutes, scheduling_earliest_start_local_time,
+           scheduling_latest_end_local_time, scheduling_is_fixed, version, created_at, updated_at
+         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        ownerId,
+        '损坏的排程存储',
+        'WORK',
+        'MEDIUM',
+        'OPEN',
+        localDate,
+        null,
+        row.durationMinutes,
+        row.earliestStartLocalTime,
+        row.latestEndLocalTime,
+        row.isFixed,
+        1,
+        initialTimestamp,
+        initialTimestamp,
+      );
+
+    expect(() => harness.taskRepository.findById(ownerId, id)).toThrow(
+      'TASK_SCHEDULING_INCONSISTENT_STORAGE',
+    );
+    expect(() => harness.taskRepository.list(ownerId, { page: 1, pageSize: 20 })).toThrow(
+      'TASK_SCHEDULING_INCONSISTENT_STORAGE',
+    );
+  });
+
   it('rejects scheduling without a target date before either table is written', () => {
     const harness = createHarness();
 
@@ -201,6 +321,41 @@ describe('TaskSchedulingUnitOfWork', () => {
       kind: 'TASK',
       entityId: created.id,
     })).toHaveLength(1);
+  });
+
+  it('updates the same ACTIVE request source for every latest Task area', () => {
+    const harness = createHarness();
+    const created = harness.unitOfWork.create(ownerId, taskInput());
+    const requestId = '00000000-0000-4000-8000-000000000712';
+
+    for (const transition of [
+      { version: 1, area: 'STUDY' as const, source: 'LEARNING_AGENT' as const, entityVersion: 2 },
+      {
+        version: 2,
+        area: 'LIFE' as const,
+        source: 'SCHEDULE_COORDINATOR' as const,
+        entityVersion: 3,
+      },
+    ]) {
+      const result = harness.unitOfWork.update(ownerId, created.id, {
+        version: transition.version,
+        area: transition.area,
+      });
+
+      expect(result).toMatchObject({
+        kind: 'UPDATED',
+        task: { area: transition.area, version: transition.entityVersion },
+      });
+      expect(harness.calendarRepository.findActiveTimeRequestByOrigin(ownerId, {
+        kind: 'TASK',
+        entityId: created.id,
+      })).toMatchObject({
+        id: requestId,
+        source: transition.source,
+        version: transition.entityVersion,
+        origin: { kind: 'TASK', entityId: created.id, entityVersion: transition.entityVersion },
+      });
+    }
   });
 
   it('clears scheduling and closes the active request as CANCELLED', () => {

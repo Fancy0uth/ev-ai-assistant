@@ -412,7 +412,10 @@ describe('task version conflict races', () => {
       code: 'VERSION_CONFLICT',
       message: '数据已变化，请确认最新内容后重试',
     });
-    expect(taskVersionConflictDetailsSchema.parse(thrown.details)).toEqual({ currentTask: latestTask });
+    expect(taskVersionConflictDetailsSchema.parse(thrown.details)).toEqual({
+      currentTask: { ...latestTask, scheduling: null },
+    });
+    expect(latestTask).not.toHaveProperty('scheduling');
     expect(findByIdCalls).toEqual([
       [ownerId, id],
       [ownerId, id],

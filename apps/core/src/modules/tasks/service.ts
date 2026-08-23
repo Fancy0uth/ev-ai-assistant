@@ -38,9 +38,7 @@ export interface TaskService {
 }
 
 function normalizeTask(task: Task): NormalizedTask {
-  const normalized = taskSchema.parse(task);
-  if (task.scheduling === undefined) Object.assign(task, { scheduling: null });
-  return normalized;
+  return taskSchema.parse(task);
 }
 
 function versionConflict(currentTask?: Task): ApiError {
