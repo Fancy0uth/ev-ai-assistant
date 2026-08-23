@@ -317,6 +317,123 @@ describe('v0.5 expired Provider execution convergence', () => {
     expect(secretStore.unprotectCalls).toBe(0);
   });
 
+  it('fails startup closed without partially finalizing a corrupted Run idempotency correlation', async () => {
+    await openApp();
+    const { ownerId, token } = await setupOwner();
+    const preflight = await approvedPreflight(token);
+    await app!.close();
+    app = undefined;
+
+    const seeded = seedExecution({
+      ownerId,
+      preflightId: preflight.id,
+      expectedPreflightVersion: preflight.version,
+      idempotencyKey: 'v05-startup-sweeper-run-correlation-corrupt-01',
+      attemptCount: 1,
+    });
+    seeded.database
+      .prepare('update daily_plan_runs set idempotency_record_id = null where id = ? and owner_id = ?')
+      .run(seeded.claimed.run.id, ownerId);
+    seeded.database.close();
+    databases.splice(databases.indexOf(seeded.database), 1);
+    current = new Date(t0.getTime() + PROVIDER_POLICY.leaseMs + 1_000);
+
+    let startupError: unknown;
+    try {
+      await openApp();
+    } catch (error) {
+      startupError = error;
+    }
+
+    const control = openDatabase(databasePath);
+    databases.push(control);
+    expect(
+      control.prepare('select state from idempotency_records where id = ?').get(seeded.recordId),
+    ).toEqual({ state: 'IN_PROGRESS' });
+    expect(
+      control.prepare('select status, idempotency_record_id from daily_plan_runs where id = ?').get(seeded.claimed.run.id),
+    ).toEqual({ status: 'GENERATING', idempotency_record_id: null });
+    expect(
+      control.prepare('select status from daily_plan_preflights where id = ?').get(preflight.id),
+    ).toEqual({ status: 'CLAIMED' });
+    expect(
+      control.prepare('select status from provider_call_logs where id = ?').get(seeded.providerCallId),
+    ).toEqual({ status: 'STARTED' });
+    expect(startupError).toBeInstanceOf(Error);
+    expect((startupError as Error).message).toContain('Expired Daily Plan execution correlation is inconsistent');
+    expect(provider.calls).toBe(0);
+    expect(secretStore.unprotectCalls).toBe(0);
+  });
+
+  it('terminalizes only idempotency in a claim-before-business window and remains restart-idempotent', async () => {
+    await openApp();
+    const { ownerId, token } = await setupOwner();
+    const preflight = await approvedPreflight(token);
+    await app!.close();
+    app = undefined;
+
+    const database = openDatabase(databasePath);
+    databases.push(database);
+    const reliability = createProviderReliabilityRepository(database);
+    const recordId = '00000000-0000-4000-8000-000000005811';
+    reliability.createInProgress({
+      id: recordId,
+      ownerId,
+      key: 'v05-claim-before-business-expired-01',
+      operation: 'daily_plan.generate',
+      resourceId: preflight.id,
+      requestHash: hashIdempotencyRequest({
+        ownerId,
+        key: 'v05-claim-before-business-expired-01',
+        operation: 'daily_plan.generate',
+        resourceId: preflight.id,
+        body: { preflightId: preflight.id, expectedPreflightVersion: preflight.version },
+      }),
+      leaseToken: 'claim-before-business-lease',
+      leaseExpiresAt: new Date(t0.getTime() + PROVIDER_POLICY.leaseMs).toISOString(),
+      attemptCount: 1,
+      createdAt: t0.toISOString(),
+    });
+    database.close();
+    databases.splice(databases.indexOf(database), 1);
+    current = new Date(t0.getTime() + PROVIDER_POLICY.leaseMs + 1_000);
+
+    await openApp();
+    const control = openDatabase(databasePath);
+    databases.push(control);
+    expect(
+      control.prepare('select state, response_status, updated_at from idempotency_records where id = ?').get(recordId),
+    ).toMatchObject({ state: 'FAILED', response_status: 503 });
+    const firstTerminal = control
+      .prepare('select updated_at from idempotency_records where id = ?')
+      .get(recordId);
+    expect(
+      control.prepare('select status from daily_plan_runs where id = ?').get(preflight.runId),
+    ).toEqual({ status: 'CONTEXT_READY' });
+    expect(
+      control.prepare('select status from daily_plan_preflights where id = ?').get(preflight.id),
+    ).toEqual({ status: 'APPROVED' });
+    expect(
+      control.prepare('select count(*) as count from provider_call_logs where idempotency_record_id = ?').get(recordId),
+    ).toEqual({ count: 0 });
+    expect(provider.calls).toBe(0);
+    expect(secretStore.unprotectCalls).toBe(0);
+
+    control.close();
+    databases.splice(databases.indexOf(control), 1);
+    await app!.close();
+    app = undefined;
+    current = new Date(current.getTime() + 1_000);
+    await openApp();
+    const reopened = openDatabase(databasePath);
+    databases.push(reopened);
+    expect(
+      reopened.prepare('select updated_at from idempotency_records where id = ?').get(recordId),
+    ).toEqual(firstTerminal);
+    expect(provider.calls).toBe(0);
+    expect(secretStore.unprotectCalls).toBe(0);
+  });
+
   it('uses the same terminal unit for an attempt-two request-path expiry and replays it', async () => {
     await openApp();
     const { ownerId, token } = await setupOwner();

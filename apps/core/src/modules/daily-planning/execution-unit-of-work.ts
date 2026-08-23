@@ -141,11 +141,27 @@ export function createDailyPlanExecutionUnitOfWork(options: {
       options.fault?.({ phase: 'IDEMPOTENCY_TERMINAL', outcome: 'FAILED' });
     },
   );
-  const findCorrelatedRun = options.database.prepare(
-    `select id
+  const findRecoveryPreflight = options.database.prepare(
+    `select id, run_id, status
+     from daily_plan_preflights
+     where id = ? and owner_id = ?`,
+  );
+  const findRecoveryRun = options.database.prepare(
+    `select id, status, idempotency_record_id, lease_token
      from daily_plan_runs
-     where owner_id = ? and idempotency_record_id = ? and status = 'GENERATING'
-       and lease_token = ?`,
+     where id = ? and owner_id = ?`,
+  );
+  const findExecutionLinkedRuns = options.database.prepare(
+    `select id, status, idempotency_record_id, lease_token
+     from daily_plan_runs
+     where owner_id = ? and (idempotency_record_id = ? or lease_token = ?)`,
+  );
+  const findStartedProviderCalls = options.database.prepare(
+    `select id, run_id, idempotency_record_id
+     from provider_call_logs
+     where owner_id = ? and status = 'STARTED'
+       and (idempotency_record_id = ? or (? is not null and run_id = ?))
+     order by id`,
   );
   const failExpiredRun = options.database.prepare(
     `update daily_plan_runs
@@ -196,6 +212,25 @@ export function createDailyPlanExecutionUnitOfWork(options: {
     updated_at: string;
   };
 
+  type RecoveryPreflightRow = {
+    id: string;
+    run_id: string;
+    status: 'AWAITING_APPROVAL' | 'APPROVED' | 'CLAIMED' | 'CONSUMED' | 'STALE';
+  };
+
+  type RecoveryRunRow = {
+    id: string;
+    status: 'CREATED' | 'CONTEXT_READY' | 'GENERATING' | 'SUCCEEDED' | 'FAILED';
+    idempotency_record_id: string | null;
+    lease_token: string | null;
+  };
+
+  type StartedProviderCallRow = {
+    id: string;
+    run_id: string | null;
+    idempotency_record_id: string | null;
+  };
+
   function expiredRecord(row: ExpiredRow): IdempotencyRecord {
     return {
       id: row.id,
@@ -227,12 +262,49 @@ export function createDailyPlanExecutionUnitOfWork(options: {
       ) {
         return false;
       }
-      const run = findCorrelatedRun.get(
+      if (!record.resourceId) {
+        throw new Error('Expired Daily Plan execution correlation is inconsistent');
+      }
+      const preflight = findRecoveryPreflight.get(
+        record.resourceId,
+        record.ownerId,
+      ) as RecoveryPreflightRow | undefined;
+      const run = preflight
+        ? (findRecoveryRun.get(preflight.run_id, record.ownerId) as RecoveryRunRow | undefined)
+        : undefined;
+      const linkedRuns = findExecutionLinkedRuns.all(
         record.ownerId,
         record.id,
         record.leaseToken,
-      ) as { id: string } | undefined;
-      if (run) {
+      ) as RecoveryRunRow[];
+      const startedCalls = findStartedProviderCalls.all(
+        record.ownerId,
+        record.id,
+        preflight?.run_id ?? null,
+        preflight?.run_id ?? null,
+      ) as StartedProviderCallRow[];
+      const executionStarted =
+        (preflight !== undefined && !['AWAITING_APPROVAL', 'APPROVED'].includes(preflight.status)) ||
+        (run !== undefined && !['CREATED', 'CONTEXT_READY'].includes(run.status)) ||
+        linkedRuns.length > 0 ||
+        startedCalls.length > 0;
+
+      if (executionStarted) {
+        if (!preflight) {
+          throw new Error('Expired Daily Plan preflight could not be finalized');
+        }
+        const hasCompleteCorrelation =
+          preflight.status === 'CLAIMED' &&
+          run?.status === 'GENERATING' &&
+          run.idempotency_record_id === record.id &&
+          run.lease_token === record.leaseToken &&
+          linkedRuns.every((linkedRun) => linkedRun.id === run.id) &&
+          startedCalls.every(
+            (call) => call.run_id === run.id && call.idempotency_record_id === record.id,
+          );
+        if (!hasCompleteCorrelation || !run) {
+          throw new Error('Expired Daily Plan execution correlation is inconsistent');
+        }
         if (
           failExpiredRun.run(
             nowIso,
