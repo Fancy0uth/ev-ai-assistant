@@ -98,6 +98,9 @@ describe('v0.4 TimeRequest lifecycle repository', () => {
       closedReason: null,
       version: 1,
     });
+    expect(calendar.listTimeRequestsForDate(ownerId, localDate)).toMatchObject([
+      { id: originalId, lifecycleStatus: 'ACTIVE' },
+    ]);
     expect(calendar.findActiveTimeRequestByOrigin(ownerId, origin())).toMatchObject({ id: originalId });
 
     expect(
@@ -158,6 +161,10 @@ describe('v0.4 TimeRequest lifecycle repository', () => {
         closedReason: 'CANCELLED',
       }),
     ).toBeUndefined();
+    expect(calendar.listTimeRequestsForDate(ownerId, localDate)).toEqual([]);
+    expect(calendar.listTimeRequestHistoryForOrigin(ownerId, origin())).toMatchObject([
+      { id: originalId, lifecycleStatus: 'CLOSED', origin: origin(2) },
+    ]);
 
     expect(createActiveRequest(replacementId, 3, '2026-08-23T02:00:00.000Z')).toMatchObject({
       id: replacementId,

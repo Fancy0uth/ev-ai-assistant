@@ -151,8 +151,8 @@ export interface CalendarRepository {
   createRule(rule: NewCalendarRule): CalendarRule;
   createEvent(event: NewEvent): Event;
   listEventsForDate(ownerId: string, localDate: string): Event[];
-  createTimeRequest(request: NewTimeRequest): TimeRequest;
-  listTimeRequestsForDate(ownerId: string, localDate: string): TimeRequest[];
+  createTimeRequest(request: NewTimeRequest): NormalizedTimeRequest;
+  listTimeRequestsForDate(ownerId: string, localDate: string): NormalizedTimeRequest[];
   findActiveTimeRequestByOrigin(
     ownerId: string,
     origin: TimeRequestOriginIdentity,
@@ -474,9 +474,9 @@ export function createCalendarRepository(database: Database.Database): CalendarR
     listTimeRequestsForDate(ownerId, localDate) {
       const rows = database
         .prepare(
-          `select ${timeRequestColumns}
+           `select ${timeRequestColumns}
            from time_requests
-           where owner_id = ? and target_date = ?
+           where owner_id = ? and target_date = ? and lifecycle_status = 'ACTIVE'
            order by
              case priority when 'HIGH' then 0 when 'MEDIUM' then 1 else 2 end,
              created_at asc,
