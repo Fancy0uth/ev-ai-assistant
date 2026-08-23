@@ -9,7 +9,7 @@
 - [x] V4-03：以本地 Unit of Work 原子同步 Task↔TimeRequest，并提供 Task 详情 API。
 - [x] V4-04：拆分持久 preflight 与事务外 Provider 调用，明确 `service.ts` 和 `app.ts` 装配。
 - [x] V4-05：暴露 preflight/07:00 fail-closed、手工 Event Proposal 与 Event 详情 API。
-- [ ] V4-06：提取 focused preflight component/hook，完成 Task/Event/Project Web 详情路由。
+- [x] V4-06：提取 focused preflight component/hook，完成 Task/Event/Project Web 详情路由。
 - [ ] V4-07：修正可聚焦 E2E runner，并证明无 SQLite 注入的 UI-origin 闭环。
 
 ## v0.5：Provider Reliability
