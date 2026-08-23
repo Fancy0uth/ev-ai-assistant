@@ -7,8 +7,7 @@ import {
 } from '@ev/contracts';
 import { CredentialNotConfiguredError } from '../providers/credential-service';
 import type {
-  DailyPlanningContextService,
-  DailyPlanningPacket,
+  ApprovedDailyPlanningPacket,
 } from './context-service';
 import {
   DailyPlanningProviderModelOutputError,
@@ -16,7 +15,11 @@ import {
   type DailyPlanningProvider,
   type DailyPlanningProviderInput,
 } from './provider';
-import type { DailyPlanRunRepository } from './repository';
+import {
+  DailyPlanBaseVersionStaleError,
+  type DailyPlanRunRepository,
+} from './repository';
+import type { DailyPlanPreflightService } from './preflight-service';
 import { DailyPlanValidationError, validateDailyPlanOutput } from './validator';
 
 export interface DailyPlanningCredentialPort {
@@ -24,7 +27,7 @@ export interface DailyPlanningCredentialPort {
 }
 
 export interface DailyPlanningServiceDependencies {
-  contextService: DailyPlanningContextService;
+  preflightService: DailyPlanPreflightService;
   repository: DailyPlanRunRepository;
   credentialService: DailyPlanningCredentialPort;
   provider: DailyPlanningProvider;
@@ -38,6 +41,20 @@ export interface DailyPlanningService {
     localDate: string;
     trigger: DailyPlanTrigger;
   }): Promise<DailyPlanProposal>;
+  generateApprovedPreflight(input: {
+    ownerId: string;
+    preflightId: string;
+    expectedPreflightVersion: number;
+  }): Promise<DailyPlanProposal>;
+}
+
+export class DailyPlanPreflightRequiredError extends Error {
+  readonly code = 'DAILY_PLAN_PREFLIGHT_REQUIRED';
+
+  constructor() {
+    super('DAILY_PLAN_PREFLIGHT_REQUIRED');
+    this.name = 'DailyPlanPreflightRequiredError';
+  }
 }
 
 export class DailyPlanGenerationError extends Error {
@@ -47,7 +64,10 @@ export class DailyPlanGenerationError extends Error {
   }
 }
 
-function providerInput(packet: DailyPlanningPacket, localDate: string): DailyPlanningProviderInput {
+function providerInput(
+  packet: ApprovedDailyPlanningPacket,
+  localDate: string,
+): DailyPlanningProviderInput {
   return {
     localDate,
     fixedBlocks: packet.timeBlocks
@@ -56,15 +76,21 @@ function providerInput(packet: DailyPlanningPacket, localDate: string): DailyPla
     softBlocks: packet.timeBlocks
       .filter((block) => !block.isHard)
       .map(({ startLocalTime, endLocalTime }) => ({ startLocalTime, endLocalTime })),
-    timeRequests: packet.timeRequests.map((request) => ({
-      contextRef: request.contextRef,
-      durationMinutes: request.durationMinutes,
-      priority: request.priority,
-      availability: {
-        earliestStartLocalTime: request.earliestStartLocalTime,
-        latestEndLocalTime: request.latestEndLocalTime,
-      },
-    })),
+    timeRequests: packet.timeRequests
+      .filter((request) => request.included)
+      .map((request) => ({
+        contextRef: request.contextRef,
+        safeTitle: request.safeTitle,
+        domain: request.domain,
+        deadlineLocalDate: request.deadlineLocalDate,
+        durationMinutes: request.durationMinutes,
+        priority: request.priority,
+        availability: {
+          earliestStartLocalTime: request.earliestStartLocalTime,
+          latestEndLocalTime: request.latestEndLocalTime,
+        },
+        isFixed: request.isFixed,
+      })),
     recoveryLevel: packet.recoveryLevel,
   };
 }
@@ -95,48 +121,62 @@ export function createDailyPlanningService(
   const now = dependencies.now ?? (() => new Date());
 
   return {
-    async generateDailyPlan(input) {
-      const { run, packet } = dependencies.contextService.prepare(
-        input.ownerId,
-        input.localDate,
-        input.trigger,
-        now(),
-      );
+    async generateDailyPlan(_input) {
+      void _input;
+      throw new DailyPlanPreflightRequiredError();
+    },
 
-      let proposal: DailyPlanProposal;
+    async generateApprovedPreflight(input) {
+      const claimed = dependencies.preflightService.claimApproved(
+        input.ownerId,
+        input.preflightId,
+        input.expectedPreflightVersion,
+      );
       try {
-        dependencies.repository.markRunGenerating(input.ownerId, run.id);
         let providerOutput: unknown;
         await dependencies.credentialService.withApiKey(input.ownerId, async (apiKey) => {
-          providerOutput = await dependencies.provider.generate(apiKey, providerInput(packet, input.localDate));
+          providerOutput = await dependencies.provider.generate(
+            apiKey,
+            providerInput(claimed.packet, claimed.preflight.localDate),
+          );
         });
         const modelOutput = dailyPlanModelOutputSchema.parse(providerOutput);
-        const validatedItems = validateDailyPlanOutput(packet, modelOutput);
-        proposal = dailyPlanProposalSchema.parse({
+        const validatedItems = validateDailyPlanOutput(claimed.packet, modelOutput);
+        const timestamp = now().toISOString();
+        const proposal = dailyPlanProposalSchema.parse({
           id: newId(),
           contractVersion: 'DAILY_PLAN_V1',
-          runId: run.id,
-          localDate: input.localDate,
+          runId: claimed.run.id,
+          localDate: claimed.preflight.localDate,
           status: 'PENDING_REVIEW',
-          baseScheduleVersion: packet.baseScheduleVersion,
+          baseScheduleVersion: claimed.packet.baseScheduleVersion,
           summary: modelOutput.summary,
           items: validatedItems.map((item) => ({ id: newId(), ...item })),
           version: 1,
-          createdAt: now().toISOString(),
-          updatedAt: now().toISOString(),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+        return dependencies.repository.completeClaimedPreflight({
+          ownerId: input.ownerId,
+          preflightId: input.preflightId,
+          expectedVersion: claimed.preflight.version,
+          proposal,
+          completedAt: now().toISOString(),
         });
       } catch (error) {
+        if (error instanceof DailyPlanBaseVersionStaleError) {
+          throw error;
+        }
         const code = failureCode(error);
-        dependencies.repository.failRun(input.ownerId, run.id, code);
+        dependencies.repository.failClaimedPreflight({
+          ownerId: input.ownerId,
+          preflightId: input.preflightId,
+          expectedVersion: claimed.preflight.version,
+          code,
+          completedAt: now().toISOString(),
+        });
         throw new DailyPlanGenerationError(code);
       }
-
-      return dependencies.repository.completeWithProposal(
-        input.ownerId,
-        run.id,
-        packet.baseScheduleVersion,
-        proposal,
-      );
     },
   };
 }

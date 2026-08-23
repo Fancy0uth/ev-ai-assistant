@@ -12,12 +12,16 @@ export interface DailyPlanningProviderInput {
   }>;
   timeRequests: Array<{
     contextRef: string;
+    safeTitle: string;
+    domain: 'WORK' | 'STUDY' | 'FITNESS' | 'NUTRITION' | 'LIFE';
+    deadlineLocalDate: string | null;
     durationMinutes: number;
     priority: 'LOW' | 'MEDIUM' | 'HIGH';
     availability: {
       earliestStartLocalTime: LocalTime | null;
       latestEndLocalTime: LocalTime | null;
     };
+    isFixed: boolean;
   }>;
   recoveryLevel: 'NONE' | 'READY' | 'MODERATE' | 'LIMITED';
 }

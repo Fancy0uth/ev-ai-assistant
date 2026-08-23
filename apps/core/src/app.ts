@@ -52,6 +52,7 @@ import { createDeepSeekDailyPlanningProvider } from './modules/daily-planning/de
 import type { DailyPlanningProvider } from './modules/daily-planning/provider';
 import { createDailyPlanRunRepository } from './modules/daily-planning/repository';
 import { createDailyPlanReviewService } from './modules/daily-planning/review-service';
+import { createDailyPlanPreflightService } from './modules/daily-planning/preflight-service';
 import { createDailyPlanningService } from './modules/daily-planning/service';
 import { registerDailyPlanningRoutes } from './routes/daily-planning';
 
@@ -134,14 +135,20 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
   );
   const dailyPlanRepository = createDailyPlanRunRepository(database);
+  const dailyPlanningContextService = createDailyPlanningContextService(dailyPlanRepository, {
+    newId: () => crypto.randomUUID(),
+  });
+  const dailyPlanPreflightService = createDailyPlanPreflightService({
+    contextService: dailyPlanningContextService,
+    repository: dailyPlanRepository,
+    newId: () => crypto.randomUUID(),
+  });
   const dailyPlanReviewService = createDailyPlanReviewService({
     repository: dailyPlanRepository,
     newId: () => crypto.randomUUID(),
   });
   const dailyPlanningService = createDailyPlanningService({
-    contextService: createDailyPlanningContextService(dailyPlanRepository, {
-      newId: () => crypto.randomUUID(),
-    }),
+    preflightService: dailyPlanPreflightService,
     repository: dailyPlanRepository,
     credentialService: providerCredentialService,
     provider: options.dailyPlanningProvider ?? createDeepSeekDailyPlanningProvider(),

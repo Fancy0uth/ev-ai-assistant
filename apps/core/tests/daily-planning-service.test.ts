@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DailyPlanModelOutput } from '@ev/contracts';
 import { createCalendarRepository } from '../src/modules/calendar/repository';
 import { createDailyPlanningContextService } from '../src/modules/daily-planning/context-service';
+import { createDailyPlanPreflightService } from '../src/modules/daily-planning/preflight-service';
 import {
   createDailyPlanningService,
   DailyPlanGenerationError,
@@ -157,16 +158,46 @@ describe('daily planning generation service', () => {
     credentialPort = credentials(),
     generationRepository = repository,
   ) {
-    return createDailyPlanningService({
-      contextService: createDailyPlanningContextService(repository, {
+    const contextService = createDailyPlanningContextService(generationRepository, {
         newId: () => '00000000-0000-4000-8000-000000000641',
-      }),
+      });
+    const preflightService = createDailyPlanPreflightService({
+      contextService,
+      repository: generationRepository,
+      newId: () => '00000000-0000-4000-8000-000000000642',
+      now: () => timestamp,
+    });
+    const dailyPlanningService = createDailyPlanningService({
+      preflightService,
       repository: generationRepository,
       credentialService: credentialPort,
       provider,
       newId: () => '00000000-0000-4000-8000-000000000651',
       now: () => timestamp,
     });
+    return {
+      ...dailyPlanningService,
+      async generateDailyPlan(input: { ownerId: string; localDate: string; trigger: 'MANUAL' }) {
+        const prepared = preflightService.prepare(input.ownerId, input.localDate, input.trigger);
+        const approved = preflightService.approve(
+          input.ownerId,
+          prepared.id,
+          prepared.version,
+          prepared.items.map(({ contextRef, safeTitle, domain, deadlineLocalDate, included }) => ({
+            contextRef,
+            safeTitle,
+            domain,
+            deadlineLocalDate,
+            included,
+          })),
+        );
+        return dailyPlanningService.generateApprovedPreflight({
+          ownerId: input.ownerId,
+          preflightId: approved.id,
+          expectedPreflightVersion: approved.version,
+        });
+      },
+    };
   }
 
   async function expectFailed(
@@ -224,9 +255,13 @@ describe('daily planning generation service', () => {
         timeRequests: [
           {
             contextRef: 'TIME_REQUEST_1',
+            safeTitle: 'Sensitive project title',
+            domain: 'WORK',
+            deadlineLocalDate: localDate,
             durationMinutes: 60,
             priority: 'HIGH',
             availability: { earliestStartLocalTime: '10:30', latestEndLocalTime: '17:00' },
+            isFixed: false,
           },
         ],
         recoveryLevel: 'READY',
@@ -240,7 +275,6 @@ describe('daily planning generation service', () => {
       timeRequestId,
       'Private hard event title',
       'Private soft event title',
-      'Sensitive project title',
       '72',
       'raw recovery note',
       testApiKey,
@@ -265,10 +299,10 @@ describe('daily planning generation service', () => {
     await expectFailed(provider, 'DAILY_PLAN_PROVIDER_UNAVAILABLE');
   });
 
-  it('fails a prepared run instead of leaving Today stuck when the generating transition fails', async () => {
+  it('fails a claimed run instead of reporting success when finalization fails', async () => {
     const transitionFailureRepository: DailyPlanRunRepository = {
       ...repository,
-      markRunGenerating() {
+      completeClaimedPreflight() {
         throw new Error('storage transition failed');
       },
     };
@@ -321,7 +355,7 @@ describe('daily planning generation service', () => {
     const provider = new FakeProvider();
     const staleRepository: DailyPlanRunRepository = {
       ...repository,
-      completeWithProposal(...args) {
+      completeClaimedPreflight(input) {
         createCalendarRepository(database).createEvent({
           id: '00000000-0000-4000-8000-000000000661',
           ownerId,
@@ -337,7 +371,7 @@ describe('daily planning generation service', () => {
           createdAt: timestamp.toISOString(),
           updatedAt: timestamp.toISOString(),
         });
-        return repository.completeWithProposal(...args);
+        return repository.completeClaimedPreflight(input);
       },
     };
 
