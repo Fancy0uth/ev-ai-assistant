@@ -37,6 +37,12 @@
 - 日期切换后旧的每日计划生成错误不再覆盖当前日期页面。
 - Web preflight 对 schema-valid 但 action、run、日期、版本或 payload 语义不一致的响应 fail closed；不再只凭 HTTP 成功继续。
 - 过时的 Daily Plan E2E 已对齐三步审核门与 v0.5 强制幂等键；Contracts 冲突响应 fixture 已对齐 `scheduling: null` 的规范输出。
+- Provider 返回后的业务终态、脱敏调用日志和幂等 HTTP snapshot 现在由同一短事务提交；成功/失败 fault injection 均证明全有或全无。
+- schedule drift 的 `STALE/version` 与 409 replay snapshot 同事务持久化，不再因异常传播被外层回滚。
+- Owner 日配额按实际调用时的上海自然日原子预留，并在 Key 解密和网络前拒绝超限请求；terminal 使用 allowlisted actual usage 对账。
+- 启动和第二次过期请求会用同一恢复 UoW 收敛 Run、preflight、STARTED log 与幂等记录，且不会在启动阶段调用 Provider。
+- v18 的 app version 字段允许历史 semver/null，旧 v17 Run 不再虚报当前版本，0.6 写入无需重建 v18 表。
+- Manual Event 与 Today Proposal 的不确定重试会在 transport 0、BFF 502 或响应解析失败时复用同一语义幂等键。
 
 ## [0.1.0] — 技术预览
 

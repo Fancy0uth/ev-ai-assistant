@@ -19,6 +19,7 @@
 - [x] V5-03：实现陈旧 Run 恢复、超时、配额和有界重试。
 - [x] V5-04：持久化脱敏 Provider 调用日志与分层 health 元数据。
 - [x] V5-05：建立单一版本事实并同步 0.5.0 package/health/run 元数据。
+- [x] V5-R1：按 Sol FAIL review 集中关闭 atomic UoW、STALE、quota、recovery、migration 五个 P1，并通过最小验证矩阵。
 - [ ] V5-06：test-only Fake、DPAPI port 与脱敏自动证据已完成；真实 DeepSeek 人工验收仍为 `NOT RUN — APPROVAL REQUIRED`。
 
 ## v0.6：Learning and Schedule Loop
