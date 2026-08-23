@@ -172,6 +172,14 @@ export const dailyPlanPreflightSchema = z
   .superRefine((preflight, context) => {
     const contextRefs = new Set<string>();
 
+    const addIssue = (path: Array<string>, message: string) => {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message,
+      });
+    };
+
     for (const [index, item] of preflight.items.entries()) {
       if (contextRefs.has(item.contextRef)) {
         context.addIssue({
@@ -181,6 +189,68 @@ export const dailyPlanPreflightSchema = z
         });
       }
       contextRefs.add(item.contextRef);
+    }
+
+    const hasApprovedAt = preflight.approvedAt !== null;
+    const hasClaimedAt = preflight.claimedAt !== null;
+    const hasConsumedAt = preflight.consumedAt !== null;
+
+    switch (preflight.status) {
+      case 'AWAITING_APPROVAL':
+        if (hasApprovedAt || hasClaimedAt || hasConsumedAt) {
+          addIssue(['status'], 'AWAITING_APPROVAL 不能包含生命周期时间戳');
+        }
+        break;
+      case 'APPROVED':
+        if (!hasApprovedAt || hasClaimedAt || hasConsumedAt) {
+          addIssue(['status'], 'APPROVED 仅能包含 approvedAt');
+        }
+        break;
+      case 'CLAIMED':
+        if (!hasApprovedAt || !hasClaimedAt || hasConsumedAt) {
+          addIssue(['status'], 'CLAIMED 必须包含 approvedAt 和 claimedAt');
+        }
+        break;
+      case 'CONSUMED':
+        if (!hasApprovedAt || !hasClaimedAt || !hasConsumedAt) {
+          addIssue(['status'], 'CONSUMED 必须包含全部生命周期时间戳');
+        }
+        break;
+      case 'STALE':
+        if (hasConsumedAt || (hasClaimedAt && !hasApprovedAt)) {
+          addIssue(['status'], 'STALE 不可包含 consumedAt，claimedAt 需要 approvedAt');
+        }
+        break;
+    }
+
+    const timestampAtLeast = (timestamp: string, lowerBound: string) =>
+      Date.parse(timestamp) >= Date.parse(lowerBound);
+
+    if (!timestampAtLeast(preflight.updatedAt, preflight.createdAt)) {
+      addIssue(['updatedAt'], 'updatedAt 不得早于 createdAt');
+    }
+
+    if (
+      preflight.approvedAt !== null &&
+      !timestampAtLeast(preflight.approvedAt, preflight.createdAt)
+    ) {
+      addIssue(['approvedAt'], 'approvedAt 不得早于 createdAt');
+    }
+
+    if (
+      preflight.claimedAt !== null &&
+      (preflight.approvedAt === null ||
+        !timestampAtLeast(preflight.claimedAt, preflight.approvedAt))
+    ) {
+      addIssue(['claimedAt'], 'claimedAt 必须不早于 approvedAt');
+    }
+
+    if (
+      preflight.consumedAt !== null &&
+      (preflight.claimedAt === null ||
+        !timestampAtLeast(preflight.consumedAt, preflight.claimedAt))
+    ) {
+      addIssue(['consumedAt'], 'consumedAt 必须不早于 claimedAt');
     }
   });
 

@@ -39,20 +39,6 @@ export const taskSchedulingInputSchema = z
 
 export type TaskSchedulingInput = z.infer<typeof taskSchedulingInputSchema>;
 
-type TaskWire = {
-  id: string;
-  title: string;
-  area: z.infer<typeof taskAreaSchema>;
-  priority: z.infer<typeof taskPrioritySchema>;
-  status: z.infer<typeof taskStatusSchema>;
-  targetDate: string | null;
-  completedAt: string | null;
-  scheduling?: TaskSchedulingInput | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export const taskSchema = z
   .object({
     id: z.uuid(),
@@ -67,7 +53,7 @@ export const taskSchema = z
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
-  .strict() as z.ZodType<TaskWire, TaskWire>;
+  .strict();
 
 export const createTaskSchema = z
   .object({
@@ -75,7 +61,7 @@ export const createTaskSchema = z
     area: taskAreaSchema,
     priority: taskPrioritySchema,
     targetDate: localDateSchema.nullable().optional(),
-    scheduling: taskSchedulingInputSchema.nullable().optional(),
+    scheduling: taskSchedulingInputSchema.nullable().optional().default(null),
   })
   .strict();
 
@@ -166,11 +152,9 @@ export type TaskArea = z.infer<typeof taskAreaSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskDateScope = z.infer<typeof taskDateScopeSchema>;
-export type Task = TaskWire;
-export type NormalizedTask = Omit<TaskWire, 'scheduling'> & {
-  scheduling: TaskSchedulingInput | null;
-};
-export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+export type Task = z.input<typeof taskSchema>;
+export type NormalizedTask = z.output<typeof taskSchema>;
+export type CreateTaskInput = z.input<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type TaskListQuery = z.infer<typeof taskListQuerySchema>;
 export type TaskVersionConflictDetails = z.infer<typeof taskVersionConflictDetailsSchema>;

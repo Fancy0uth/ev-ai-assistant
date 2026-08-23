@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/storage/database';
+import { runMigrations } from '../src/storage/migrations';
 
 const migration001FixtureSql = `
   create table owners (
@@ -394,261 +395,6 @@ describe('daily-plan storage migrations', () => {
     }
   });
 
-  it('adds v17 lifecycle storage without rewriting v16 TimeRequest history', () => {
-    const databasePath = join(testDirectory, 'v16.sqlite');
-    const timestamp = '2026-08-23T00:00:00.000Z';
-    const ownerId = 'v16-owner';
-    const legacy = new Database(databasePath);
-
-    try {
-      legacy.pragma('foreign_keys = ON');
-      legacy.exec(`
-        create table schema_migrations (
-          version integer primary key,
-          name text not null,
-          applied_at text not null
-        );
-      `);
-      legacy.exec(migration001FixtureSql);
-      legacy.exec(`
-        create table time_requests (
-          id text primary key,
-          owner_id text not null references owners(id) on delete cascade,
-          source text not null,
-          title text not null,
-          target_date text not null,
-          duration_minutes integer not null,
-          priority text not null,
-          earliest_start_local_time text,
-          latest_end_local_time text,
-          is_fixed integer not null,
-          version integer not null,
-          created_at text not null,
-          updated_at text not null
-        );
-
-        create table daily_plan_runs (
-          id text primary key,
-          owner_id text not null references owners(id) on delete cascade,
-          contract_version text not null,
-          local_date text not null,
-          trigger text not null,
-          status text not null,
-          context_manifest_json text not null,
-          proposal_id text,
-          failure_code text,
-          created_at text not null,
-          completed_at text,
-          unique (id, owner_id)
-        );
-      `);
-      const addMigration = legacy.prepare(
-        'insert into schema_migrations (version, name, applied_at) values (?, ?, ?)',
-      );
-      for (let version = 1; version <= 16; version += 1) {
-        addMigration.run(version, `legacy-v${version}`, timestamp);
-      }
-      legacy
-        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
-        .run(ownerId, ownerId, 'hash', timestamp);
-      legacy
-        .prepare(
-          `insert into tasks (
-            id, owner_id, title, area, priority, status, target_date, completed_at,
-            version, created_at, updated_at
-          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          'v16-task',
-          ownerId,
-          'Keep v16 task',
-          'WORK',
-          'HIGH',
-          'OPEN',
-          '2026-08-24',
-          null,
-          4,
-          timestamp,
-          timestamp,
-        );
-      legacy
-        .prepare(
-          `insert into time_requests (
-            id, owner_id, source, title, target_date, duration_minutes, priority,
-            earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at, updated_at
-          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          'v16-request',
-          ownerId,
-          'PROJECT_AGENT',
-          'Keep v16 request',
-          '2026-08-24',
-          45,
-          'HIGH',
-          '09:00',
-          '11:00',
-          0,
-          2,
-          timestamp,
-          timestamp,
-        );
-      legacy
-        .prepare(
-          `insert into daily_plan_runs (
-            id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
-            proposal_id, failure_code, created_at, completed_at
-          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          'v16-run',
-          ownerId,
-          'DAILY_PLAN_V1',
-          '2026-08-24',
-          'MANUAL',
-          'CONTEXT_READY',
-          '{}',
-          null,
-          null,
-          timestamp,
-          null,
-        );
-    } finally {
-      legacy.close();
-    }
-
-    const database = openDatabase(databasePath);
-    try {
-      const taskColumns = database
-        .prepare("select name from pragma_table_info('tasks') order by cid")
-        .all() as Array<{ name: string }>;
-      expect(taskColumns.map(({ name }) => name)).toEqual(
-        expect.arrayContaining([
-          'scheduling_duration_minutes',
-          'scheduling_earliest_start_local_time',
-          'scheduling_latest_end_local_time',
-          'scheduling_is_fixed',
-        ]),
-      );
-      expect(database.prepare('select * from tasks where id = ?').get('v16-task')).toMatchObject({
-        id: 'v16-task',
-        title: 'Keep v16 task',
-        version: 4,
-        scheduling_duration_minutes: null,
-        scheduling_earliest_start_local_time: null,
-        scheduling_latest_end_local_time: null,
-        scheduling_is_fixed: null,
-      });
-      expect(
-        database.prepare('select origin_kind, origin_id, origin_version, lifecycle_status, closed_at, closed_reason from time_requests where id = ?').get('v16-request'),
-      ).toEqual({
-        origin_kind: null,
-        origin_id: null,
-        origin_version: null,
-        lifecycle_status: 'ACTIVE',
-        closed_at: null,
-        closed_reason: null,
-      });
-
-      const insertTimeRequest = database.prepare(
-        `insert into time_requests (
-          id, owner_id, source, title, target_date, duration_minutes, priority,
-          earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at, updated_at,
-          origin_kind, origin_id, origin_version, lifecycle_status, closed_at, closed_reason
-        ) values (?, ?, 'PROJECT_AGENT', 'Lifecycle request', '2026-08-24', 45, 'HIGH', null, null, 0, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      insertTimeRequest.run(
-        'active-origin-request',
-        ownerId,
-        timestamp,
-        timestamp,
-        'TASK',
-        '33333333-3333-4333-8333-333333333333',
-        1,
-        'ACTIVE',
-        null,
-        null,
-      );
-      expect(() =>
-        insertTimeRequest.run(
-          'duplicate-active-origin-request',
-          ownerId,
-          timestamp,
-          timestamp,
-          'TASK',
-          '33333333-3333-4333-8333-333333333333',
-          2,
-          'ACTIVE',
-          null,
-          null,
-        ),
-      ).toThrow();
-      expect(() =>
-        insertTimeRequest.run(
-          'partial-origin-request',
-          ownerId,
-          timestamp,
-          timestamp,
-          'TASK',
-          null,
-          null,
-          'ACTIVE',
-          null,
-          null,
-        ),
-      ).toThrow();
-      expect(() =>
-        insertTimeRequest.run(
-          'active-with-closure-request',
-          ownerId,
-          timestamp,
-          timestamp,
-          null,
-          null,
-          null,
-          'ACTIVE',
-          timestamp,
-          'CANCELLED',
-        ),
-      ).toThrow();
-      database
-        .prepare(
-          "update time_requests set lifecycle_status = 'CLOSED', closed_at = ?, closed_reason = 'COMPLETED' where id = ?",
-        )
-        .run(timestamp, 'active-origin-request');
-      insertTimeRequest.run(
-        'replacement-active-origin-request',
-        ownerId,
-        timestamp,
-        timestamp,
-        'TASK',
-        '33333333-3333-4333-8333-333333333333',
-        3,
-        'ACTIVE',
-        null,
-        null,
-      );
-
-      database
-        .prepare(
-          `insert into daily_plan_preflights (
-            id, owner_id, run_id, contract_version, local_date, status, base_schedule_version,
-            items_json, version, created_at, updated_at, approved_at, claimed_at, consumed_at
-          ) values (?, ?, ?, 'DAILY_PLAN_PREFLIGHT_V1', '2026-08-24', 'AWAITING_APPROVAL', 1, '[]', 1, ?, ?, null, null, null)`,
-        )
-        .run('v17-preflight', ownerId, 'v16-run', timestamp, timestamp);
-      expect(database.prepare('select id, status from daily_plan_preflights where id = ?').get('v17-preflight')).toEqual({
-        id: 'v17-preflight',
-        status: 'AWAITING_APPROVAL',
-      });
-      expect(
-        database.prepare('select version, name from schema_migrations where version = 17').get(),
-      ).toEqual({ version: 17, name: 'add_scheduling_lifecycle' });
-    } finally {
-      database.close();
-    }
-  });
-
   it('preserves v2 agent-session data while upgrading through v17', () => {
     const databasePath = join(testDirectory, 'v2.sqlite');
     const timestamp = '2026-08-23T00:00:00.000Z';
@@ -706,6 +452,288 @@ describe('daily-plan storage migrations', () => {
       ).toEqual({ version: 17, name: 'add_scheduling_lifecycle' });
     } finally {
       database.close();
+    }
+  });
+
+  it('preserves full canonical v16 owner-scoped snapshots through v17', () => {
+    const databasePath = join(testDirectory, 'canonical-v16.sqlite');
+    const timestamp = '2026-08-23T00:00:00.000Z';
+    const ownerId = 'canonical-v16-owner';
+    const legacy = new Database(databasePath);
+    let legacyClosed = false;
+
+    try {
+      legacy.pragma('foreign_keys = ON');
+      runMigrations(legacy, 16);
+      expect(legacy.prepare('select version from schema_migrations where version = 17').get()).toBeUndefined();
+
+      legacy
+        .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run(ownerId, ownerId, 'hash', timestamp);
+      const insertTask = legacy.prepare(
+        `insert into tasks (
+          id, owner_id, title, area, priority, status, target_date, completed_at,
+          version, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      insertTask.run(
+        'canonical-task-1',
+        ownerId,
+        'Canonical task one',
+        'WORK',
+        'HIGH',
+        'OPEN',
+        '2026-08-24',
+        null,
+        2,
+        timestamp,
+        timestamp,
+      );
+      insertTask.run(
+        'canonical-task-2',
+        ownerId,
+        'Canonical task two',
+        'STUDY',
+        'MEDIUM',
+        'IN_PROGRESS',
+        null,
+        null,
+        3,
+        timestamp,
+        timestamp,
+      );
+
+      const insertTimeRequest = legacy.prepare(
+        `insert into time_requests (
+          id, owner_id, source, title, target_date, duration_minutes, priority,
+          earliest_start_local_time, latest_end_local_time, is_fixed, version, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      insertTimeRequest.run(
+        'canonical-request-1',
+        ownerId,
+        'PROJECT_AGENT',
+        'Canonical request one',
+        '2026-08-24',
+        45,
+        'HIGH',
+        '09:00',
+        '11:00',
+        0,
+        2,
+        timestamp,
+        timestamp,
+      );
+      insertTimeRequest.run(
+        'canonical-request-2',
+        ownerId,
+        'LEARNING_AGENT',
+        'Canonical request two',
+        '2026-08-25',
+        60,
+        'MEDIUM',
+        null,
+        null,
+        1,
+        4,
+        timestamp,
+        timestamp,
+      );
+
+      const insertRun = legacy.prepare(
+        `insert into daily_plan_runs (
+          id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
+          proposal_id, failure_code, created_at, completed_at
+        ) values (?, ?, 'DAILY_PLAN_V1', ?, 'MANUAL', 'CONTEXT_READY', '{}', null, null, ?, null)`,
+      );
+      insertRun.run('canonical-run-1', ownerId, '2026-08-24', timestamp);
+      insertRun.run('canonical-run-2', ownerId, '2026-08-25', timestamp);
+
+      const insertProposal = legacy.prepare(
+        `insert into proposals (
+          id, owner_id, kind, status, source, title, changes_json, version, created_at, expires_at, decided_at
+        ) values (?, ?, 'SCHEDULE', 'PENDING', 'DAILY_SCHEDULER', ?, '[]', 1, ?, null, null)`,
+      );
+      insertProposal.run('canonical-proposal-1', ownerId, 'Canonical proposal one', timestamp);
+      insertProposal.run('canonical-proposal-2', ownerId, 'Canonical proposal two', timestamp);
+
+      const insertDailyPlanProposal = legacy.prepare(
+        `insert into daily_plan_proposals (
+          id, owner_id, run_id, contract_version, local_date, status, base_schedule_version,
+          summary, items_json, version, created_at, updated_at
+        ) values (?, ?, ?, 'DAILY_PLAN_V1', ?, 'PENDING_REVIEW', 1, ?, '[]', 1, ?, ?)`,
+      );
+      insertDailyPlanProposal.run(
+        'canonical-daily-proposal-1',
+        ownerId,
+        'canonical-run-1',
+        '2026-08-24',
+        'Canonical daily proposal one',
+        timestamp,
+        timestamp,
+      );
+      insertDailyPlanProposal.run(
+        'canonical-daily-proposal-2',
+        ownerId,
+        'canonical-run-2',
+        '2026-08-25',
+        'Canonical daily proposal two',
+        timestamp,
+        timestamp,
+      );
+
+      const snapshot = {
+        owners: legacy.prepare('select * from owners order by id').all() as Array<Record<string, unknown>>,
+        tasks: legacy.prepare('select * from tasks order by id').all() as Array<Record<string, unknown>>,
+        timeRequests: legacy
+          .prepare('select * from time_requests order by id')
+          .all() as Array<Record<string, unknown>>,
+        runs: legacy
+          .prepare('select * from daily_plan_runs order by id')
+          .all() as Array<Record<string, unknown>>,
+        proposals: legacy
+          .prepare('select * from proposals order by id')
+          .all() as Array<Record<string, unknown>>,
+        dailyPlanProposals: legacy
+          .prepare('select * from daily_plan_proposals order by id')
+          .all() as Array<Record<string, unknown>>,
+      };
+      const ids = Object.fromEntries(
+        Object.entries(snapshot).map(([name, rows]) => [
+          name,
+          (rows as Array<{ id: string }>).map(({ id }) => id),
+        ]),
+      );
+      const counts = Object.fromEntries(
+        Object.entries(snapshot).map(([name, rows]) => [name, (rows as unknown[]).length]),
+      );
+
+      legacy.close();
+      legacyClosed = true;
+      const upgraded = openDatabase(databasePath);
+      try {
+        const after = {
+          owners: upgraded.prepare('select * from owners order by id').all(),
+          tasks: upgraded.prepare('select * from tasks order by id').all(),
+          timeRequests: upgraded.prepare('select * from time_requests order by id').all(),
+          runs: upgraded.prepare('select * from daily_plan_runs order by id').all(),
+          proposals: upgraded.prepare('select * from proposals order by id').all(),
+          dailyPlanProposals: upgraded.prepare('select * from daily_plan_proposals order by id').all(),
+        };
+        expect(after).toEqual({
+          ...snapshot,
+          tasks: snapshot.tasks.map((task) => ({
+            ...task,
+            scheduling_duration_minutes: null,
+            scheduling_earliest_start_local_time: null,
+            scheduling_latest_end_local_time: null,
+            scheduling_is_fixed: null,
+          })),
+          timeRequests: snapshot.timeRequests.map((request) => ({
+            ...request,
+            origin_kind: null,
+            origin_id: null,
+            origin_version: null,
+            lifecycle_status: 'ACTIVE',
+            closed_at: null,
+            closed_reason: null,
+          })),
+        });
+        expect(
+          Object.fromEntries(
+            Object.entries(after).map(([name, rows]) => [
+              name,
+              (rows as Array<{ id: string }>).map(({ id }) => id),
+            ]),
+          ),
+        ).toEqual(ids);
+        expect(
+          Object.fromEntries(
+            Object.entries(after).map(([name, rows]) => [name, (rows as unknown[]).length]),
+          ),
+        ).toEqual(counts);
+
+        const insertPreflight = upgraded.prepare(
+          `insert into daily_plan_preflights (
+            id, owner_id, run_id, contract_version, local_date, status, base_schedule_version,
+            items_json, version, created_at, updated_at, approved_at, claimed_at, consumed_at
+          ) values (?, ?, ?, 'DAILY_PLAN_PREFLIGHT_V1', '2026-08-24', ?, 1, '[]', 1, ?, ?, ?, ?, ?)`,
+        );
+        upgraded
+          .prepare(
+            `insert into daily_plan_runs (
+              id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
+              proposal_id, failure_code, created_at, completed_at
+            ) values (?, ?, 'DAILY_PLAN_V1', '2026-08-24', 'MANUAL', 'CONTEXT_READY', '{}', null, null, ?, null)`,
+          )
+          .run('canonical-matrix-run', ownerId, timestamp);
+        for (const [index, status, updatedAt, approvedAt, claimedAt, consumedAt] of [
+          ['AWAITING_APPROVAL', timestamp, '2026-08-23T01:00:00.000Z', null, null, null],
+          ['APPROVED', timestamp, null, null, null],
+          ['CLAIMED', timestamp, '2026-08-23T01:00:00.000Z', null, null],
+          ['CONSUMED', timestamp, '2026-08-23T01:00:00.000Z', '2026-08-23T02:00:00.000Z', null],
+          ['STALE', timestamp, null, '2026-08-23T02:00:00.000Z', null],
+          ['STALE', timestamp, null, null, '2026-08-23T03:00:00.000Z'],
+          ['APPROVED', timestamp, '2026-08-22T23:59:59.999Z', null, null],
+          ['CLAIMED', timestamp, '2026-08-23T02:00:00.000Z', '2026-08-23T01:00:00.000Z', null],
+          ['CONSUMED', timestamp, '2026-08-23T01:00:00.000Z', '2026-08-23T02:00:00.000Z', '2026-08-23T01:00:00.000Z'],
+          ['AWAITING_APPROVAL', '2026-08-22T23:59:59.999Z', null, null, null],
+        ]) {
+          expect(() =>
+            insertPreflight.run(
+              `invalid-preflight-${index}`,
+              ownerId,
+              'canonical-matrix-run',
+              status,
+              timestamp,
+              updatedAt,
+              approvedAt,
+              claimedAt,
+              consumedAt,
+            ),
+          ).toThrow();
+        }
+        expect(() =>
+          insertPreflight.run(
+            'invalid-approved-preflight',
+            ownerId,
+            'canonical-run-1',
+            'APPROVED',
+            timestamp,
+            timestamp,
+            null,
+            null,
+            null,
+          ),
+        ).toThrow();
+        insertPreflight.run(
+          'consumed-preflight',
+          ownerId,
+          'canonical-run-1',
+          'CONSUMED',
+          timestamp,
+          '2026-08-23T03:00:00.000Z',
+          '2026-08-23T01:00:00.000Z',
+          '2026-08-23T02:00:00.000Z',
+          '2026-08-23T03:00:00.000Z',
+        );
+        expect(() =>
+          upgraded
+            .prepare("update daily_plan_preflights set status = 'STALE', consumed_at = null where id = ?")
+            .run('consumed-preflight'),
+        ).toThrow();
+        expect(() =>
+          upgraded
+            .prepare('update daily_plan_preflights set updated_at = ? where id = ?')
+            .run('2026-08-22T23:59:59.999Z', 'consumed-preflight'),
+        ).toThrow();
+      } finally {
+        upgraded.close();
+      }
+    } finally {
+      if (!legacyClosed) {
+        legacy.close();
+      }
     }
   });
 

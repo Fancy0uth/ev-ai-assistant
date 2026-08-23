@@ -1,5 +1,5 @@
 import { calculateDailyStatus } from '@ev/domain';
-import type { DayView } from '@ev/contracts';
+import { taskSchema, type DayView } from '@ev/contracts';
 import type { CalendarRepository } from '../calendar/repository';
 import type { ProposalService } from '../proposals/service';
 import type { TaskService } from '../tasks/service';
@@ -15,7 +15,7 @@ export function createDayPlanningService(
 ): DayPlanningService {
   return {
     getDay(ownerId, localDate) {
-      const tasks = taskService.listForDate(ownerId, localDate);
+      const tasks = taskService.listForDate(ownerId, localDate).map((task) => taskSchema.parse(task));
       return {
         date: localDate,
         status: calculateDailyStatus({ tasks, yesterday: null }),

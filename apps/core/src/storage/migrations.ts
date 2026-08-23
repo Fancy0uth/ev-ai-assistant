@@ -794,11 +794,119 @@ const migrations: readonly Migration[] = [
 
       create index daily_plan_preflights_owner_date_status_idx
         on daily_plan_preflights(owner_id, local_date, status, created_at desc);
+
+      create trigger daily_plan_preflights_v17_validate_before_insert
+      before insert on daily_plan_preflights
+      when
+        not (
+          (new.status = 'AWAITING_APPROVAL'
+            and new.approved_at is null
+            and new.claimed_at is null
+            and new.consumed_at is null)
+          or (new.status = 'APPROVED'
+            and new.approved_at is not null
+            and new.claimed_at is null
+            and new.consumed_at is null)
+          or (new.status = 'CLAIMED'
+            and new.approved_at is not null
+            and new.claimed_at is not null
+            and new.consumed_at is null)
+          or (new.status = 'CONSUMED'
+            and new.approved_at is not null
+            and new.claimed_at is not null
+            and new.consumed_at is not null)
+          or (new.status = 'STALE'
+            and new.consumed_at is null
+            and (new.claimed_at is null or new.approved_at is not null))
+        )
+        or julianday(new.created_at) is null
+        or julianday(new.updated_at) is null
+        or (new.approved_at is not null and julianday(new.approved_at) is null)
+        or (new.claimed_at is not null and julianday(new.claimed_at) is null)
+        or (new.consumed_at is not null and julianday(new.consumed_at) is null)
+        or julianday(new.updated_at) < julianday(new.created_at)
+        or (
+          new.approved_at is not null
+          and julianday(new.approved_at) < julianday(new.created_at)
+        )
+        or (
+          new.claimed_at is not null
+          and (
+            new.approved_at is null
+            or julianday(new.claimed_at) < julianday(new.approved_at)
+          )
+        )
+        or (
+          new.consumed_at is not null
+          and (
+            new.claimed_at is null
+            or julianday(new.consumed_at) < julianday(new.claimed_at)
+          )
+        )
+      begin
+        select raise(abort, 'invalid daily plan preflight lifecycle state');
+      end;
+
+      create trigger daily_plan_preflights_v17_validate_before_update
+      before update on daily_plan_preflights
+      when
+        not (
+          (new.status = 'AWAITING_APPROVAL'
+            and new.approved_at is null
+            and new.claimed_at is null
+            and new.consumed_at is null)
+          or (new.status = 'APPROVED'
+            and new.approved_at is not null
+            and new.claimed_at is null
+            and new.consumed_at is null)
+          or (new.status = 'CLAIMED'
+            and new.approved_at is not null
+            and new.claimed_at is not null
+            and new.consumed_at is null)
+          or (new.status = 'CONSUMED'
+            and new.approved_at is not null
+            and new.claimed_at is not null
+            and new.consumed_at is not null)
+          or (new.status = 'STALE'
+            and new.consumed_at is null
+            and (new.claimed_at is null or new.approved_at is not null))
+        )
+        or julianday(new.created_at) is null
+        or julianday(new.updated_at) is null
+        or (new.approved_at is not null and julianday(new.approved_at) is null)
+        or (new.claimed_at is not null and julianday(new.claimed_at) is null)
+        or (new.consumed_at is not null and julianday(new.consumed_at) is null)
+        or julianday(new.updated_at) < julianday(new.created_at)
+        or (
+          new.approved_at is not null
+          and julianday(new.approved_at) < julianday(new.created_at)
+        )
+        or (
+          new.claimed_at is not null
+          and (
+            new.approved_at is null
+            or julianday(new.claimed_at) < julianday(new.approved_at)
+          )
+        )
+        or (
+          new.consumed_at is not null
+          and (
+            new.claimed_at is null
+            or julianday(new.consumed_at) < julianday(new.claimed_at)
+          )
+        )
+        or (old.status = 'CONSUMED' and new.status = 'STALE')
+      begin
+        select raise(abort, 'invalid daily plan preflight lifecycle state');
+      end;
     `,
   },
 ];
 
-export function runMigrations(database: Database.Database): void {
+export function runMigrations(
+  database: Database.Database,
+  targetVersion?: number,
+): void {
   database.exec(`
     create table if not exists schema_migrations (
       version integer primary key,
@@ -823,6 +931,10 @@ export function runMigrations(database: Database.Database): void {
   });
 
   for (const migration of migrations) {
+    if (targetVersion !== undefined && migration.version > targetVersion) {
+      continue;
+    }
+
     if (!applied.has(migration.version)) {
       applyMigration(migration);
     }

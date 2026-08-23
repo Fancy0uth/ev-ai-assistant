@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type * as z from 'zod';
 import * as contracts from '../src/index';
+import type { CreateTaskInput, NormalizedTask, Task, TaskSchedulingInput } from '../src/index';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const runId = '22222222-2222-4222-8222-222222222222';
@@ -55,6 +57,18 @@ describe('v0.4 scheduling contracts', () => {
 
   it('keeps Task create and update scheduling optional while accepting explicit cancellation', () => {
     expect(
+      contracts.createTaskSchema.parse({
+        title: task.title,
+        area: task.area,
+        priority: task.priority,
+      }),
+    ).toEqual({
+      title: task.title,
+      area: task.area,
+      priority: task.priority,
+      scheduling: null,
+    });
+    expect(
       contracts.createTaskSchema.safeParse({
         title: task.title,
         area: task.area,
@@ -75,6 +89,23 @@ describe('v0.4 scheduling contracts', () => {
       contracts.updateTaskSchema.safeParse({ version: 1, title: task.title, scheduling }).success,
     ).toBe(true);
     expect(contracts.updateTaskSchema.safeParse({ version: 1, scheduling: null }).success).toBe(true);
+  });
+
+  it('derives compatible Task input and normalized output aliases from the schemas', () => {
+    const legacyTask: Task = task;
+    const createWithoutScheduling: CreateTaskInput = {
+      title: task.title,
+      area: task.area,
+      priority: task.priority,
+    };
+
+    expect(legacyTask.scheduling).toBeUndefined();
+    expect(createWithoutScheduling.scheduling).toBeUndefined();
+    expectTypeOf<Task>().toEqualTypeOf<z.input<typeof contracts.taskSchema>>();
+    expectTypeOf<NormalizedTask>().toEqualTypeOf<z.output<typeof contracts.taskSchema>>();
+    expectTypeOf<CreateTaskInput>().toEqualTypeOf<z.input<typeof contracts.createTaskSchema>>();
+    expectTypeOf<Task['scheduling']>().toEqualTypeOf<TaskSchedulingInput | null | undefined>();
+    expectTypeOf<NormalizedTask['scheduling']>().toEqualTypeOf<TaskSchedulingInput | null>();
   });
 
   it('rejects malformed, expanded, and reverse Task scheduling windows', () => {
@@ -264,6 +295,53 @@ describe('v0.4 scheduling contracts', () => {
           ? dailyPlanPreflightApproveInputSchema
           : dailyPlanPreflightSchema;
       expect(schema.safeParse(invalidValue).success).toBe(false);
+    }
+  });
+
+  it('enforces the binding preflight status matrix and timestamp monotonicity', () => {
+    const basePreflight = {
+      id,
+      runId,
+      contractVersion: 'DAILY_PLAN_PREFLIGHT_V1',
+      localDate: '2026-08-24',
+      baseScheduleVersion: 1,
+      items: [],
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      approvedAt: null,
+      claimedAt: null,
+      consumedAt: null,
+    };
+    const approvedAt = '2026-08-23T01:00:00.000Z';
+    const claimedAt = '2026-08-23T02:00:00.000Z';
+    const consumedAt = '2026-08-23T03:00:00.000Z';
+
+    for (const validPreflight of [
+      { ...basePreflight, status: 'AWAITING_APPROVAL' },
+      { ...basePreflight, status: 'APPROVED', approvedAt },
+      { ...basePreflight, status: 'CLAIMED', approvedAt, claimedAt },
+      { ...basePreflight, status: 'CONSUMED', approvedAt, claimedAt, consumedAt },
+      { ...basePreflight, status: 'STALE' },
+      { ...basePreflight, status: 'STALE', approvedAt },
+      { ...basePreflight, status: 'STALE', approvedAt, claimedAt },
+    ]) {
+      expect(contracts.dailyPlanPreflightSchema.safeParse(validPreflight).success).toBe(true);
+    }
+
+    for (const invalidPreflight of [
+      { ...basePreflight, status: 'AWAITING_APPROVAL', approvedAt },
+      { ...basePreflight, status: 'APPROVED' },
+      { ...basePreflight, status: 'CLAIMED', approvedAt },
+      { ...basePreflight, status: 'CONSUMED', approvedAt, claimedAt },
+      { ...basePreflight, status: 'STALE', claimedAt },
+      { ...basePreflight, status: 'STALE', consumedAt },
+      { ...basePreflight, status: 'APPROVED', approvedAt: '2026-08-22T23:59:59.999Z' },
+      { ...basePreflight, status: 'CLAIMED', approvedAt, claimedAt: now },
+      { ...basePreflight, status: 'CONSUMED', approvedAt, claimedAt, consumedAt: approvedAt },
+      { ...basePreflight, status: 'AWAITING_APPROVAL', updatedAt: '2026-08-22T23:59:59.999Z' },
+    ]) {
+      expect(contracts.dailyPlanPreflightSchema.safeParse(invalidPreflight).success).toBe(false);
     }
   });
 });
