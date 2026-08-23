@@ -382,25 +382,31 @@ describe('v0.4 approved scheduling and manual Event routes', () => {
     });
   });
 
-  it('rolls back Event, proposal decision, and audit when Event materialization fails', async () => {
+  it('rolls back an already materialized Event and proposal decision when audit insertion aborts', async () => {
     const { token, ownerId } = await authenticatedOwner();
-    const proposal = await createEventProposal(token, 'Conflicting Event');
-    createOtherOwner();
-    createCalendarRepository(database()).createEvent({
-      id: proposal.eventId,
-      ownerId: otherOwnerId,
-      calendarRuleId: null,
-      title: 'Conflicting other owner Event',
-      kind: 'MEETING',
-      localDate,
-      startLocalTime: '08:00',
-      endLocalTime: '09:00',
-      isHard: true,
-      status: 'CONFIRMED',
-      version: 1,
-      createdAt: '2026-08-24T00:00:00.000Z',
-      updatedAt: '2026-08-24T00:00:00.000Z',
-    });
+    const proposal = await createEventProposal(token, 'Audit rollback Event');
+
+    database().exec(`
+      create trigger test_abort_proposal_audit_insert
+      before insert on proposal_audits
+      when new.proposal_id = '${proposal.proposalId}'
+        and exists (
+          select 1
+          from events
+          where id = '${proposal.eventId}' and owner_id = '${ownerId}'
+        )
+        and exists (
+          select 1
+          from proposals
+          where id = new.proposal_id
+            and owner_id = new.owner_id
+            and status = 'ACCEPTED'
+            and version = 2
+        )
+      begin
+        select raise(abort, 'TEST_PROPOSAL_AUDIT_INSERT_ABORT');
+      end;
+    `);
 
     const response = await currentApp().inject({
       method: 'POST',
@@ -408,7 +414,13 @@ describe('v0.4 approved scheduling and manual Event routes', () => {
       cookies: { ev_session: token },
       payload: { version: 1, decision: 'ACCEPT' },
     });
+
     expect(response.statusCode).toBe(500);
+    expect(apiErrorSchema.parse(response.json()).error).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: '本地服务暂时无法完成请求',
+    });
+    expect(response.body).not.toContain('TEST_PROPOSAL_AUDIT_INSERT_ABORT');
     expect(eventCount(ownerId)).toBe(0);
     expect(proposalAuditCount(proposal.proposalId)).toBe(0);
     const storedProposal = database()
