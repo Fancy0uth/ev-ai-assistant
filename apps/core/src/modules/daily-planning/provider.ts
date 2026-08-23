@@ -1,4 +1,9 @@
-import type { LocalTime } from '@ev/contracts';
+import type {
+  DeepSeekFinishReason,
+  DeepSeekModel,
+  DeepSeekUsage,
+  LocalTime,
+} from '@ev/contracts';
 
 export interface DailyPlanningProviderInput {
   localDate: string;
@@ -27,7 +32,20 @@ export interface DailyPlanningProviderInput {
 }
 
 export interface DailyPlanningProvider {
-  generate(apiKey: string, input: DailyPlanningProviderInput): Promise<unknown>;
+  generate(apiKey: string, input: DailyPlanningProviderInput): Promise<DailyPlanningProviderResult>;
+}
+
+/**
+ * The provider boundary intentionally carries only the parsed model output
+ * plus the small, allowlisted transport metadata that v0.5 may persist.
+ * Raw HTTP payloads, prompt text and credentials cannot cross this port.
+ */
+export interface DailyPlanningProviderResult {
+  output: unknown;
+  model: DeepSeekModel;
+  finishReason: DeepSeekFinishReason;
+  usage: DeepSeekUsage;
+  outputChars: number;
 }
 
 export class DailyPlanningProviderUnavailableError extends Error {
@@ -45,5 +63,23 @@ export class DailyPlanningProviderModelOutputError extends Error {
   constructor() {
     super('Daily planning provider returned invalid model output');
     this.name = 'DailyPlanningProviderModelOutputError';
+  }
+}
+
+export class DailyPlanningProviderTimeoutError extends Error {
+  readonly code = 'DAILY_PLAN_PROVIDER_TIMEOUT';
+
+  constructor() {
+    super('Daily planning provider timed out');
+    this.name = 'DailyPlanningProviderTimeoutError';
+  }
+}
+
+export class DailyPlanningProviderQuotaError extends Error {
+  readonly code = 'DAILY_PLAN_PROVIDER_QUOTA_EXCEEDED';
+
+  constructor() {
+    super('Daily planning provider quota is exhausted');
+    this.name = 'DailyPlanningProviderQuotaError';
   }
 }

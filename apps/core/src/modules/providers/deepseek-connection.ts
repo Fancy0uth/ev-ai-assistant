@@ -1,9 +1,11 @@
 import type { DeepSeekConnectionTestResult } from '@ev/contracts';
+import { PROVIDER_POLICY } from './provider-policy';
 
-const DEEPSEEK_CHAT_COMPLETIONS_URL = 'https://api.deepseek.com/chat/completions';
-const CONNECTION_TIMEOUT_MS = 5_000;
+const DEEPSEEK_CHAT_COMPLETIONS_URL = PROVIDER_POLICY.deepSeekEndpoint;
+const CONNECTION_TIMEOUT_MS = PROVIDER_POLICY.headerTimeoutMs;
 const HEALTH_PROBE_BODY = JSON.stringify({
   model: 'deepseek-v4-flash',
+  stream: false,
   messages: [{ role: 'user', content: 'Reply only with JSON: {"status":"ok"}.' }],
   response_format: { type: 'json_object' },
   thinking: { type: 'disabled' },

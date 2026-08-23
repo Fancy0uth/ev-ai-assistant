@@ -19,6 +19,7 @@ import { createCalendarRepository } from '../src/modules/calendar/repository';
 import type {
   DailyPlanningProvider,
   DailyPlanningProviderInput,
+  DailyPlanningProviderResult,
 } from '../src/modules/daily-planning/provider';
 import { SecretStoreUnavailableError, type SecretStorePort } from '../src/modules/providers/secret-store';
 import { openDatabase } from '../src/storage/database';
@@ -50,9 +51,16 @@ class FakeSecretStore implements SecretStorePort {
 class FakeDailyPlanningProvider implements DailyPlanningProvider {
   readonly inputs: DailyPlanningProviderInput[] = [];
 
-  async generate(_apiKey: string, input: DailyPlanningProviderInput): Promise<unknown> {
+  async generate(_apiKey: string, input: DailyPlanningProviderInput): Promise<DailyPlanningProviderResult> {
     this.inputs.push(input);
-    return validModelOutput();
+    const output = validModelOutput();
+    return {
+      output,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(output).length,
+    };
   }
 }
 

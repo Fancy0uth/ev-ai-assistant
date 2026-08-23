@@ -13,6 +13,7 @@ import {
   DailyPlanBaseVersionStaleError,
   type DailyPlanRunRepository,
 } from './repository';
+import { PROVIDER_POLICY } from '../providers/provider-policy';
 
 type DailyPlanPreflightApprovalItem = DailyPlanPreflightApproveInput['items'][number];
 
@@ -157,6 +158,13 @@ export function createDailyPlanPreflightService(
         preflightId,
         expectedVersion,
         claimedAt: now().toISOString(),
+        execution: {
+          leaseToken: newId(),
+          leaseExpiresAt: new Date(now().getTime() + PROVIDER_POLICY.leaseMs).toISOString(),
+          deadlineAt: new Date(now().getTime() + PROVIDER_POLICY.totalTimeoutMs).toISOString(),
+          attemptCount: 1,
+          idempotencyRecordId: null,
+        },
       });
       if (result.kind === 'stale') {
         throw new DailyPlanBaseVersionStaleError();

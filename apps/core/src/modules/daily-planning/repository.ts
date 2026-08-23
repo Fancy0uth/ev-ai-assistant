@@ -97,6 +97,14 @@ export type DailyPlanPreflightClaimResult =
       context: DailyPlanningReadContext;
     };
 
+export interface DailyPlanProviderExecutionLease {
+  leaseToken: string;
+  leaseExpiresAt: string;
+  deadlineAt: string;
+  attemptCount: number;
+  idempotencyRecordId: string | null;
+}
+
 export interface DailyPlanProposalListQuery {
   localDate?: string;
   page: number;
@@ -163,6 +171,14 @@ export interface DailyPlanRunRepository {
     preflightId: string;
     expectedVersion: number;
     claimedAt: string;
+    execution: DailyPlanProviderExecutionLease;
+  }): DailyPlanPreflightClaimResult;
+  recoverClaimedPreflight(input: {
+    ownerId: string;
+    preflightId: string;
+    expectedVersion: number;
+    claimedAt: string;
+    execution: DailyPlanProviderExecutionLease;
   }): DailyPlanPreflightClaimResult;
   completeClaimedPreflight(input: {
     ownerId: string;
@@ -170,6 +186,7 @@ export interface DailyPlanRunRepository {
     expectedVersion: number;
     proposal: DailyPlanProposal;
     completedAt: string;
+    leaseToken?: string;
   }): DailyPlanProposal;
   failClaimedPreflight(input: {
     ownerId: string;
@@ -177,6 +194,8 @@ export interface DailyPlanRunRepository {
     expectedVersion: number;
     code: DailyPlanFailureCode;
     completedAt: string;
+    leaseToken?: string;
+    terminalReason?: string;
   }): DailyPlanPreflight;
   getRun(ownerId: string, runId: string): DailyPlanRun | undefined;
   findLatestRunForDate(ownerId: string, localDate: string): DailyPlanRun | undefined;
@@ -284,6 +303,13 @@ interface DailyPlanRunRow {
   failure_code: DailyPlanFailureCode | null;
   created_at: string;
   completed_at: string | null;
+  attempt_count: number;
+  lease_token: string | null;
+  lease_expires_at: string | null;
+  deadline_at: string | null;
+  terminal_reason: string | null;
+  app_version: '0.5.0';
+  idempotency_record_id: string | null;
 }
 
 interface DailyPlanPreflightRow {
@@ -349,6 +375,12 @@ function toDailyPlanRun(row: DailyPlanRunRow): DailyPlanRun {
     failureCode: row.failure_code,
     createdAt: row.created_at,
     completedAt: row.completed_at,
+    attemptCount: row.attempt_count,
+    leaseExpiresAt: row.lease_expires_at,
+    deadlineAt: row.deadline_at,
+    terminalReason: row.terminal_reason,
+    appVersion: row.app_version,
+    idempotencyRecordId: row.idempotency_record_id,
   });
 }
 
@@ -477,7 +509,8 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   );
   const findRun = database.prepare(
     `select id, contract_version, local_date, trigger, status, context_manifest_json,
-            proposal_id, failure_code, created_at, completed_at
+            proposal_id, failure_code, created_at, completed_at, attempt_count, lease_token,
+            lease_expires_at, deadline_at, terminal_reason, app_version, idempotency_record_id
      from daily_plan_runs
      where id = ? and owner_id = ?`,
   );
@@ -490,8 +523,10 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   const insertContextReadyRun = database.prepare(
     `insert into daily_plan_runs (
        id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
-       proposal_id, failure_code, created_at, completed_at
-     ) values (?, ?, 'DAILY_PLAN_V1', ?, ?, 'CONTEXT_READY', ?, null, null, ?, null)`,
+       proposal_id, failure_code, created_at, completed_at, attempt_count, lease_token,
+       lease_expires_at, deadline_at, terminal_reason, app_version, idempotency_record_id
+     ) values (?, ?, 'DAILY_PLAN_V1', ?, ?, 'CONTEXT_READY', ?, null, null, ?, null,
+       0, null, null, null, null, '0.5.0', null)`,
   );
   const insertPreflight = database.prepare(
     `insert into daily_plan_preflights (
@@ -509,6 +544,11 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      set status = 'CLAIMED', version = version + 1, updated_at = ?, claimed_at = ?
      where id = ? and owner_id = ? and version = ? and status = 'APPROVED'`,
   );
+  const recoverPreflight = database.prepare(
+    `update daily_plan_preflights
+     set version = version + 1, updated_at = ?, claimed_at = ?
+     where id = ? and owner_id = ? and version = ? and status = 'CLAIMED'`,
+  );
   const consumePreflight = database.prepare(
     `update daily_plan_preflights
      set status = 'CONSUMED', version = version + 1, updated_at = ?, consumed_at = ?
@@ -521,7 +561,8 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   );
   const findLatestRunForDate = database.prepare(
     `select id, contract_version, local_date, trigger, status, context_manifest_json,
-            proposal_id, failure_code, created_at, completed_at
+            proposal_id, failure_code, created_at, completed_at, attempt_count, lease_token,
+            lease_expires_at, deadline_at, terminal_reason, app_version, idempotency_record_id
      from daily_plan_runs
      where owner_id = ? and local_date = ?
      order by created_at desc, id asc
@@ -675,13 +716,30 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   );
   const completeRun = database.prepare(
     `update daily_plan_runs
-     set status = 'SUCCEEDED', proposal_id = ?, failure_code = null, completed_at = ?
-     where id = ? and owner_id = ? and status in ('CONTEXT_READY', 'GENERATING')`,
+     set status = 'SUCCEEDED', proposal_id = ?, failure_code = null, completed_at = ?,
+         lease_token = null, lease_expires_at = null, terminal_reason = null
+     where id = ? and owner_id = ? and status in ('CONTEXT_READY', 'GENERATING')
+       and (? is null or lease_token = ?)`,
   );
   const failContextReadyRun = database.prepare(
     `update daily_plan_runs
-     set status = 'FAILED', proposal_id = null, failure_code = ?, completed_at = ?
-     where id = ? and owner_id = ? and status in ('CONTEXT_READY', 'GENERATING')`,
+     set status = 'FAILED', proposal_id = null, failure_code = ?, completed_at = ?,
+         lease_token = null, lease_expires_at = null, terminal_reason = ?
+     where id = ? and owner_id = ? and status in ('CONTEXT_READY', 'GENERATING')
+       and (? is null or lease_token = ?)`,
+  );
+  const claimGeneratingRun = database.prepare(
+    `update daily_plan_runs
+     set status = 'GENERATING', attempt_count = ?, lease_token = ?, lease_expires_at = ?,
+         deadline_at = ?, terminal_reason = null, app_version = '0.5.0', idempotency_record_id = ?
+     where id = ? and owner_id = ? and status = 'CONTEXT_READY'`,
+  );
+  const recoverGeneratingRun = database.prepare(
+    `update daily_plan_runs
+     set attempt_count = ?, lease_token = ?, lease_expires_at = ?, deadline_at = ?,
+         terminal_reason = null, app_version = '0.5.0', idempotency_record_id = ?
+     where id = ? and owner_id = ? and status = 'GENERATING' and attempt_count = 1
+       and lease_expires_at <= ?`,
   );
   const markGeneratingRun = database.prepare(
     `update daily_plan_runs
@@ -753,8 +811,11 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         if (!run || stale.changes !== 1 || failContextReadyRun.run(
           'DAILY_PLAN_BASE_VERSION_STALE',
           timestampAtLeast(staleAt, run.created_at),
+          'DAILY_PLAN_BASE_VERSION_STALE',
           preflight.runId,
           input.ownerId,
+          null,
+          null,
         ).changes !== 1) {
           throw new DailyPlanRunStateConflictError();
         }
@@ -794,6 +855,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
       preflightId: string;
       expectedVersion: number;
       claimedAt: string;
+      execution: DailyPlanProviderExecutionLease;
     }): DailyPlanPreflightClaimResult => {
       const row = findPreflight.get(input.preflightId, input.ownerId) as DailyPlanPreflightRow | undefined;
       if (!row) return { kind: 'not_found' };
@@ -816,8 +878,11 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           failContextReadyRun.run(
             'DAILY_PLAN_BASE_VERSION_STALE',
             timestampAtLeast(staleAt, run.created_at),
+            'DAILY_PLAN_BASE_VERSION_STALE',
             preflight.runId,
             input.ownerId,
+            null,
+            null,
           ).changes !== 1
         ) {
           throw new DailyPlanRunStateConflictError();
@@ -840,7 +905,64 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           input.ownerId,
           input.expectedVersion,
         ).changes !== 1 ||
-        markGeneratingRun.run(preflight.runId, input.ownerId).changes !== 1
+        claimGeneratingRun.run(
+          input.execution.attemptCount,
+          input.execution.leaseToken,
+          input.execution.leaseExpiresAt,
+          input.execution.deadlineAt,
+          input.execution.idempotencyRecordId,
+          preflight.runId,
+          input.ownerId,
+        ).changes !== 1
+      ) {
+        throw new DailyPlanRunStateConflictError();
+      }
+      return {
+        kind: 'claimed',
+        preflight: toDailyPlanPreflight(
+          findPreflight.get(input.preflightId, input.ownerId) as DailyPlanPreflightRow,
+        ),
+        run: toDailyPlanRun(findRun.get(preflight.runId, input.ownerId) as DailyPlanRunRow),
+        context,
+      };
+    },
+  );
+
+  const recoverClaimedPreflightTransaction = database.transaction(
+    (input: {
+      ownerId: string;
+      preflightId: string;
+      expectedVersion: number;
+      claimedAt: string;
+      execution: DailyPlanProviderExecutionLease;
+    }): DailyPlanPreflightClaimResult => {
+      const row = findPreflight.get(input.preflightId, input.ownerId) as DailyPlanPreflightRow | undefined;
+      if (!row) return { kind: 'not_found' };
+      const preflight = toDailyPlanPreflight(row);
+      if (preflight.version !== input.expectedVersion) return { kind: 'version_conflict' };
+      if (preflight.status !== 'CLAIMED') return { kind: 'not_approved' };
+      const run = findRun.get(preflight.runId, input.ownerId) as DailyPlanRunRow | undefined;
+      if (!run || run.status !== 'GENERATING') throw new DailyPlanRunStateConflictError();
+      const context = readContextSnapshot(input.ownerId, preflight.localDate);
+      const claimedAt = timestampAtLeast(input.claimedAt, preflight.claimedAt ?? preflight.createdAt);
+      if (
+        recoverPreflight.run(
+          claimedAt,
+          claimedAt,
+          input.preflightId,
+          input.ownerId,
+          input.expectedVersion,
+        ).changes !== 1 ||
+        recoverGeneratingRun.run(
+          input.execution.attemptCount,
+          input.execution.leaseToken,
+          input.execution.leaseExpiresAt,
+          input.execution.deadlineAt,
+          input.execution.idempotencyRecordId,
+          preflight.runId,
+          input.ownerId,
+          input.claimedAt,
+        ).changes !== 1
       ) {
         throw new DailyPlanRunStateConflictError();
       }
@@ -862,6 +984,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
       expectedVersion: number;
       proposal: DailyPlanProposal;
       completedAt: string;
+      leaseToken?: string;
     }): { proposal: DailyPlanProposal } | { stale: true } => {
       const row = findPreflight.get(input.preflightId, input.ownerId) as DailyPlanPreflightRow | undefined;
       if (!row) throw new DailyPlanRunStateConflictError();
@@ -889,8 +1012,11 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           failContextReadyRun.run(
             'DAILY_PLAN_BASE_VERSION_STALE',
             timestampAtLeast(completedAt, run.created_at),
+            'DAILY_PLAN_BASE_VERSION_STALE',
             preflight.runId,
             input.ownerId,
+            input.leaseToken ?? null,
+            input.leaseToken ?? null,
           ).changes !== 1
         ) {
           throw new DailyPlanRunStateConflictError();
@@ -915,6 +1041,8 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
           timestampAtLeast(completedAt, run.created_at),
           preflight.runId,
           input.ownerId,
+          input.leaseToken ?? null,
+          input.leaseToken ?? null,
         ).changes !== 1 ||
         consumePreflight.run(
           completedAt,
@@ -941,6 +1069,8 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
       expectedVersion: number;
       code: DailyPlanFailureCode;
       completedAt: string;
+      leaseToken?: string;
+      terminalReason?: string;
     }): DailyPlanPreflight => {
       const row = findPreflight.get(input.preflightId, input.ownerId) as DailyPlanPreflightRow | undefined;
       if (!row) throw new DailyPlanRunStateConflictError();
@@ -959,8 +1089,11 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         failContextReadyRun.run(
           input.code,
           timestampAtLeast(completedAt, run.created_at),
+          input.terminalReason ?? input.code,
           preflight.runId,
           input.ownerId,
+          input.leaseToken ?? null,
+          input.leaseToken ?? null,
         ).changes !== 1 ||
         consumePreflight.run(
           completedAt,
@@ -998,8 +1131,11 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         failContextReadyRun.run(
           'DAILY_PLAN_BASE_VERSION_STALE',
           completionTimestamp(run.created_at),
+          'DAILY_PLAN_BASE_VERSION_STALE',
           runId,
           ownerId,
+          null,
+          null,
         );
         return { stale: true };
       }
@@ -1016,7 +1152,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         proposal.createdAt,
         proposal.updatedAt,
       );
-      completeRun.run(proposal.id, completionTimestamp(run.created_at), runId, ownerId);
+      completeRun.run(proposal.id, completionTimestamp(run.created_at), runId, ownerId, null, null);
 
       return {
         proposal: toDailyPlanProposal(
@@ -1278,6 +1414,10 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
 
     claimApprovedPreflight(input) {
       return claimApprovedPreflightTransaction(input);
+    },
+
+    recoverClaimedPreflight(input) {
+      return recoverClaimedPreflightTransaction(input);
     },
 
     completeClaimedPreflight(input) {

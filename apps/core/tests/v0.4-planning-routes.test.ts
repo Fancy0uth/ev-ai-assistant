@@ -7,7 +7,10 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
 import { createCalendarRepository } from '../src/modules/calendar/repository';
-import type { DailyPlanningProvider } from '../src/modules/daily-planning/provider';
+import type {
+  DailyPlanningProvider,
+  DailyPlanningProviderResult,
+} from '../src/modules/daily-planning/provider';
 import type { SecretStorePort } from '../src/modules/providers/secret-store';
 import { openDatabase } from '../src/storage/database';
 
@@ -39,12 +42,19 @@ class CountingSecretStore implements SecretStorePort {
 class CountingProvider implements DailyPlanningProvider {
   calls = 0;
 
-  async generate(): Promise<unknown> {
+  async generate(): Promise<DailyPlanningProviderResult> {
     this.calls += 1;
-    return {
+    const output = {
       schemaVersion: 'DAILY_PLAN_MODEL_V1',
       summary: 'A route test provider response.',
       actions: [],
+    };
+    return {
+      output,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(output).length,
     };
   }
 }

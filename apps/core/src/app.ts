@@ -134,9 +134,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     options.secretStore ?? createWindowsDpapiSecretStore(),
     options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
   );
+  const providerReliabilityRepository = createProviderReliabilityRepository(database);
   const idempotencyService = createIdempotencyService({
     database,
-    repository: createProviderReliabilityRepository(database),
+    repository: providerReliabilityRepository,
   });
   const dailyPlanRepository = createDailyPlanRunRepository(database);
   const dailyPlanningContextService = createDailyPlanningContextService(dailyPlanRepository, {
@@ -156,6 +157,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     repository: dailyPlanRepository,
     credentialService: providerCredentialService,
     provider: options.dailyPlanningProvider ?? createDeepSeekDailyPlanningProvider(),
+    reliabilityRepository: providerReliabilityRepository,
     newId: () => crypto.randomUUID(),
   });
   const dailyPlanAutomationService = createDailyPlanAutomationService({

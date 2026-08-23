@@ -5,7 +5,10 @@ import { dailyPlanPreflightResponseSchema, todaySnapshotSchema } from '@ev/contr
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
-import type { DailyPlanningProvider } from '../src/modules/daily-planning/provider';
+import type {
+  DailyPlanningProvider,
+  DailyPlanningProviderResult,
+} from '../src/modules/daily-planning/provider';
 import type { SecretStorePort } from '../src/modules/providers/secret-store';
 import { createTaskRepository } from '../src/modules/tasks/repository';
 import { openDatabase } from '../src/storage/database';
@@ -36,11 +39,18 @@ class InMemorySecretStore implements SecretStorePort {
 }
 
 const planningProvider: DailyPlanningProvider = {
-  async generate() {
-    return {
+  async generate(): Promise<DailyPlanningProviderResult> {
+    const output = {
       schemaVersion: 'DAILY_PLAN_MODEL_V1',
       summary: '今天没有可排入时间轴的新增事项。',
       actions: [],
+    };
+    return {
+      output,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(output).length,
     };
   },
 };

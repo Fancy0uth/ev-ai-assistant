@@ -57,4 +57,38 @@ describe('v0.5 idempotency service', () => {
       IdempotencyConflictError,
     );
   });
+
+  it('recovers one expired lease and then terminally seals a second expiration', () => {
+    const database = openDatabase(':memory:');
+    databases.push(database);
+    let current = new Date('2026-08-23T00:00:00.000Z');
+    database
+      .prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+      .run('owner-recovery', 'owner-recovery', 'hash', current.toISOString());
+    let id = 0;
+    const service = createIdempotencyService({
+      database,
+      repository: createProviderReliabilityRepository(database),
+      now: () => current,
+      newId: () => `record-${++id}`,
+      newLeaseToken: () => `lease-${++id}`,
+    });
+    const request = {
+      ownerId: 'owner-recovery',
+      key: 'v05-idempotency-key-0002',
+      operation: 'daily_plan.generate' as const,
+      resourceId: 'preflight-recovery',
+      body: { preflightId: 'preflight-recovery', expectedPreflightVersion: 2 },
+    };
+
+    expect(service.claim(request)).toMatchObject({ kind: 'CLAIMED', attemptCount: 1, recovered: false });
+    current = new Date('2026-08-23T00:00:21.000Z');
+    expect(service.claim(request)).toMatchObject({ kind: 'CLAIMED', attemptCount: 2, recovered: true });
+    current = new Date('2026-08-23T00:00:42.000Z');
+    expect(service.claim(request)).toMatchObject({
+      kind: 'TERMINAL',
+      status: 503,
+      body: { error: { code: 'DAILY_PLAN_PROVIDER_INTERRUPTED' } },
+    });
+  });
 });

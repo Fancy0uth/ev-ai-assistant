@@ -3,7 +3,11 @@ import { writeFile } from 'node:fs/promises';
 import type { DailyPlanModelOutput } from '@ev/contracts';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
-import type { DailyPlanningProvider, DailyPlanningProviderInput } from '../src/modules/daily-planning/provider';
+import type {
+  DailyPlanningProvider,
+  DailyPlanningProviderInput,
+  DailyPlanningProviderResult,
+} from '../src/modules/daily-planning/provider';
 import { SecretStoreUnavailableError, type SecretStorePort } from '../src/modules/providers/secret-store';
 import { openDatabase } from '../src/storage/database';
 
@@ -49,7 +53,7 @@ class TestOnlyDailyPlanCredentialPort implements SecretStorePort {
 }
 
 class TestOnlyDailyPlanningProvider implements DailyPlanningProvider {
-  async generate(apiKey: string, input: DailyPlanningProviderInput): Promise<unknown> {
+  async generate(apiKey: string, input: DailyPlanningProviderInput): Promise<DailyPlanningProviderResult> {
     if (apiKey !== TEST_PROVIDER_KEY) {
       throw new Error('The daily plan E2E provider received an unexpected credential.');
     }
@@ -83,7 +87,13 @@ class TestOnlyDailyPlanningProvider implements DailyPlanningProvider {
       summary: '由测试 Fake Provider 生成的待审核安排。',
       actions,
     };
-    return output;
+    return {
+      output,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(output).length,
+    };
   }
 }
 

@@ -85,6 +85,12 @@ function rethrowGenerationError(error: unknown): never {
       throw new ApiError(409, error.code, '尚未配置每日计划 Provider 凭据');
     case 'DAILY_PLAN_PROVIDER_UNAVAILABLE':
       throw new ApiError(503, error.code, '每日计划 Provider 暂不可用');
+    case 'DAILY_PLAN_PROVIDER_TIMEOUT':
+      throw new ApiError(503, error.code, '每日计划 Provider 请求超时');
+    case 'DAILY_PLAN_PROVIDER_QUOTA_EXCEEDED':
+      throw new ApiError(429, error.code, '每日计划 Provider 配额已用尽，请稍后重试');
+    case 'DAILY_PLAN_PROVIDER_RESPONSE_REJECTED':
+      throw new ApiError(422, error.code, '每日计划 Provider 返回内容未通过完整性策略');
     case 'DAILY_PLAN_MODEL_OUTPUT_INVALID':
       throw new ApiError(422, error.code, '每日计划 Provider 返回结果不符合要求');
     case 'DAILY_PLAN_VALIDATION_FAILED':
@@ -239,6 +245,12 @@ export async function registerDailyPlanningRoutes(
         ownerId,
         preflightId: input.preflightId,
         expectedPreflightVersion: input.expectedPreflightVersion,
+        execution: {
+          idempotencyRecordId: claim.recordId,
+          leaseToken: claim.leaseToken,
+          attemptCount: claim.attemptCount,
+          recovered: claim.recovered,
+        },
       });
       const body = dailyPlanProposalResponseSchema.parse({ data: proposal });
       if (!options.idempotencyService.complete({ ...claim, status: 201, body })) {
@@ -257,12 +269,24 @@ export async function registerDailyPlanningRoutes(
     } catch (error) {
       const mapped = toGenerationApiError(error);
       const body = apiErrorBody(mapped);
-      options.idempotencyService.fail({
+      const finalized = options.idempotencyService.fail({
         ...claim,
         status: mapped.statusCode,
         body,
         failureCode: mapped.code,
       });
+      if (!finalized) {
+        return sendIdempotencyClaim(reply, {
+          kind: 'TERMINAL',
+          status: 503,
+          body: apiErrorSchema.parse({
+            error: {
+              code: 'DAILY_PLAN_PROVIDER_INTERRUPTED',
+              message: '每日计划生成结果已过期，请重新发起。',
+            },
+          }),
+        });
+      }
       return reply.status(mapped.statusCode).send(body);
     }
   });

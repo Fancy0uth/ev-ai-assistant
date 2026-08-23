@@ -20,8 +20,10 @@ import {
 import type {
   DailyPlanningProvider,
   DailyPlanningProviderInput,
+  DailyPlanningProviderResult,
 } from '../src/modules/daily-planning/provider';
 import { CredentialNotConfiguredError } from '../src/modules/providers/credential-service';
+import { createProviderReliabilityRepository } from '../src/modules/providers/reliability-repository';
 import { openDatabase } from '../src/storage/database';
 
 const ownerId = '00000000-0000-4000-8000-000000000601';
@@ -37,11 +39,17 @@ class FakeProvider implements DailyPlanningProvider {
   response: unknown = validModelOutput();
   error: Error | undefined;
 
-  async generate(apiKey: string, input: DailyPlanningProviderInput): Promise<unknown> {
+  async generate(apiKey: string, input: DailyPlanningProviderInput): Promise<DailyPlanningProviderResult> {
     this.apiKeys.push(apiKey);
     this.inputs.push(input);
     if (this.error) throw this.error;
-    return this.response;
+    return {
+      output: this.response,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(this.response).length,
+    };
   }
 }
 
@@ -172,6 +180,7 @@ describe('daily planning generation service', () => {
       repository: generationRepository,
       credentialService: credentialPort,
       provider,
+      reliabilityRepository: createProviderReliabilityRepository(database),
       newId: () => '00000000-0000-4000-8000-000000000651',
       now: () => timestamp,
     });
@@ -247,6 +256,24 @@ describe('daily planning generation service', () => {
       failureCode: null,
     });
     expect(provider.apiKeys).toEqual([testApiKey]);
+    const callLog = database.prepare('select * from provider_call_logs').get() as Record<string, unknown>;
+    expect(callLog).toMatchObject({
+      provider: 'DEEPSEEK',
+      operation: 'daily_plan.generate',
+      status: 'SUCCEEDED',
+      model: 'deepseek-v4-flash',
+      app_version: '0.5.0',
+    });
+    for (const forbiddenColumn of [
+      'api_key',
+      'authorization',
+      'request_body',
+      'response_body',
+      'prompt',
+      'completion',
+    ]) {
+      expect(forbiddenColumn in callLog).toBe(false);
+    }
     expect(provider.inputs).toEqual([
       {
         localDate,
@@ -290,6 +317,44 @@ describe('daily planning generation service', () => {
       'DAILY_PLAN_PROVIDER_NOT_CONFIGURED',
       credentials(new CredentialNotConfiguredError()),
     );
+  });
+
+  it('fails closed before any Provider call when the Owner-local-day token quota is exhausted', async () => {
+    const reliability = createProviderReliabilityRepository(database);
+    reliability.startProviderCall({
+      id: 'prior-provider-call',
+      ownerId,
+      runId: null,
+      idempotencyRecordId: null,
+      provider: 'DEEPSEEK',
+      operation: 'daily_plan.generate',
+      model: 'deepseek-v4-flash',
+      attemptNo: 1,
+      inputChars: 10,
+      localDate,
+      startedAt: timestamp.toISOString(),
+    });
+    reliability.finishProviderCall({
+      id: 'prior-provider-call',
+      status: 'SUCCEEDED',
+      failureCode: null,
+      finishReason: 'stop',
+      usage: { promptTokens: 90_000, completionTokens: 10_000, totalTokens: 100_000 },
+      outputChars: 10,
+      finishedAt: timestamp.toISOString(),
+      durationMs: 0,
+    });
+    const provider = new FakeProvider();
+
+    await expect(
+      service(provider).generateDailyPlan({ ownerId, localDate, trigger: 'MANUAL' }),
+    ).rejects.toMatchObject({ code: 'DAILY_PLAN_PROVIDER_QUOTA_EXCEEDED' });
+    expect(provider.apiKeys).toEqual([]);
+    expect(repository.getRun(ownerId, '00000000-0000-4000-8000-000000000641')).toMatchObject({
+      status: 'FAILED',
+      failureCode: 'DAILY_PLAN_PROVIDER_UNAVAILABLE',
+      terminalReason: 'DAILY_PLAN_PROVIDER_QUOTA_EXCEEDED',
+    });
   });
 
   it('fails the run when the provider transport rejects', async () => {

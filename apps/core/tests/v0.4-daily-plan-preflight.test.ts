@@ -17,6 +17,7 @@ import {
 import type {
   DailyPlanningProvider,
   DailyPlanningProviderInput,
+  DailyPlanningProviderResult,
 } from '../src/modules/daily-planning/provider';
 import { createDailyPlanRunRepository } from '../src/modules/daily-planning/repository';
 import { openDatabase } from '../src/storage/database';
@@ -29,13 +30,20 @@ class CountingProvider implements DailyPlanningProvider {
   calls = 0;
   lastInput: DailyPlanningProviderInput | undefined;
 
-  async generate(_apiKey: string, input: DailyPlanningProviderInput): Promise<unknown> {
+  async generate(_apiKey: string, input: DailyPlanningProviderInput): Promise<DailyPlanningProviderResult> {
     this.calls += 1;
     this.lastInput = input;
-    return {
+    const output = {
       schemaVersion: 'DAILY_PLAN_MODEL_V1',
       summary: 'This output must never be used by a legacy direct generation call.',
       actions: [],
+    };
+    return {
+      output,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(output).length,
     };
   }
 }
@@ -61,6 +69,16 @@ function validModelOutput(contextRef = 'TIME_REQUEST_1') {
         rationale: '该时段满足已批准的可用窗口。',
       },
     ],
+  };
+}
+
+function providerResult(output: unknown): DailyPlanningProviderResult {
+  return {
+    output,
+    model: 'deepseek-v4-flash',
+    finishReason: 'stop',
+    usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    outputChars: JSON.stringify(output).length,
   };
 }
 
@@ -198,7 +216,7 @@ describe('v0.4 daily plan preflight boundary', () => {
       expect(database.inTransaction).toBe(false);
       provider.calls += 1;
       provider.lastInput = input;
-      return validModelOutput();
+      return providerResult(validModelOutput());
     };
     const credentialPort: DailyPlanningCredentialPort = {
       async withApiKey(_ownerId, callback) {
@@ -418,7 +436,7 @@ describe('v0.4 daily plan preflight boundary', () => {
     provider.generate = async (_apiKey, input) => {
       provider.calls += 1;
       provider.lastInput = input;
-      return validModelOutput('TIME_REQUEST_2');
+      return providerResult(validModelOutput('TIME_REQUEST_2'));
     };
     const service = createDailyPlanningService({
       preflightService,
@@ -547,7 +565,7 @@ describe('v0.4 daily plan preflight boundary', () => {
         createdAt: now.toISOString(),
         updatedAt: now.toISOString(),
       });
-      return validModelOutput();
+      return providerResult(validModelOutput());
     };
     const service = createDailyPlanningService({
       preflightService,

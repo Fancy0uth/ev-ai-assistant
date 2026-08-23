@@ -15,6 +15,7 @@ import {
   DailyPlanningProviderUnavailableError,
   type DailyPlanningProvider,
   type DailyPlanningProviderInput,
+  type DailyPlanningProviderResult,
 } from '../src/modules/daily-planning/provider';
 import { SecretStoreUnavailableError, type SecretStorePort } from '../src/modules/providers/secret-store';
 import { openDatabase } from '../src/storage/database';
@@ -50,11 +51,17 @@ class FakeDailyPlanningProvider implements DailyPlanningProvider {
   error: Error | undefined;
   beforeGenerate: (() => void) | undefined;
 
-  async generate(_apiKey: string, input: DailyPlanningProviderInput): Promise<unknown> {
+  async generate(_apiKey: string, input: DailyPlanningProviderInput): Promise<DailyPlanningProviderResult> {
     this.inputs.push(input);
     this.beforeGenerate?.();
     if (this.error) throw this.error;
-    return this.response;
+    return {
+      output: this.response,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(this.response).length,
+    };
   }
 }
 

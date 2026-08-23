@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { APP_VERSION } from './reliability';
 import { localTimeSchema, timeRequestSourceSchema } from './calendar';
 
 const nonBlankText = (maximum: number) =>
@@ -727,6 +728,12 @@ export const dailyPlanRunSchema = z
     failureCode: dailyPlanFailureCodeSchema.nullable(),
     createdAt: z.iso.datetime(),
     completedAt: z.iso.datetime().nullable(),
+    attemptCount: z.number().int().min(0).optional(),
+    leaseExpiresAt: z.iso.datetime().nullable().optional(),
+    deadlineAt: z.iso.datetime().nullable().optional(),
+    terminalReason: z.string().min(1).max(120).nullable().optional(),
+    appVersion: z.literal(APP_VERSION).optional(),
+    idempotencyRecordId: z.uuid().nullable().optional(),
   })
   .strict()
   .superRefine((run, context) => {
