@@ -419,6 +419,82 @@ describe('v0.4 daily plan preflight boundary', () => {
     });
   });
 
+  it('rejects an excluded context ref returned by a provider that saw only included items', async () => {
+    createCalendarRepository(database).createTimeRequest({
+      id: '00000000-0000-4000-8000-000000004484',
+      ownerId,
+      source: 'PROJECT_AGENT',
+      title: 'Excluded private local project task',
+      targetDate: localDate,
+      durationMinutes: 60,
+      priority: 'MEDIUM',
+      earliestStartLocalTime: '09:00',
+      latestEndLocalTime: '17:00',
+      isFixed: false,
+      version: 1,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
+    const repository = createDailyPlanRunRepository(database);
+    const preflightService = createDailyPlanPreflightService({
+      contextService: createDailyPlanningContextService(repository, {
+        newId: () => '00000000-0000-4000-8000-000000004485',
+      }),
+      repository,
+      newId: () => '00000000-0000-4000-8000-000000004486',
+      now: () => now,
+    });
+    const provider = new CountingProvider();
+    provider.generate = async (_apiKey, input) => {
+      provider.calls += 1;
+      provider.lastInput = input;
+      return validModelOutput('TIME_REQUEST_2');
+    };
+    const service = createDailyPlanningService({
+      preflightService,
+      repository,
+      credentialService: credentials(),
+      provider,
+      newId: () => '00000000-0000-4000-8000-000000004487',
+      now: () => now,
+    });
+    const prepared = preflightService.prepare(ownerId, localDate);
+    const approved = preflightService.approve(ownerId, prepared.id, prepared.version, [
+      {
+        contextRef: 'TIME_REQUEST_1',
+        safeTitle: 'Included task',
+        domain: 'WORK',
+        deadlineLocalDate: localDate,
+        included: true,
+      },
+      {
+        contextRef: 'TIME_REQUEST_2',
+        safeTitle: 'Excluded task',
+        domain: 'WORK',
+        deadlineLocalDate: localDate,
+        included: false,
+      },
+    ]);
+
+    await expect(service.generateApprovedPreflight({
+      ownerId,
+      preflightId: approved.id,
+      expectedPreflightVersion: approved.version,
+    })).rejects.toMatchObject({ code: 'DAILY_PLAN_VALIDATION_FAILED' });
+
+    expect(provider.calls).toBe(1);
+    expect(provider.lastInput?.timeRequests.map((request) => request.contextRef)).toEqual([
+      'TIME_REQUEST_1',
+    ]);
+    expect(repository.getPreflight(ownerId, approved.id)).toMatchObject({ status: 'CONSUMED' });
+    expect(repository.getRun(ownerId, prepared.runId)).toMatchObject({
+      status: 'FAILED',
+      failureCode: 'DAILY_PLAN_VALIDATION_FAILED',
+    });
+    expect(repository.findProposalByRun(ownerId, prepared.runId)).toBeUndefined();
+    expect(database.prepare('select count(*) as count from daily_plan_proposals').get()).toEqual({ count: 0 });
+  });
+
   it('stales an approved preflight during claim without calling a provider', async () => {
     const repository = createDailyPlanRunRepository(database);
     const preflightService = createDailyPlanPreflightService({

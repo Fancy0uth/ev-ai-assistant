@@ -76,21 +76,19 @@ function providerInput(
     softBlocks: packet.timeBlocks
       .filter((block) => !block.isHard)
       .map(({ startLocalTime, endLocalTime }) => ({ startLocalTime, endLocalTime })),
-    timeRequests: packet.timeRequests
-      .filter((request) => request.included)
-      .map((request) => ({
-        contextRef: request.contextRef,
-        safeTitle: request.safeTitle,
-        domain: request.domain,
-        deadlineLocalDate: request.deadlineLocalDate,
-        durationMinutes: request.durationMinutes,
-        priority: request.priority,
-        availability: {
-          earliestStartLocalTime: request.earliestStartLocalTime,
-          latestEndLocalTime: request.latestEndLocalTime,
-        },
-        isFixed: request.isFixed,
-      })),
+    timeRequests: packet.timeRequests.map((request) => ({
+      contextRef: request.contextRef,
+      safeTitle: request.safeTitle,
+      domain: request.domain,
+      deadlineLocalDate: request.deadlineLocalDate,
+      durationMinutes: request.durationMinutes,
+      priority: request.priority,
+      availability: {
+        earliestStartLocalTime: request.earliestStartLocalTime,
+        latestEndLocalTime: request.latestEndLocalTime,
+      },
+      isFixed: request.isFixed,
+    })),
     recoveryLevel: packet.recoveryLevel,
   };
 }

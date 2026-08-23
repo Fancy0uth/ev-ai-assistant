@@ -215,7 +215,7 @@ export function buildApprovedDailyPlanningPacket(
     throw new Error('DAILY_PLAN_PREFLIGHT_CONTEXT_MISMATCH');
   }
 
-  const timeRequests = context.timeRequests.map((request, index) => {
+  const verifiedTimeRequests = context.timeRequests.map((request, index) => {
     const contextRef = `TIME_REQUEST_${index + 1}`;
     const item = preparedItems.get(contextRef);
     if (
@@ -252,7 +252,7 @@ export function buildApprovedDailyPlanningPacket(
       endLocalTime: event.endLocalTime,
       isHard: event.isHard,
     })),
-    timeRequests,
+    timeRequests: verifiedTimeRequests.filter((request) => request.included),
     recoveryLevel: recoveryLevel(context),
   };
 }
