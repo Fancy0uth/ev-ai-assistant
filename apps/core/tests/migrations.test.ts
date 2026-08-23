@@ -659,53 +659,211 @@ describe('daily-plan storage migrations', () => {
             items_json, version, created_at, updated_at, approved_at, claimed_at, consumed_at
           ) values (?, ?, ?, 'DAILY_PLAN_PREFLIGHT_V1', '2026-08-24', ?, 1, '[]', 1, ?, ?, ?, ?, ?)`,
         );
-        upgraded
-          .prepare(
-            `insert into daily_plan_runs (
-              id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
-              proposal_id, failure_code, created_at, completed_at
-            ) values (?, ?, 'DAILY_PLAN_V1', '2026-08-24', 'MANUAL', 'CONTEXT_READY', '{}', null, null, ?, null)`,
-          )
-          .run('canonical-matrix-run', ownerId, timestamp);
-        for (const [index, status, updatedAt, approvedAt, claimedAt, consumedAt] of [
-          ['AWAITING_APPROVAL', timestamp, '2026-08-23T01:00:00.000Z', null, null, null],
-          ['APPROVED', timestamp, null, null, null],
-          ['CLAIMED', timestamp, '2026-08-23T01:00:00.000Z', null, null],
-          ['CONSUMED', timestamp, '2026-08-23T01:00:00.000Z', '2026-08-23T02:00:00.000Z', null],
-          ['STALE', timestamp, null, '2026-08-23T02:00:00.000Z', null],
-          ['STALE', timestamp, null, null, '2026-08-23T03:00:00.000Z'],
-          ['APPROVED', timestamp, '2026-08-22T23:59:59.999Z', null, null],
-          ['CLAIMED', timestamp, '2026-08-23T02:00:00.000Z', '2026-08-23T01:00:00.000Z', null],
-          ['CONSUMED', timestamp, '2026-08-23T01:00:00.000Z', '2026-08-23T02:00:00.000Z', '2026-08-23T01:00:00.000Z'],
-          ['AWAITING_APPROVAL', '2026-08-22T23:59:59.999Z', null, null, null],
-        ]) {
+        const insertPreflightRun = upgraded.prepare(
+          `insert into daily_plan_runs (
+            id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
+            proposal_id, failure_code, created_at, completed_at
+          ) values (?, ?, 'DAILY_PLAN_V1', '2026-08-24', 'MANUAL', 'CONTEXT_READY', '{}', null, null, ?, null)`,
+        );
+        const validLifecycleCases = [
+          {
+            id: 'valid-awaiting-approval-preflight',
+            runId: 'canonical-valid-awaiting-approval-run',
+            status: 'AWAITING_APPROVAL',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            approvedAt: null,
+            claimedAt: null,
+            consumedAt: null,
+          },
+          {
+            id: 'valid-approved-preflight',
+            runId: 'canonical-valid-approved-run',
+            status: 'APPROVED',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T01:00:00.000Z',
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: null,
+            consumedAt: null,
+          },
+          {
+            id: 'valid-claimed-preflight',
+            runId: 'canonical-valid-claimed-run',
+            status: 'CLAIMED',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T02:00:00.000Z',
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: '2026-08-23T02:00:00.000Z',
+            consumedAt: null,
+          },
+          {
+            id: 'valid-consumed-preflight',
+            runId: 'canonical-valid-consumed-run',
+            status: 'CONSUMED',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T03:00:00.000Z',
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: '2026-08-23T02:00:00.000Z',
+            consumedAt: '2026-08-23T03:00:00.000Z',
+          },
+          {
+            id: 'valid-stale-preflight',
+            runId: 'canonical-valid-stale-run',
+            status: 'STALE',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T03:00:00.000Z',
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: '2026-08-23T02:00:00.000Z',
+            consumedAt: null,
+          },
+        ];
+        const selectPreflight = upgraded.prepare(
+          `select id, run_id, status, created_at, updated_at, approved_at, claimed_at, consumed_at
+           from daily_plan_preflights where id = ?`,
+        );
+        for (const lifecycle of validLifecycleCases) {
+          insertPreflightRun.run(lifecycle.runId, ownerId, timestamp);
+          insertPreflight.run(
+            lifecycle.id,
+            ownerId,
+            lifecycle.runId,
+            lifecycle.status,
+            lifecycle.createdAt,
+            lifecycle.updatedAt,
+            lifecycle.approvedAt,
+            lifecycle.claimedAt,
+            lifecycle.consumedAt,
+          );
+          expect(selectPreflight.get(lifecycle.id)).toEqual({
+            id: lifecycle.id,
+            run_id: lifecycle.runId,
+            status: lifecycle.status,
+            created_at: lifecycle.createdAt,
+            updated_at: lifecycle.updatedAt,
+            approved_at: lifecycle.approvedAt,
+            claimed_at: lifecycle.claimedAt,
+            consumed_at: lifecycle.consumedAt,
+          });
+        }
+
+        const invalidLifecycleCases = [
+          {
+            id: 'invalid-awaiting-with-approved-preflight',
+            runId: 'canonical-invalid-awaiting-with-approved-run',
+            status: 'AWAITING_APPROVAL',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: null,
+            consumedAt: null,
+          },
+          {
+            id: 'invalid-approved-without-approved-at-preflight',
+            runId: 'canonical-invalid-approved-without-approved-at-run',
+            status: 'APPROVED',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            approvedAt: null,
+            claimedAt: null,
+            consumedAt: null,
+          },
+          {
+            id: 'invalid-claimed-without-claimed-at-preflight',
+            runId: 'canonical-invalid-claimed-without-claimed-at-run',
+            status: 'CLAIMED',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T01:00:00.000Z',
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: null,
+            consumedAt: null,
+          },
+          {
+            id: 'invalid-consumed-without-consumed-at-preflight',
+            runId: 'canonical-invalid-consumed-without-consumed-at-run',
+            status: 'CONSUMED',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T02:00:00.000Z',
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: '2026-08-23T02:00:00.000Z',
+            consumedAt: null,
+          },
+          {
+            id: 'invalid-stale-claimed-without-approved-at-preflight',
+            runId: 'canonical-invalid-stale-claimed-without-approved-at-run',
+            status: 'STALE',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T02:00:00.000Z',
+            approvedAt: null,
+            claimedAt: '2026-08-23T02:00:00.000Z',
+            consumedAt: null,
+          },
+          {
+            id: 'invalid-stale-with-consumed-at-preflight',
+            runId: 'canonical-invalid-stale-with-consumed-at-run',
+            status: 'STALE',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T03:00:00.000Z',
+            approvedAt: null,
+            claimedAt: null,
+            consumedAt: '2026-08-23T03:00:00.000Z',
+          },
+          {
+            id: 'invalid-approved-before-created-preflight',
+            runId: 'canonical-invalid-approved-before-created-run',
+            status: 'APPROVED',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            approvedAt: '2026-08-22T23:59:59.999Z',
+            claimedAt: null,
+            consumedAt: null,
+          },
+          {
+            id: 'invalid-claimed-before-approved-preflight',
+            runId: 'canonical-invalid-claimed-before-approved-run',
+            status: 'CLAIMED',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T02:00:00.000Z',
+            approvedAt: '2026-08-23T02:00:00.000Z',
+            claimedAt: '2026-08-23T01:00:00.000Z',
+            consumedAt: null,
+          },
+          {
+            id: 'invalid-consumed-before-claimed-preflight',
+            runId: 'canonical-invalid-consumed-before-claimed-run',
+            status: 'CONSUMED',
+            createdAt: timestamp,
+            updatedAt: '2026-08-23T02:00:00.000Z',
+            approvedAt: '2026-08-23T01:00:00.000Z',
+            claimedAt: '2026-08-23T02:00:00.000Z',
+            consumedAt: '2026-08-23T01:00:00.000Z',
+          },
+          {
+            id: 'invalid-updated-before-created-preflight',
+            runId: 'canonical-invalid-updated-before-created-run',
+            status: 'AWAITING_APPROVAL',
+            createdAt: timestamp,
+            updatedAt: '2026-08-22T23:59:59.999Z',
+            approvedAt: null,
+            claimedAt: null,
+            consumedAt: null,
+          },
+        ];
+        for (const lifecycle of invalidLifecycleCases) {
+          insertPreflightRun.run(lifecycle.runId, ownerId, timestamp);
           expect(() =>
             insertPreflight.run(
-              `invalid-preflight-${index}`,
+              lifecycle.id,
               ownerId,
-              'canonical-matrix-run',
-              status,
-              timestamp,
-              updatedAt,
-              approvedAt,
-              claimedAt,
-              consumedAt,
+              lifecycle.runId,
+              lifecycle.status,
+              lifecycle.createdAt,
+              lifecycle.updatedAt,
+              lifecycle.approvedAt,
+              lifecycle.claimedAt,
+              lifecycle.consumedAt,
             ),
-          ).toThrow();
+          ).toThrow('invalid daily plan preflight lifecycle state');
         }
-        expect(() =>
-          insertPreflight.run(
-            'invalid-approved-preflight',
-            ownerId,
-            'canonical-run-1',
-            'APPROVED',
-            timestamp,
-            timestamp,
-            null,
-            null,
-            null,
-          ),
-        ).toThrow();
         insertPreflight.run(
           'consumed-preflight',
           ownerId,
