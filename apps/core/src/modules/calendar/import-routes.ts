@@ -3,7 +3,10 @@ import {
   courseArtifactResponseSchema,
   courseImportPathParamsSchema,
   courseImportResponseSchema,
+  confirmCourseImportSchema,
   createCourseImportSchema,
+  extractCourseImportSchema,
+  saveCourseImportRevisionSchema,
   courseScheduleImageMediaTypeSchema,
 } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
@@ -44,5 +47,24 @@ export async function registerCourseImportRoutes(app: FastifyInstance, options: 
   app.get('/v1/course-imports/:id', { preHandler: authGuard }, async (request) => {
     const { id } = parseRequestInput(courseImportPathParamsSchema, request.params, '课表导入路径参数不符合要求');
     return courseImportResponseSchema.parse({ data: options.courseImportService.findById(authenticatedOwnerId(request), id) });
+  });
+  app.post('/v1/course-imports/:id/extract', { preHandler: authGuard }, async (request, reply) => {
+    const { id } = parseRequestInput(courseImportPathParamsSchema, request.params, '课表导入路径参数不符合要求');
+    const key = request.headers['idempotency-key'];
+    if (typeof key !== 'string' || !key) throw new ApiError(400, 'IDEMPOTENCY_KEY_REQUIRED', '课表提取需要 Idempotency-Key');
+    const input = parseRequestInput(extractCourseImportSchema, request.body, '课表提取请求不符合要求');
+    return reply.status(202).send(courseImportResponseSchema.parse({ data: await options.courseImportService.extract(authenticatedOwnerId(request), id, input, key) }));
+  });
+  app.post('/v1/course-imports/:id/revisions', { preHandler: authGuard }, async (request, reply) => {
+    const { id } = parseRequestInput(courseImportPathParamsSchema, request.params, '课表导入路径参数不符合要求');
+    const input = parseRequestInput(saveCourseImportRevisionSchema, request.body, '课表候选修订不符合要求');
+    return reply.status(201).send(courseImportResponseSchema.parse({ data: options.courseImportService.saveRevision(authenticatedOwnerId(request), id, input) }));
+  });
+  app.post('/v1/course-imports/:id/confirm', { preHandler: authGuard }, async (request, reply) => {
+    const { id } = parseRequestInput(courseImportPathParamsSchema, request.params, '课表导入路径参数不符合要求');
+    const key = request.headers['idempotency-key'];
+    if (typeof key !== 'string' || !key) throw new ApiError(400, 'IDEMPOTENCY_KEY_REQUIRED', '确认课程需要 Idempotency-Key');
+    const input = parseRequestInput(confirmCourseImportSchema, request.body, '确认课程请求不符合要求');
+    return reply.status(201).send(courseImportResponseSchema.parse({ data: options.courseImportService.confirm(authenticatedOwnerId(request), id, input, key) }));
   });
 }

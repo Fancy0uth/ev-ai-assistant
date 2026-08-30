@@ -11,6 +11,7 @@ import { CalendarPlus, FileImage, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 import { ManualEventProposalPanel } from './manual-event-proposal-panel';
+import { CourseImportReview } from './course-import-review';
 
 function failureMessage(error: unknown): string {
   return error instanceof CoreClientError ? error.message : '本地日程操作暂时未完成，请稍后重试。';
@@ -142,21 +143,8 @@ export function ScheduleWorkspace() {
       </div>
 
       {failure ? <p className="domain-form__error domain-workspace__error" role="alert">{failure}</p> : null}
-      {importResult ? <ImportResult result={importResult} /> : null}
+      {importResult ? <CourseImportReview initial={importResult} onUpdated={setImportResult} /> : null}
       <ManualEventProposalPanel initialDate={todayInShanghai()} />
-    </section>
-  );
-}
-
-function ImportResult({ result }: { result: ReturnType<typeof courseImportResponseSchema.parse>['data'] }) {
-  const blocked = result.import.status === 'BLOCKED_PROVIDER';
-  return (
-    <section className="domain-card import-result" aria-live="polite">
-      <p className="section-kicker">IMPORT RESULT</p>
-      <h2>{blocked ? 'Provider 未配置，外发已阻断' : '请先确认外发披露'}</h2>
-      <p>图片已保存到 Owner 私有本地 artifact；状态：{result.import.status}</p>
-      <p className="domain-result__boundary">用途：{result.disclosure.purpose}。Provider：{result.disclosure.providerLabel}；证据：{result.disclosure.evidenceKind}。</p>
-      <p>将发送：{result.disclosure.selectedData.join('、')}。本任务尚未调用任何外部 Provider。</p>
     </section>
   );
 }

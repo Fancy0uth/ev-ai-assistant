@@ -1,8 +1,8 @@
-# TASK-V6-01：安全本地课表 artifact（等待原子提交）
+# TASK-V6-02：课表候选审阅与排程 Proposal（待原子提交）
 
 ## 当前目标
 
-V6-01 的实现、测试、typecheck、聚焦 lint 和 diff 检查均已完成。Git 在 `git add` 时因无法创建 linked-worktree `index.lock` 被拒绝；按执行约束，等待主 Agent 提交指定原子 commit 后再开始 V6-02。
+V6-02 已完成实现与验证，待创建指定原子提交后继续 V6-03。
 
 ## 执行基线
 
@@ -27,4 +27,4 @@ npm test --workspace @ev/web -- tests/schedule-workspace.test.tsx tests/today-da
 
 ## 交接记录
 
-V6-01：GREEN 已通过 Contracts 16/16、Core 13/13、Web 17/17；三个 workspace typecheck 与聚焦 eslint、`git diff --check` 均通过。真实 Provider 证据仍为 `NOT RUN — APPROVAL REQUIRED`。唯一阻断：`git add …` 返回 `fatal: Unable to create .../.git/worktrees/product-prd/index.lock: Permission denied`。
+V6-02：GREEN 已通过 Contracts 7/7、Core 13/13、Web 24/24；三个 workspace typecheck、聚焦 eslint、`git diff --check` 均通过。真实 Provider 证据仍为 `NOT RUN — APPROVAL REQUIRED`。

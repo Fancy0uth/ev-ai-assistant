@@ -64,6 +64,17 @@ describe('calendar and proposal contracts', () => {
     ).toBe(false);
   });
 
+  it('keeps Course lineage on rules and defers recurrence expansion to a dedicated change', () => {
+    const linkedRule = { ...rule, courseId: '00000000-0000-4000-8000-000000000099' };
+    expect(calendarRuleSchema.parse(linkedRule)).toEqual(linkedRule);
+    expect(createProposalSchema.safeParse({
+      kind: 'SCHEDULE',
+      source: 'COURSE_IMPORT',
+      title: '确认后展开数据库系统',
+      changes: [{ operation: 'EXPAND_CALENDAR_RULE', calendarRuleId: rule.id, expectedRuleVersion: 1 }],
+    }).success).toBe(true);
+  });
+
   it('keeps Event, Signal and TimeRequest distinct for the daily coordination loop', () => {
     const base = {
       id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c',

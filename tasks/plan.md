@@ -2,7 +2,7 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 状态 | Active — v0.4、v0.5 已关闭；V6-01 已完成验证，等待 Git 原子提交后继续。 |
+| 状态 | Active — v0.4、v0.5 已关闭；V6-02 已完成验证，待 Git 原子提交后继续。 |
 | 当前实现基线 | `155b172de91a62feb2762469536555f9a6b2b025`；v0.5 工程 PASS，真实 DeepSeek 仍为独立证据债。 |
 | 权威设计 | [v0.4–v0.9 绑定设计](../docs/superpowers/specs/2026-08-23-v0.4-v0.9-mvp-design.md) |
 | 执行路线 | [v0.4–v0.9 总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) |

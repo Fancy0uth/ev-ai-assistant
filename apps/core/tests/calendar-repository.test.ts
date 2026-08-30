@@ -48,10 +48,13 @@ describe('owner-scoped calendar and proposal repositories', () => {
       createdAt: now,
       updatedAt: now,
     });
+    database.prepare(`insert into courses (id, owner_id, term_id, title, course_code, official_url, version, created_at, updated_at) values (?, ?, ?, ?, null, null, 1, ?, ?)`)
+      .run('00000000-0000-4000-8000-000000000107', ownerId, termId, '数据库系统', now, now);
     calendar.createRule({
       id: ruleId,
       ownerId,
       termId,
+      courseId: '00000000-0000-4000-8000-000000000107',
       title: '数据库系统',
       weekday: 1,
       startLocalTime: '08:00',
@@ -79,6 +82,7 @@ describe('owner-scoped calendar and proposal repositories', () => {
     };
     const savedEvent = calendar.createEvent(event);
 
+    expect(savedEvent.courseId).toBe('00000000-0000-4000-8000-000000000107');
     expect(calendar.listEventsForDate(ownerId, '2026-09-07')).toEqual([savedEvent]);
     expect(calendar.listEventsForDate(otherOwnerId, '2026-09-07')).toEqual([]);
   });

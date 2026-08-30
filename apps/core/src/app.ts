@@ -74,6 +74,7 @@ export interface AppOptions {
   visionCapability?: VisionCapability;
   publicSearchCapability?: PublicSearchCapability;
   learningAdviceCapability?: LearningAdviceCapability;
+  courseImportExternalOperationObserver?: (inTransaction: boolean) => void;
   domainAgentProvider?: DomainAgentProvider;
   domainAgentProviders?: Partial<Record<ProviderKey, DomainAgentProvider>>;
   secretStore?: SecretStorePort;
@@ -122,7 +123,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const taskRepository = createTaskRepository(database);
   const calendarRepository = createCalendarRepository(database);
   const proposalRepository = createProposalRepository(database);
-  const proposalService = createProposalService(proposalRepository, calendarRepository);
+  const proposalService = createProposalService(proposalRepository, calendarRepository, { database });
   const calendarService = createCalendarService(calendarRepository, proposalService);
   const taskService = createTaskService(taskRepository, {
     schedulingUnitOfWork: createTaskSchedulingUnitOfWork(database, {
@@ -144,6 +145,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     calendarRepository,
     artifactRoot,
     capabilityRegistry,
+    options.courseImportExternalOperationObserver ? { onExternalOperation: options.courseImportExternalOperationObserver } : {},
   );
   const providerService = createProviderService(database, {
     providers: {

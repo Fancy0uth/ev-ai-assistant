@@ -86,7 +86,7 @@ export function createProposalRepository(database: Database.Database): ProposalR
       if (!row) return undefined;
       const current = toProposal(row);
       if (current.status !== 'PENDING' || current.version !== input.version) return undefined;
-      if (input.decision === 'ACCEPT') applyAcceptedChanges(current);
+      applyAcceptedChanges(current);
 
       const status = input.decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
       const updated = updateDecisionStatement.run(

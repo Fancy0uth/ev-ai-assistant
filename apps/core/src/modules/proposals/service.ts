@@ -7,12 +7,14 @@ import {
 } from '@ev/contracts';
 import { expandCalendarRule } from '@ev/domain';
 import { ApiError } from '../../http/api-error';
+import type Database from 'better-sqlite3';
 import type { CalendarRepository, NewCalendarRule, NewEvent } from '../calendar/repository';
 import type { ProposalRepository } from './repository';
 
 interface ProposalServiceOptions {
   now?: () => Date;
   newId?: () => string;
+  database?: Database.Database;
 }
 
 export interface ProposalService {
@@ -71,6 +73,7 @@ export function createProposalService(
             id: newId(),
             ownerId,
             calendarRuleId: rule.id,
+            courseId: rule.courseId ?? null,
             title: rule.title,
             kind: 'COURSE',
             localDate: occurrence.localDate,
@@ -83,6 +86,27 @@ export function createProposalService(
             updatedAt: now().toISOString(),
           };
           calendarRepository.createEvent(event);
+        }
+      } else if (change.operation === 'EXPAND_CALENDAR_RULE') {
+        const rule = calendarRepository.findRule(ownerId, change.calendarRuleId);
+        if (!rule || rule.version !== change.expectedRuleVersion) {
+          throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', '提案引用的课程规则已变化或不可访问');
+        }
+        const term = calendarRepository.findTerm(ownerId, rule.termId);
+        if (!term) throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', '提案引用的学期不存在或不可访问');
+        const occurrences = expandCalendarRule({
+          ruleId: rule.id, termWeekOneMonday: term.weekOneMonday, weekday: rule.weekday,
+          startLocalTime: rule.startLocalTime, endLocalTime: rule.endLocalTime,
+          weekStart: rule.weekStart, weekEnd: rule.weekEnd, weekPattern: rule.weekPattern,
+        });
+        for (const occurrence of occurrences) {
+          calendarRepository.createEvent({
+            id: newId(), ownerId, calendarRuleId: rule.id, courseId: rule.courseId ?? null,
+            title: rule.title, kind: 'COURSE', localDate: occurrence.localDate,
+            startLocalTime: occurrence.startLocalTime, endLocalTime: occurrence.endLocalTime,
+            isHard: rule.isHard, status: 'CONFIRMED', version: 1,
+            createdAt: now().toISOString(), updatedAt: now().toISOString(),
+          });
         }
       } else if (change.operation === 'CREATE_EVENT') {
         const event: NewEvent = { ...change.event, ownerId };
@@ -123,7 +147,13 @@ export function createProposalService(
         proposalId,
         input,
         now().toISOString(),
-        (proposal) => applyAcceptedScheduleChanges(ownerId, proposal),
+        (proposal) => {
+          if (input.decision === 'ACCEPT') applyAcceptedScheduleChanges(ownerId, proposal);
+          if (options.database && proposal.source === 'COURSE_IMPORT') {
+            const status = input.decision === 'ACCEPT' ? 'CONFIRMED' : 'SCHEDULE_REJECTED';
+            options.database.prepare(`update course_imports_v2 set status = ?, updated_at = ?, version = version + 1 where owner_id = ? and schedule_proposal_id = ? and status = 'SCHEDULE_PROPOSAL_PENDING'`).run(status, now().toISOString(), ownerId, proposal.id);
+          }
+        },
       );
       if (decided) return decided;
       throw versionConflict(proposalRepository.findById(ownerId, proposalId));

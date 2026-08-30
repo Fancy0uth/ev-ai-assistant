@@ -1,4 +1,4 @@
-import type { CourseImport, ExternalDisclosure, LocalArtifact } from '@ev/contracts';
+import type { CourseImport, CourseImportRevision, ExternalDisclosure, LocalArtifact } from '@ev/contracts';
 import type Database from 'better-sqlite3';
 
 interface ArtifactRow {
@@ -10,6 +10,10 @@ interface ImportRow {
   id: string; term_id: string; artifact_id: string; capability_run_id: string; status: CourseImport['status'];
   current_revision_id: string | null; schedule_proposal_id: string | null; failure_code: string | null;
   version: number; created_at: string; updated_at: string;
+}
+interface RevisionRow {
+  id: string; import_id: string; parent_revision_id: string | null; revision_no: number;
+  candidates_json: string; content_hash: string; created_by: 'VISION' | 'OWNER'; created_at: string;
 }
 
 function toArtifact(row: ArtifactRow): LocalArtifact {
@@ -27,6 +31,12 @@ function toImport(row: ImportRow): CourseImport {
     failureCode: row.failure_code, version: row.version, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
+function toRevision(row: RevisionRow): CourseImportRevision {
+  return {
+    id: row.id, importId: row.import_id, parentRevisionId: row.parent_revision_id, revisionNo: row.revision_no,
+    candidates: JSON.parse(row.candidates_json), contentHash: row.content_hash, createdBy: row.created_by, createdAt: row.created_at,
+  };
+}
 
 export interface CourseImportRepository {
   findActiveArtifactByHash(ownerId: string, sha256: string): LocalArtifact | undefined;
@@ -36,6 +46,14 @@ export interface CourseImportRepository {
   requestArtifactDelete(ownerId: string, id: string, timestamp: string): LocalArtifact | undefined;
   markArtifactDeleted(ownerId: string, id: string, timestamp: string): LocalArtifact | undefined;
   insertImport(input: CourseImport & { ownerId: string }): CourseImport;
+  findImport(ownerId: string, id: string): CourseImport | undefined;
+  findRevision(ownerId: string, id: string): CourseImportRevision | undefined;
+  findCurrentRevision(ownerId: string, importId: string): CourseImportRevision | undefined;
+  insertRevision(input: CourseImportRevision & { ownerId: string }): CourseImportRevision;
+  updateImport(ownerId: string, id: string, expectedVersion: number, update: {
+    status: CourseImport['status']; currentRevisionId?: string | null; scheduleProposalId?: string | null;
+    failureCode?: string | null; timestamp: string;
+  }): CourseImport | undefined;
   insertCapabilityRun(input: {
     id: string; ownerId: string; resourceId: string; status: 'BLOCKED_PROVIDER' | 'AWAITING_DISCLOSURE';
     disclosure: ExternalDisclosure; timestamp: string; appVersion: string;
@@ -47,6 +65,8 @@ const importColumns = `id, term_id, artifact_id, capability_run_id, status, curr
 
 export function createCourseImportRepository(database: Database.Database): CourseImportRepository {
   const findArtifact = database.prepare(`select ${artifactColumns} from local_artifacts where id = ? and owner_id = ?`);
+  const findImport = database.prepare(`select ${importColumns} from course_imports_v2 where id = ? and owner_id = ?`);
+  const findRevision = database.prepare(`select r.id, r.import_id, r.parent_revision_id, r.revision_no, r.candidates_json, r.content_hash, r.created_by, r.created_at from course_import_revisions r join course_imports_v2 i on i.id = r.import_id where r.id = ? and r.owner_id = ? and i.owner_id = ?`);
   return {
     findActiveArtifactByHash(ownerId, sha256) {
       const row = database.prepare(`select ${artifactColumns} from local_artifacts where owner_id = ? and sha256 = ? and state = 'ACTIVE' order by created_at asc, id asc limit 1`).get(ownerId, sha256) as ArtifactRow | undefined;
@@ -89,6 +109,34 @@ export function createCourseImportRepository(database: Database.Database): Cours
       const row = database.prepare(`select ${importColumns} from course_imports_v2 where id = ? and owner_id = ?`).get(input.id, input.ownerId) as ImportRow | undefined;
       if (!row) throw new Error('stored course import disappeared');
       return toImport(row);
+    },
+    findImport(ownerId, id) {
+      const row = findImport.get(id, ownerId) as ImportRow | undefined;
+      return row ? toImport(row) : undefined;
+    },
+    findRevision(ownerId, id) {
+      const row = findRevision.get(id, ownerId, ownerId) as RevisionRow | undefined;
+      return row ? toRevision(row) : undefined;
+    },
+    findCurrentRevision(ownerId, importId) {
+      const row = database.prepare(`select r.id, r.import_id, r.parent_revision_id, r.revision_no, r.candidates_json, r.content_hash, r.created_by, r.created_at from course_import_revisions r join course_imports_v2 i on i.current_revision_id = r.id where i.id = ? and i.owner_id = ? and r.owner_id = ?`).get(importId, ownerId, ownerId) as RevisionRow | undefined;
+      return row ? toRevision(row) : undefined;
+    },
+    insertRevision(input) {
+      database.prepare(`insert into course_import_revisions (id, owner_id, import_id, parent_revision_id, revision_no, candidates_json, content_hash, created_by, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(input.id, input.ownerId, input.importId, input.parentRevisionId, input.revisionNo, JSON.stringify(input.candidates), input.contentHash, input.createdBy, input.createdAt);
+      const revision = this.findRevision(input.ownerId, input.id);
+      if (!revision) throw new Error('stored course import revision disappeared');
+      return revision;
+    },
+    updateImport(ownerId, id, expectedVersion, update) {
+      const current = this.findImport(ownerId, id);
+      if (!current || current.version !== expectedVersion) return undefined;
+      const result = database.prepare(`update course_imports_v2 set status = ?, current_revision_id = coalesce(?, current_revision_id), schedule_proposal_id = coalesce(?, schedule_proposal_id), failure_code = ?, updated_at = ?, version = version + 1 where id = ? and owner_id = ? and version = ?`).run(
+        update.status, update.currentRevisionId ?? null, update.scheduleProposalId ?? null, update.failureCode ?? null, update.timestamp, id, ownerId, expectedVersion,
+      );
+      if (result.changes !== 1) return undefined;
+      return this.findImport(ownerId, id);
     },
     insertCapabilityRun(input) {
       database.prepare(`insert into external_capability_runs (

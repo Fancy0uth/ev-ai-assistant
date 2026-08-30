@@ -87,6 +87,7 @@ interface TermRow {
 interface CalendarRuleRow {
   id: string;
   term_id: string;
+  course_id: string | null;
   title: string;
   weekday: number;
   start_local_time: string;
@@ -101,6 +102,7 @@ interface CalendarRuleRow {
 interface EventRow {
   id: string;
   calendar_rule_id: string | null;
+  course_id: string | null;
   title: string;
   kind: Event['kind'];
   local_date: string;
@@ -150,6 +152,7 @@ export interface CalendarRepository {
   findTerm(ownerId: string, termId: string): Term | undefined;
   listTerms(ownerId: string): Term[];
   createRule(rule: NewCalendarRule): CalendarRule;
+  findRule(ownerId: string, ruleId: string): CalendarRule | undefined;
   createEvent(event: NewEvent): Event;
   findEvent(ownerId: string, eventId: string): Event | undefined;
   listEventsForDate(ownerId: string, localDate: string): Event[];
@@ -194,6 +197,7 @@ function toRule(row: CalendarRuleRow): CalendarRule {
   return {
     id: row.id,
     termId: row.term_id,
+    courseId: row.course_id,
     title: row.title,
     weekday: row.weekday,
     startLocalTime: row.start_local_time,
@@ -210,6 +214,7 @@ function toEvent(row: EventRow): Event {
   return {
     id: row.id,
     calendarRuleId: row.calendar_rule_id,
+    courseId: row.course_id,
     title: row.title,
     kind: row.kind,
     localDate: row.local_date,
@@ -279,13 +284,13 @@ const termColumns = `
 `;
 
 const ruleColumns = `
-  id, term_id, title, weekday, start_local_time, end_local_time, week_start, week_end,
+  id, term_id, course_id, title, weekday, start_local_time, end_local_time, week_start, week_end,
   week_pattern, is_hard, version
 `;
 
 const eventColumns = `
-  id, calendar_rule_id, title, kind, local_date, start_local_time, end_local_time, is_hard,
-  status, version, created_at, updated_at
+  e.id, e.calendar_rule_id, r.course_id, e.title, e.kind, e.local_date, e.start_local_time, e.end_local_time, e.is_hard,
+  e.status, e.version, e.created_at, e.updated_at
 `;
 
 const timeRequestColumns = `
@@ -306,8 +311,9 @@ export function createCalendarRepository(database: Database.Database): CalendarR
     `select ${timeRequestColumns} from time_requests where id = ? and owner_id = ?`,
   );
   const findEvent = database.prepare(
-    `select ${eventColumns} from events where owner_id = ? and id = ?`,
+    `select ${eventColumns} from events e left join calendar_rules r on r.id = e.calendar_rule_id and r.owner_id = e.owner_id where e.owner_id = ? and e.id = ?`,
   );
+  const findRule = database.prepare(`select ${ruleColumns} from calendar_rules where id = ? and owner_id = ?`);
   const insertTimeRequest = database.prepare(
     `insert into time_requests (
        id, owner_id, source, title, target_date, duration_minutes, priority,
@@ -383,14 +389,15 @@ export function createCalendarRepository(database: Database.Database): CalendarR
       database
         .prepare(
           `insert into calendar_rules (
-             id, owner_id, term_id, title, weekday, start_local_time, end_local_time, week_start,
+             id, owner_id, term_id, course_id, title, weekday, start_local_time, end_local_time, week_start,
              week_end, week_pattern, is_hard, version
-           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           rule.id,
           rule.ownerId,
           rule.termId,
+          rule.courseId ?? null,
           rule.title,
           rule.weekday,
           rule.startLocalTime,
@@ -405,6 +412,11 @@ export function createCalendarRepository(database: Database.Database): CalendarR
         .prepare(`select ${ruleColumns} from calendar_rules where id = ? and owner_id = ?`)
         .get(rule.id, rule.ownerId) as CalendarRuleRow;
       return toRule(row);
+    },
+
+    findRule(ownerId, ruleId) {
+      const row = findRule.get(ruleId, ownerId) as CalendarRuleRow | undefined;
+      return row ? toRule(row) : undefined;
     },
 
     createEvent(event) {
@@ -431,7 +443,7 @@ export function createCalendarRepository(database: Database.Database): CalendarR
           event.updatedAt,
         );
       const row = database
-        .prepare(`select ${eventColumns} from events where id = ? and owner_id = ?`)
+        .prepare(`select ${eventColumns} from events e left join calendar_rules r on r.id = e.calendar_rule_id and r.owner_id = e.owner_id where e.id = ? and e.owner_id = ?`)
         .get(event.id, event.ownerId) as EventRow;
       return toEvent(row);
     },
@@ -445,9 +457,9 @@ export function createCalendarRepository(database: Database.Database): CalendarR
       const rows = database
         .prepare(
           `select ${eventColumns}
-           from events
-           where owner_id = ? and local_date = ?
-           order by start_local_time asc, end_local_time asc, id asc`,
+           from events e left join calendar_rules r on r.id = e.calendar_rule_id and r.owner_id = e.owner_id
+           where e.owner_id = ? and e.local_date = ?
+           order by e.start_local_time asc, e.end_local_time asc, e.id asc`,
         )
         .all(ownerId, localDate) as EventRow[];
       return rows.map(toEvent);

@@ -65,6 +65,7 @@ export const calendarRuleSchema = z
   .object({
     id: z.uuid(),
     termId: z.uuid(),
+    courseId: z.uuid().nullable().optional(),
     title: z.string().min(1).max(200),
     weekday: z.number().int().min(1).max(7),
     startLocalTime: localTimeSchema,
@@ -98,6 +99,7 @@ export const eventSchema = z
   .object({
     id: z.uuid(),
     calendarRuleId: z.uuid().nullable(),
+    courseId: z.uuid().nullable().optional(),
     title: nonBlankTitleSchema,
     kind: eventKindSchema,
     localDate: z.iso.date(),

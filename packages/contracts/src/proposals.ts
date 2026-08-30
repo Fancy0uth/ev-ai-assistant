@@ -26,9 +26,16 @@ export const createEventChangeSchema = z
   })
   .strict();
 
+export const expandCalendarRuleChangeSchema = z.object({
+  operation: z.literal('EXPAND_CALENDAR_RULE'),
+  calendarRuleId: z.uuid(),
+  expectedRuleVersion: z.number().int().positive(),
+}).strict();
+
 export const scheduleProposalChangeSchema = z.discriminatedUnion('operation', [
   createCalendarRuleChangeSchema,
   createEventChangeSchema,
+  expandCalendarRuleChangeSchema,
 ]);
 
 export const proposalChangeSchema = scheduleProposalChangeSchema;

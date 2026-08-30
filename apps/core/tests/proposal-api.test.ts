@@ -168,7 +168,14 @@ describe('versioned schedule proposal API', () => {
     app = await buildApp({ databasePath, logger: false });
     const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
     const token = readSessionToken(setup.headers['set-cookie']);
-    await seedScheduleProposal(rejectedProposalId, '不应进入日程的课程');
+    const ownerId = await seedScheduleProposal(rejectedProposalId, '不应进入日程的课程');
+    const database = openDatabase(databasePath);
+    try {
+      database.pragma('ignore_check_constraints = ON');
+      database.pragma('foreign_keys = OFF');
+      database.prepare(`insert into course_imports_v2 (id, owner_id, term_id, artifact_id, capability_run_id, status, current_revision_id, schedule_proposal_id, confirm_idempotency_key, confirm_request_hash, failure_code, created_at, updated_at, version) values (?, ?, ?, ?, ?, 'SCHEDULE_PROPOSAL_PENDING', null, ?, null, null, null, ?, ?, 1)`)
+        .run('00000000-0000-4000-8000-000000000206', ownerId, termId, '00000000-0000-4000-8000-000000000207', '00000000-0000-4000-8000-000000000208', rejectedProposalId, now, now);
+    } finally { database.close(); }
 
     const rejected = await app.inject({
       method: 'POST',
@@ -180,12 +187,40 @@ describe('versioned schedule proposal API', () => {
     expect(rejected.statusCode).toBe(200);
     expect(rejected.json().data).toMatchObject({ status: 'REJECTED', version: 2 });
 
+    const importDatabase = openDatabase(databasePath);
+    try { expect(importDatabase.prepare('select status from course_imports_v2 where id = ?').get('00000000-0000-4000-8000-000000000206')).toEqual({ status: 'SCHEDULE_REJECTED' }); } finally { importDatabase.close(); }
+
     const day = await app.inject({
       method: 'GET',
       url: '/v1/days/2026-09-07',
       cookies: { ev_session: token },
     });
     expect(day.statusCode).toBe(200);
+    expect(day.json().data.events).toEqual([]);
+
+    const today = await app.inject({
+      method: 'GET',
+      url: '/v1/today?date=2026-09-07',
+      cookies: { ev_session: token },
+    });
+    expect(today.statusCode).toBe(200);
+    expect(today.json().data.events).toEqual([]);
+  });
+
+  it('rejects a mismatched expansion Rule atomically without creating partial Events', async () => {
+    app = await buildApp({ databasePath, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const ownerId = await seedScheduleProposal('00000000-0000-4000-8000-000000000209', '先建立学期');
+    const database = openDatabase(databasePath);
+    try {
+      createProposalRepository(database).create({ id: '00000000-0000-4000-8000-000000000210', ownerId, kind: 'SCHEDULE', status: 'PENDING', source: 'COURSE_IMPORT', title: '规则已变化', changes: [{ operation: 'EXPAND_CALENDAR_RULE', calendarRuleId: '00000000-0000-4000-8000-000000000211', expectedRuleVersion: 1 }], version: 1, createdAt: now, expiresAt: null });
+    } finally { database.close(); }
+    const response = await app.inject({ method: 'POST', url: '/v1/proposals/00000000-0000-4000-8000-000000000210/decision', cookies: { ev_session: token }, headers: { 'idempotency-key': 'v06-mismatched-rule-01' }, payload: { version: 1, decision: 'ACCEPT' } });
+    expect(response.statusCode).toBe(422); expect(response.json().error.code).toBe('PROPOSAL_CANNOT_APPLY');
+    const unchanged = await app.inject({ method: 'GET', url: '/v1/proposals/00000000-0000-4000-8000-000000000210', cookies: { ev_session: token } });
+    expect(unchanged.statusCode).toBe(200); expect(unchanged.json().data).toMatchObject({ status: 'PENDING', version: 1 });
+    const day = await app.inject({ method: 'GET', url: '/v1/days/2026-09-07', cookies: { ev_session: token } });
     expect(day.json().data.events).toEqual([]);
   });
 });

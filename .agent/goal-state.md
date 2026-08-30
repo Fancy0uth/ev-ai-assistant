@@ -10,7 +10,7 @@ M1 / v0.6：课程、课表截图与学习排程闭环。
 
 ## 当前任务
 
-TASK-V6-01 已完成实现与验证，等待主 Agent 提交 `feat(course-import): secure local timetable artifacts`；Git worktree 无法创建 `index.lock`，在该原子提交存在前不得开始 V6-02。
+TASK-V6-02 已完成实现与验证，待创建 `feat(course-import): review timetable candidates before scheduling` 后连续进入 V6-03。
 
 ## 已完成任务
 
