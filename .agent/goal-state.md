@@ -10,13 +10,14 @@ M1 / v0.6：课程、课表截图与学习排程闭环。
 
 ## 当前任务
 
-TASK-V6-01：从 `155b172` 开始实现 bounded raw 课表图片、Owner 私有 artifact、能力披露和 additive migration v19；尚未开始产品代码。
+TASK-V6-01：以产品比较基线 `155b172`、计划执行基线 `d5d4ea5` 开始实现 bounded raw 课表图片、Owner 私有 artifact、能力披露和 additive migration v19；尚未开始产品代码。
 
 ## 已完成任务
 
 - v0.4 Action Scheduling Foundation：工程 PASS。
 - v0.5 Provider Reliability：工程 PASS；关版提交 `155b172`。
 - TASK-V6-00：v0.6 单次 Sol 整版分析与实施契约冻结完成；四个垂直任务已写入独立计划。
+- v0.6 计划与长期任务状态已提交为 `d5d4ea5`；该提交不改变产品运行行为。
 
 ## 下一任务
 
