@@ -47,12 +47,15 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
   const taskInput = page.getByLabel('新任务');
   const areaSelect = page.getByLabel('领域', { exact: true });
   const prioritySelect = page.getByLabel('优先级');
+  const includeInDailyPlanCheckbox = page.getByRole('checkbox', { name: '加入每日计划' });
   const addTaskButton = page.getByRole('button', { name: '添加到今天' });
   await taskInput.focus();
   await page.keyboard.press('Tab');
   await expect(areaSelect).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(prioritySelect).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(includeInDailyPlanCheckbox).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(addTaskButton).toBeFocused();
   await taskInput.fill(taskTitle);

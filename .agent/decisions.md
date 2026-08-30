@@ -217,3 +217,39 @@ V6-01 用 Fastify raw Buffer parser、BFF bounded stream、Node 内建图片 hea
 ### 保留约束
 
 v19 仅追加表、索引、immutable trigger；artifact bytes 不进入 SQLite。Fake registry 继续要求 test 环境、显式开关和 resolved runner-owned data root 三重同时满足。V6-02 负责首次读取 artifact 并在事务外调用 Vision。
+
+## ADR-LT-009：Provider 日配额归属 claim 的上海执行日
+
+### 问题
+
+Capability run 可以先创建、后执行。若配额继续读取创建时持久化的 `local_date`，跨日执行会把 reservation 错算到创建日，并可能错误阻断新一天的调用。
+
+### 采用方案
+
+`claim()` 在同一 SQLite immediate transaction 内根据传入 `now` 计算 Asia/Shanghai 本地执行日；配额查询使用该日期，成功 claim 同时更新 `external_capability_runs.local_date`、reservation、lease 和 RUNNING 状态。Owner、capability、执行日三维继续隔离；未成功 claim 不改日期也不调用 Provider。
+
+### 未采用方案
+
+沿用 run 创建日；在 claim 事务外预先更新日期；增加新的 quota schema 或 migration。
+
+### 采用理由
+
+冻结策略限定的是实际 Provider reservation 的 Owner/local-date ceiling。把日期计算、配额检查和 claim 更新放在同一事务，可避免跨日错账和并发窗口，并复用现有 schema。
+
+### 影响范围
+
+Vision、Public Search、Learning 的共享 capability-run claim 与 quota-exhausted 判定。
+
+### 是否可逆
+
+实现可逆；执行日配额语义为冻结契约。迁移 001..020 不变。
+
+## V0.6 全量 E2E 记录：共享 Owner 下使用互斥的固定学习窗口
+
+### 决定
+
+保留共享单 Owner 与真实 proposal decision，不清理 v0.4 已确认 Event；v0.6 desktop/iPhone 学习窗口分别固定为 16:00–17:00、18:00–19:00，从而与 v0.4 的 12:00–13:00 Event 及彼此明确不重叠。
+
+### 理由与边界
+
+trace 已证明原 12:00–13:00 APPLY 被 Core 正确按冲突拒绝。修复只调整 E2E 输入，不改产品、Fake、validator、runner/config、60 分钟约束、Today 日期、lineage 或严格浏览器断言。后续共享页面同时保留 completed 与 pending proposal 时，以唯一 exact `采用安排` 按钮过滤当前 pending `article.daily-plan-review-card`，并在该 card 内保持 exact summary/button 断言；不使用位置选择器或放宽计数。focused v0.6 1/1、完整 E2E 8/8 均 PASS。

@@ -1,5 +1,6 @@
 import type { CourseImport, CourseImportRevision, ExternalDisclosure, LocalArtifact } from '@ev/contracts';
 import type Database from 'better-sqlite3';
+import { providerUsageLocalDate } from '../providers/provider-policy';
 
 interface ArtifactRow {
   id: string; media_type: LocalArtifact['mediaType']; byte_size: number; width: number; height: number;
@@ -144,11 +145,11 @@ export function createCourseImportRepository(database: Database.Database): Cours
         disclosure_json, disclosure_version, idempotency_key, request_hash, status, lease_token, lease_expires_at,
         deadline_at, policy_version, local_date, reserved_calls, actual_calls, input_chars, output_chars,
         failure_code, app_version, created_at, updated_at, version
-      ) values (?, ?, 'COURSE_SCHEDULE_VISION', 'COURSE_IMPORT_EXTRACT', ?, ?, ?, ?, ?, ?, 'CAPABILITY_DISCLOSURE_V1',
-        null, null, ?, null, null, null, 'CAPABILITY_POLICY_V1', substr(?, 1, 10), 0, 0, 0, 0, ?, ?, ?, ?, 1)`)
+      ) values (?, ?, 'COURSE_SCHEDULE_VISION', 'COURSE_IMPORT_EXTRACT', ?, ?, ?, ?, 'NONE', ?, 'CAPABILITY_DISCLOSURE_V1',
+        null, null, ?, null, null, null, 'CAPABILITY_POLICY_V1', ?, 0, 0, 0, 0, ?, ?, ?, ?, 1)`)
         .run(input.id, input.ownerId, input.resourceId, input.disclosure.providerId, input.disclosure.providerLabel,
-          input.disclosure.adapterKind, input.disclosure.evidenceKind, JSON.stringify(input.disclosure), input.status,
-          input.timestamp, input.status === 'BLOCKED_PROVIDER' ? 'VISION_PROVIDER_NOT_CONFIGURED' : null,
+          input.disclosure.adapterKind, JSON.stringify(input.disclosure), input.status,
+          providerUsageLocalDate(new Date(input.timestamp)), input.status === 'BLOCKED_PROVIDER' ? 'VISION_PROVIDER_NOT_CONFIGURED' : null,
           input.appVersion, input.timestamp, input.timestamp);
     },
   };

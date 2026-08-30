@@ -18,12 +18,20 @@ function u16be(bytes: Uint8Array, offset: number): number {
   return (bytes[offset]! << 8) | bytes[offset + 1]!;
 }
 
+function u16le(bytes: Uint8Array, offset: number): number {
+  return bytes[offset]! | (bytes[offset + 1]! << 8);
+}
+
 function u24le(bytes: Uint8Array, offset: number): number {
   return bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16);
 }
 
 function u32be(bytes: Uint8Array, offset: number): number {
   return ((bytes[offset]! * 2 ** 24) + (bytes[offset + 1]! << 16) + (bytes[offset + 2]! << 8) + bytes[offset + 3]!) >>> 0;
+}
+
+function u32le(bytes: Uint8Array, offset: number): number {
+  return (bytes[offset]! + (bytes[offset + 1]! * 2 ** 8) + (bytes[offset + 2]! * 2 ** 16) + (bytes[offset + 3]! * 2 ** 24)) >>> 0;
 }
 
 function pngDimensions(bytes: Uint8Array): { width: number; height: number } | undefined {
@@ -57,28 +65,40 @@ function jpegDimensions(bytes: Uint8Array): { width: number; height: number } | 
 function webpDimensions(bytes: Uint8Array): { width: number; height: number } | undefined {
   if (!equalAt(bytes, 0, [0x52, 0x49, 0x46, 0x46]) || !equalAt(bytes, 8, [0x57, 0x45, 0x42, 0x50])) return undefined;
   if (bytes.length < 20) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
-  if (equalAt(bytes, 12, [0x56, 0x50, 0x38, 0x58])) {
-    if (bytes.length < 30) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
-    return { width: u24le(bytes, 24) + 1, height: u24le(bytes, 27) + 1 };
-  }
-  if (equalAt(bytes, 12, [0x56, 0x50, 0x38, 0x20])) {
-    if (bytes.length < 33 || !equalAt(bytes, 26, [0x9d, 0x01, 0x2a])) {
+  if (u32le(bytes, 4) !== bytes.length - 8) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+  let offset = 12;
+  let dimensions: { width: number; height: number } | undefined;
+  while (offset < bytes.length) {
+    if (offset + 8 > bytes.length) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+    const chunkSize = u32le(bytes, offset + 4);
+    const payloadOffset = offset + 8;
+    const payloadEnd = payloadOffset + chunkSize;
+    const paddedEnd = payloadEnd + (chunkSize % 2);
+    if (!Number.isSafeInteger(payloadEnd) || paddedEnd > bytes.length) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+    if (chunkSize % 2 === 1 && bytes[payloadEnd] !== 0) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+    if (offset === 12 && equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x58])) {
+      if (chunkSize !== 10) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      dimensions = { width: u24le(bytes, payloadOffset + 4) + 1, height: u24le(bytes, payloadOffset + 7) + 1 };
+    } else if (offset === 12 && equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x20])) {
+      if (chunkSize < 10 || !equalAt(bytes, payloadOffset + 3, [0x9d, 0x01, 0x2a])) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      dimensions = { width: u16le(bytes, payloadOffset + 6) & 0x3fff, height: u16le(bytes, payloadOffset + 8) & 0x3fff };
+    } else if (offset === 12 && equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x4c])) {
+      if (chunkSize < 5 || bytes[payloadOffset] !== 0x2f) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      const first = bytes[payloadOffset + 1]!;
+      const second = bytes[payloadOffset + 2]!;
+      const third = bytes[payloadOffset + 3]!;
+      const fourth = bytes[payloadOffset + 4]!;
+      dimensions = {
+        width: 1 + first + ((second & 0x3f) << 8),
+        height: 1 + (second >> 6) + (third << 2) + ((fourth & 0x0f) << 10),
+      };
+    } else if (offset === 12) {
       throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
     }
-    return { width: u16be(bytes, 29) & 0x3fff, height: u16be(bytes, 31) & 0x3fff };
+    offset = paddedEnd;
   }
-  if (equalAt(bytes, 12, [0x56, 0x50, 0x38, 0x4c])) {
-    if (bytes.length < 25 || bytes[20] !== 0x2f) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
-    const first = bytes[21]!;
-    const second = bytes[22]!;
-    const third = bytes[23]!;
-    const fourth = bytes[24]!;
-    return {
-      width: 1 + first + ((second & 0x3f) << 8),
-      height: 1 + (second >> 6) + (third << 2) + ((fourth & 0x0f) << 10),
-    };
-  }
-  throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+  if (offset !== bytes.length || !dimensions) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+  return dimensions;
 }
 
 export function readImageMetadata(

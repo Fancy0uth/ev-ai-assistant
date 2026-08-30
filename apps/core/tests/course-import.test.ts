@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
+import { createCapabilityRunRepository } from '../src/modules/providers/capability-run-repository';
 import type { VisionCapability } from '../src/modules/providers/capabilities';
 import { openDatabase } from '../src/storage/database';
 
@@ -18,6 +19,22 @@ function readSessionToken(setCookieHeader: string | string[] | undefined): strin
   const match = header?.match(/(?:^|;\s*)ev_session=([^;]+)/);
   if (!match?.[1]) throw new Error('ev_session cookie was not set');
   return match[1];
+}
+
+function webpChunk(
+  fourCc: 'VP8X' | 'VP8 ' | 'VP8L',
+  payload: readonly number[],
+  options: { declaredChunkSize?: number; declaredRiffSize?: number } = {},
+): Buffer {
+  const paddedLength = payload.length + (payload.length % 2);
+  const bytes = Buffer.alloc(20 + paddedLength);
+  bytes.write('RIFF', 0, 'ascii');
+  bytes.writeUInt32LE(options.declaredRiffSize ?? bytes.length - 8, 4);
+  bytes.write('WEBP', 8, 'ascii');
+  bytes.write(fourCc, 12, 'ascii');
+  bytes.writeUInt32LE(options.declaredChunkSize ?? payload.length, 16);
+  Buffer.from(payload).copy(bytes, 20);
+  return bytes;
 }
 
 describe('v0.6 local course artifacts', () => {
@@ -98,6 +115,211 @@ describe('v0.6 local course artifacts', () => {
     } finally {
       database.close();
     }
+  });
+
+  it('rejects malformed WebP RIFF and VP8X/VP8/VP8L chunks before persistence', async () => {
+    app = await buildApp({ databasePath, artifactRoot: join(directory, 'artifacts'), logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const validVp8x = webpChunk('VP8X', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const malformed = [
+      webpChunk('VP8X', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], { declaredRiffSize: 0 }),
+      webpChunk('VP8X', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], { declaredChunkSize: 1 }),
+      webpChunk('VP8 ', [0, 0, 0, 0, 0, 0, 0x9d, 0x01, 0x2a, 0, 1, 0, 1], { declaredChunkSize: 1 }),
+      webpChunk('VP8L', [0x2f, 0, 0, 0, 0], { declaredChunkSize: 1 }),
+    ];
+
+    const valid = await app.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/webp' }, payload: validVp8x,
+    });
+    const rejected = await Promise.all(malformed.map((payload) => app!.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/webp' }, payload,
+    })));
+
+    expect(valid.statusCode).toBe(201);
+    expect(valid.json().data.artifact).toMatchObject({ mediaType: 'image/webp', width: 1, height: 1 });
+    expect(rejected.map((response) => response.statusCode)).toEqual([422, 422, 422, 422]);
+    expect(rejected.map((response) => response.json().error.code)).toEqual([
+      'IMAGE_DIMENSIONS_INVALID', 'IMAGE_DIMENSIONS_INVALID', 'IMAGE_DIMENSIONS_INVALID', 'IMAGE_DIMENSIONS_INVALID',
+    ]);
+    const database = openDatabase(databasePath);
+    try {
+      expect(database.prepare('select count(*) as count from local_artifacts').get()).toEqual({ count: 1 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('atomically claims Vision extraction and replays only the same key, resource, and payload', async () => {
+    let providerCalls = 0;
+    const vision: VisionCapability = {
+      descriptor: { providerId: 'controlled-vision', providerLabel: '受控 Vision', adapterKind: 'PRODUCTION_ADAPTER' },
+      async extractCourseSchedule() {
+        providerCalls += 1;
+        return {
+          candidates: [{
+            title: '事务课程', location: null, weekday: 1, startLocalTime: '08:00', endLocalTime: '09:00',
+            weekStart: 1, weekEnd: 1, weekPattern: 'EVERY_WEEK',
+            confidence: { overall: 1, fields: { title: 1, location: 1, weekday: 1, startLocalTime: 1, endLocalTime: 1, weekStart: 1, weekEnd: 1, weekPattern: 1 } },
+          }],
+        };
+      },
+    };
+    app = await buildApp({ databasePath, artifactRoot: join(directory, 'artifacts'), visionCapability: vision, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const term = await app.inject({ method: 'POST', url: '/v1/terms', cookies: { ev_session: token }, payload: { title: '2026 秋季学期', timezone: 'Asia/Shanghai', weekOneMonday: '2026-09-07' } });
+    const uploaded = await app.inject({ method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token }, headers: { 'content-type': 'image/png' }, payload: validPng });
+    const firstImport = await app.inject({ method: 'POST', url: '/v1/course-imports', cookies: { ev_session: token }, payload: { termId: term.json().data.id, artifactId: uploaded.json().data.artifact.id } });
+    const collisionImport = await app.inject({ method: 'POST', url: '/v1/course-imports', cookies: { ev_session: token }, payload: { termId: term.json().data.id, artifactId: uploaded.json().data.artifact.id } });
+    const command = { expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' as const };
+    const key = 'v06-vision-atomic-replay-01';
+
+    const first = await app.inject({ method: 'POST', url: `/v1/course-imports/${firstImport.json().data.import.id}/extract`, cookies: { ev_session: token }, headers: { 'idempotency-key': key }, payload: command });
+    const replay = await app.inject({ method: 'POST', url: `/v1/course-imports/${firstImport.json().data.import.id}/extract`, cookies: { ev_session: token }, headers: { 'idempotency-key': key }, payload: command });
+    const changedPayload = await app.inject({ method: 'POST', url: `/v1/course-imports/${firstImport.json().data.import.id}/extract`, cookies: { ev_session: token }, headers: { 'idempotency-key': key }, payload: { ...command, expectedVersion: 2 } });
+    const changedResource = await app.inject({ method: 'POST', url: `/v1/course-imports/${collisionImport.json().data.import.id}/extract`, cookies: { ev_session: token }, headers: { 'idempotency-key': key }, payload: command });
+
+    expect(first.statusCode).toBe(202);
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toEqual(first.json());
+    expect(changedPayload.statusCode).toBe(409);
+    expect(changedPayload.json().error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect(changedResource.statusCode).toBe(409);
+    expect(changedResource.json().error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect(providerCalls).toBe(1);
+    const database = openDatabase(databasePath);
+    try {
+      expect(database.prepare('select status, version from course_imports_v2 where id = ?').get(collisionImport.json().data.import.id))
+        .toEqual({ status: 'AWAITING_DISCLOSURE', version: 1 });
+      expect(database.prepare('select idempotency_key, request_hash, status from external_capability_runs where id = ?').get(collisionImport.json().data.import.capabilityRunId))
+        .toEqual({ idempotency_key: null, request_hash: null, status: 'AWAITING_DISCLOSURE' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rejects the twenty-first Vision reservation before calling the adapter', async () => {
+    let providerCalls = 0;
+    const vision: VisionCapability = {
+      descriptor: { providerId: 'controlled-vision', providerLabel: '受控 Vision', adapterKind: 'PRODUCTION_ADAPTER' },
+      async extractCourseSchedule() {
+        providerCalls += 1;
+        return { candidates: [] };
+      },
+    };
+    app = await buildApp({ databasePath, artifactRoot: join(directory, 'artifacts'), visionCapability: vision, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const term = await app.inject({ method: 'POST', url: '/v1/terms', cookies: { ev_session: token }, payload: { title: '2026 秋季学期', timezone: 'Asia/Shanghai', weekOneMonday: '2026-09-07' } });
+    const uploaded = await app.inject({ method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token }, headers: { 'content-type': 'image/png' }, payload: validPng });
+    const imports = [] as Array<{ id: string; capabilityRunId: string }>;
+    for (let index = 0; index < 21; index += 1) {
+      const created = await app.inject({ method: 'POST', url: '/v1/course-imports', cookies: { ev_session: token }, payload: { termId: term.json().data.id, artifactId: uploaded.json().data.artifact.id } });
+      imports.push(created.json().data.import);
+    }
+    const database = openDatabase(databasePath);
+    try {
+      const owner = database.prepare('select id from owners').get() as { id: string };
+      const runs = createCapabilityRunRepository(database);
+      for (let index = 0; index < 20; index += 1) {
+        const imported = imports[index]!;
+        expect(runs.claim(owner.id, imported.capabilityRunId, `seed-vision-quota-${index}`, `${index}`.padStart(64, '0'), new Date().toISOString())).toBe(true);
+        const running = runs.findByOwnerAndId(owner.id, imported.capabilityRunId);
+        expect(runs.complete(owner.id, imported.capabilityRunId, {
+          leaseToken: running!.leaseToken!, status: 'SUCCEEDED', actualCalls: 1, inputChars: 0, outputChars: 1,
+          failureCode: null, evidenceKind: 'REAL_PROVIDER', now: new Date().toISOString(),
+        })).toBe(true);
+      }
+    } finally {
+      database.close();
+    }
+
+    const target = imports[20]!;
+    const rejected = await app.inject({
+      method: 'POST', url: `/v1/course-imports/${target.id}/extract`, cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v06-vision-quota-twenty-one' }, payload: { expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' },
+    });
+    expect(rejected.statusCode).toBe(429);
+    expect(rejected.json().error.code).toBe('CAPABILITY_PROVIDER_QUOTA_EXCEEDED');
+    expect(providerCalls).toBe(0);
+    const after = openDatabase(databasePath);
+    try {
+      expect(after.prepare('select status, version from course_imports_v2 where id = ?').get(target.id))
+        .toEqual({ status: 'AWAITING_DISCLOSURE', version: 1 });
+      expect(after.prepare('select status, reserved_calls, actual_calls, evidence_kind from external_capability_runs where id = ?').get(target.capabilityRunId))
+        .toEqual({ status: 'AWAITING_DISCLOSURE', reserved_calls: 0, actual_calls: 0, evidence_kind: 'NONE' });
+    } finally {
+      after.close();
+    }
+  });
+
+  it('atomically recovers an expired Vision extraction without calling or replaying the Provider', async () => {
+    let providerCalls = 0;
+    const vision: VisionCapability = {
+      descriptor: { providerId: 'controlled-vision', providerLabel: '受控 Vision', adapterKind: 'PRODUCTION_ADAPTER' },
+      async extractCourseSchedule() {
+        providerCalls += 1;
+        return { candidates: [] };
+      },
+    };
+    app = await buildApp({ databasePath, artifactRoot: join(directory, 'artifacts'), visionCapability: vision, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const term = await app.inject({
+      method: 'POST', url: '/v1/terms', cookies: { ev_session: token },
+      payload: { title: '2026 秋季学期', timezone: 'Asia/Shanghai', weekOneMonday: '2026-09-07' },
+    });
+    const uploaded = await app.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/png' }, payload: validPng,
+    });
+    const createImport = async () => (await app!.inject({
+      method: 'POST', url: '/v1/course-imports', cookies: { ev_session: token },
+      payload: { termId: term.json().data.id, artifactId: uploaded.json().data.artifact.id },
+    })).json().data.import as { id: string; capabilityRunId: string };
+    const staleImport = await createImport();
+    const alreadyTerminalImport = await createImport();
+    const claimAt = '2026-08-31T01:00:00.000Z';
+    const sweepAt = '2026-08-31T01:00:36.000Z';
+    const extractionInput = { expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' as const };
+    const extractionKey = 'v06-stale-vision-extraction-01';
+    const extractionHash = createHash('sha256')
+      .update(JSON.stringify({ importId: staleImport.id, ...extractionInput }))
+      .digest('hex');
+    const database = openDatabase(databasePath);
+    try {
+      const owner = database.prepare('select id from owners').get() as { id: string };
+      const runs = createCapabilityRunRepository(database);
+      expect(runs.claim(owner.id, staleImport.capabilityRunId, extractionKey, extractionHash, claimAt)).toBe(true);
+      expect(runs.claim(owner.id, alreadyTerminalImport.capabilityRunId, 'v06-stale-vision-terminal-01', 'e'.repeat(64), claimAt)).toBe(true);
+      expect(database.prepare(`update course_imports_v2 set status = 'EXTRACTING', updated_at = ?, version = version + 1
+        where id = ? and owner_id = ? and capability_run_id = ? and status = 'AWAITING_DISCLOSURE'`)
+        .run(claimAt, staleImport.id, owner.id, staleImport.capabilityRunId).changes).toBe(1);
+      expect(database.prepare(`update course_imports_v2 set status = 'FAILED', failure_code = 'PREEXISTING_FAILURE', updated_at = ?, version = version + 1
+        where id = ? and owner_id = ? and capability_run_id = ? and status = 'AWAITING_DISCLOSURE'`)
+        .run(claimAt, alreadyTerminalImport.id, owner.id, alreadyTerminalImport.capabilityRunId).changes).toBe(1);
+
+      expect(runs.sweepExpired(sweepAt)).toBe(2);
+      expect(database.prepare('select status, failure_code, updated_at, version from course_imports_v2 where id = ?').get(staleImport.id))
+        .toEqual({ status: 'FAILED', failure_code: 'CAPABILITY_EXECUTION_STALE', updated_at: sweepAt, version: 3 });
+      expect(database.prepare('select status, failure_code, reserved_calls, actual_calls, evidence_kind from external_capability_runs where id = ?').get(staleImport.capabilityRunId))
+        .toEqual({ status: 'FAILED', failure_code: 'CAPABILITY_EXECUTION_STALE', reserved_calls: 1, actual_calls: 1, evidence_kind: 'NONE' });
+      expect(database.prepare('select status, failure_code, updated_at, version from course_imports_v2 where id = ?').get(alreadyTerminalImport.id))
+        .toEqual({ status: 'FAILED', failure_code: 'PREEXISTING_FAILURE', updated_at: claimAt, version: 2 });
+    } finally {
+      database.close();
+    }
+
+    const replay = await app.inject({
+      method: 'POST', url: `/v1/course-imports/${staleImport.id}/extract`, cookies: { ev_session: token },
+      headers: { 'idempotency-key': extractionKey }, payload: extractionInput,
+    });
+    expect(replay.statusCode).toBe(422);
+    expect(replay.json().error.code).toBe('CAPABILITY_EXECUTION_STALE');
+    expect(providerCalls).toBe(0);
   });
 
   it('keeps a 100% confidence Vision result in REVIEW_REQUIRED until the Owner confirms a saved revision', async () => {

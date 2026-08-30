@@ -212,6 +212,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     contextService: dailyPlanningContextService,
     repository: dailyPlanRepository,
     newId: () => crypto.randomUUID(),
+    ...(options.providerReliabilityNow ? { now: options.providerReliabilityNow } : {}),
   });
   const dailyPlanReviewService = createDailyPlanReviewService({
     repository: dailyPlanRepository,

@@ -1,49 +1,61 @@
-# TASK-V6-04：引用学习建议、排程与 0.6.0（待主 Agent 原子提交）
+# TASK-V0.6-FULL-MATRIX-REPAIR：主 Agent 全矩阵 PASS，等待 Sol 复审
 
 ## 当前目标
 
-V6-04 已完成实现、TDD、Sol 身份修复与冻结验证矩阵；等待主 Agent 创建指定原子提交 `feat(learning): schedule cited study actions`。不得在此工作树执行 `git add` 或 `git commit`。
+Core/Web/root 单测矩阵已 GREEN。v0.6 使用互斥固定学习窗口消除了共享 Event 冲突；pending proposal card 以其唯一 exact `采用安排` 按钮作为业务锚点，严格 card 内 summary/button 断言消除了历史 proposal 摘要歧义。主 Agent 已独立完成根测试、类型检查、lint、生产 build 与完整 E2E 8/8；迁移、不可变 FAIL review、版本、凭据字面量和生成文件检查均通过。当前只等待提交修复并由 Sol 执行整版复审。
 
-## 执行基线
+## 本轮根因与最小修复
 
-- 产品比较 BASE：`155b172de91a62feb2762469536555f9a6b2b025`
-- 运行时代码 BASE：`d5d4ea5`
-- 直接前置：V6-01 `8ee52e1`、V6-02 `4b4e218`、V6-03 `b99fdce`。
-- 固定计划：`docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md` 的 V6-04。
+- `buildApp` 的 `providerReliabilityNow` 已用于 execution/idempotency/daily planning service，但没有传给 preflight service，导致测试 preflight 使用真实 2026-08-31 时间，而 recovery sweep 使用固定 2026-08-24 时间。仅在 option 存在时把同一 `now` 注入 `createDailyPlanPreflightService`；生产默认仍使用真实 `new Date()`。
+- `database.test.ts` 的当前迁移数和两个 frozen ordered list 停在 v18；精确更新到 v19 `add_v06_learning_schedule_loop`，未弱化顺序断言。
+- 三个 v0.5 测试把当前 app version 硬编码为 0.5.0；改为从 `@ev/contracts` 引用当前 `APP_VERSION`。
+- 两个 Web CSS 测试原先只截取最后一个 42rem media block；改为在测试内收集全部完整 42rem block，selectors/断言和产品 CSS 不变。
+- 三个 Playwright config 动态 import 测试各使用有限的 15 秒单项 timeout；断言和生产 Playwright config 不变。
+- Tasks 编辑保存测试原先仅等待第三次 fetch，早于 reload 后 focus effect 稳定提交；保留精确 `toHaveFocus`，仅用默认 `waitFor` 等待该真实行为。
+- 保存后任务离开筛选页的 heading fallback 测试具有相同时序；同样只等待精确 heading focus，取消编辑的同步 focus 断言保持不变。
+- 未修改 recovery service、v17 trigger、迁移 SQL、Provider adapter、产品合同、Web 产品 CSS/组件或 Playwright 生产配置。
 
-## 已实现闭环
-
-- Citation 在生成 LearningAdvice 前重新 fetch 并校验 immutable hash；变更或无法校验时 fail closed。Search 未配置时保持 `BLOCKED_PROVIDER`；DeepSeek 文本建议仅在该 Owner 的非敏感凭据 metadata 已配置后进入 disclosure，测试不打开真实 socket。
-- 生产默认使用现有 `providerCredentialService.withApiKey` 在 claim transaction 提交后临时创建 text-only DeepSeek adapter；key 不进入 payload、SQLite、response 或 observer，SecretStore/adapter/CredentialNotConfigured 均稳定映射 503。显式 `learningAdviceCapability` TEST_FAKE 仍优先且受三重门控制。
-- capability evidence 仅由实际 terminal success 产生：production Vision/Search/Learning 的 preflight 为 `NONE`，真实 adapter 成功才 `REAL_PROVIDER`，TEST_FAKE 成功为 `AUTOMATED_FAKE`；失败不升级证据。Learning 的 CredentialNotConfigured/SecretStore/factory.create 为 0 calls，进入 generate 后失败为 1；Vision 前置读取失败为 0、strict provider output failure 为 1。
-- 严格 `CITED_LEARNING_ADVICE_V1` 仅创建 LEARNING Proposal；ACCEPT 单一 SQLite transaction 创建 course-linked Learning Action、citation lineage 与 ACTIVE TimeRequest，REJECT、重放、并发、跨 Owner 和失败回滚均不产生部分事实。
-- 既有 Daily Plan 消费 TimeRequest，Today 以既有 Action/TimeRequest lineage 只读聚合 `courseId`；未改 `events` schema 或 migration v19。
-- Course detail、Provider settings 与 Today Web 显示正确的 BLOCKED/Fake 状态和 course/action lineage；E2E 使用 runner-owned 临时目录并保持三重 Fake 门。
-- Sol 返回 Terra 后，V6 E2E 从 Core response 捕获并校验 `courseId → actionId → timeRequestId → scheduledEventId` UUID lineage：desktop 后同名 Action/Event 各 1，iPhone 后各 2，实际 ID 集合与两轮 response 捕获集合完全一致。
-- 所有 workspace package、锁文件、`APP_VERSION`、health/run metadata 与 CHANGELOG 对齐 `0.6.0`；旧 migration 历史 app_version 不重写。
-
-## GREEN 命令
+## RED / GREEN
 
 ```powershell
-npm test --workspace @ev/contracts -- tests/courses.test.ts tests/calendar-proposals.test.ts tests/providers.test.ts
-# PASS: 3 files / 25 tests
-npm test --workspace @ev/core -- tests/course-import.test.ts tests/calendar-repository.test.ts tests/learning.test.ts tests/public-resource-fetcher.test.ts tests/proposal-api.test.ts tests/today.test.ts tests/migrations.test.ts tests/v0.5-reliability-storage.test.ts tests/v0.6-capability-gate.test.ts
-# PASS: 9 files / 43 tests
-npm test --workspace @ev/web -- tests/core-client.test.ts tests/core-bff-idempotency.test.ts tests/schedule-workspace.test.tsx tests/learning-workspace.test.tsx tests/course-detail-workspace.test.tsx tests/provider-settings.test.tsx tests/today-dashboard.test.tsx
-# PASS: 7 files / 47 tests
-npm run typecheck
-# PASS: 4 workspaces
-npx eslint [V6-04 focused files and apps/web/e2e/v0.6-learning-loop.spec.ts]
+npm test --workspace @ev/core -- tests/v0.5-recovery-sweeper.test.ts
+# RED: 2 failed / 3 passed
+# GREEN: 5 passed / 5
+
+npm test --workspace @ev/core -- tests/database.test.ts tests/daily-planning-service.test.ts tests/v0.5-provider-lease.test.ts tests/v0.5-reliability-repository.test.ts tests/v0.5-recovery-sweeper.test.ts
+# PASS: 5 files / 24 tests
+
+npm test --workspace @ev/core
+# PASS: 45 files / 297 tests
+
+npm run typecheck --workspace @ev/core
+npx eslint apps/core/src/app.ts apps/core/tests/database.test.ts apps/core/tests/daily-planning-service.test.ts apps/core/tests/v0.5-provider-lease.test.ts apps/core/tests/v0.5-reliability-repository.test.ts
 # PASS
-npm run build --workspace @ev/web
+
+npm test --workspace @ev/web -- tests/daily-plan-workspace.test.tsx tests/v0.4-scheduling-workspaces.test.tsx tests/playwright-config.test.ts
+# RED: 2 failed / 61 passed；首轮取样修正 1 failed / 62 passed
+# GREEN: 3 files / 63 tests
+
+npm test --workspace @ev/web
+# PASS: 21 files / 239 tests
+
+npm run typecheck --workspace @ev/web
+npx eslint apps/web/tests/daily-plan-workspace.test.tsx apps/web/tests/v0.4-scheduling-workspaces.test.tsx apps/web/tests/playwright-config.test.ts
 # PASS
-npm run test:e2e -- e2e/v0.6-learning-loop.spec.ts
-# PASS: 1/1
-git diff --check
-git diff --exit-code -- apps/core/src/storage/migrations.ts
-# PASS (v19 and migrations.ts unchanged)
+
+npm test --workspace @ev/web -- tests/tasks-workspace.test.tsx -t "edits a task with its current version and returns focus to the edit control"
+# PASS: 连续三次，每次 1/1
+
+npm test --workspace @ev/web -- tests/tasks-workspace.test.tsx
+# PASS: 43/43
+
+npm test --workspace @ev/web -- tests/tasks-workspace.test.tsx -t "edits a task with its current version and returns focus to the edit control|moves focus to the stable Tasks heading when a saved task disappears from the filtered page"
+# PASS: 连续三次，每次 2/2
+
+npx eslint apps/web/tests/tasks-workspace.test.tsx
+# PASS
 ```
 
-## 交接记录
+## 根单测矩阵状态
 
-P0=0、P1=0。完整逐项断言映射见 `.agent/reports/v0.6-v6-04.md`；Sol 升级包与返回决策保留在 `.agent/reports/v0.6-v6-04-sol-upgrade.md`、`.agent/reports/v0.6-v6-04-sol-escalation-decision.md`。真实 Vision/Search/DeepSeek 成功 smoke 仍为 `NOT RUN — APPROVAL REQUIRED`。没有真实 Provider、socket、真实凭据、依赖安装、用户 `EV_DATA_DIR`、Git staging 或提交操作。主 Agent 提交 V6-04 后，仍需按冻结流程进行一次整版 Sol 里程碑审查。
+主 Agent 最终独立验证：`npm test` 中 legacy 5/5、Core 297/297、Web 239/239、Contracts 77/77、Domain 7/7 全部通过；`npm run typecheck`、`npm run build`、完整 `npm run test:e2e` 8/8 均真实 exit 0。`npm run lint` 为 0 error、4 个未改动 v0.5 测试的既有 warning。`git diff --check`、两份新报告行尾检查、migration/immutable review zero-diff、5 个 tracked package version=0.6.0、生产源码常见凭据字面量扫描和 `next-env.d.ts` 基线检查全部通过。Git 未暂存、未提交；真实 Provider/network 未运行。

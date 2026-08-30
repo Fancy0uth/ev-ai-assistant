@@ -18,6 +18,85 @@ export const PROVIDER_POLICY = {
   maxCompletionTokens: 2_000,
 } as const;
 
+export const CAPABILITY_POLICY = {
+  maxCallsPerOwnerDay: 20,
+  leaseGraceMs: 5_000,
+  vision: {
+    maxInputBytes: 5_000_000,
+    maxOutputChars: 100_000,
+    totalTimeoutMs: 30_000,
+  },
+  publicSearch: {
+    maxInputChars: 300,
+    maxOutputChars: 20_000,
+    totalTimeoutMs: 15_000,
+  },
+  learningAdvice: {
+    maxInputChars: 20_000,
+    maxOutputChars: 8_000,
+    totalTimeoutMs: 15_000,
+  },
+} as const;
+
+export type CapabilityExecutionFailure =
+  | 'CAPABILITY_INPUT_LIMIT_EXCEEDED'
+  | 'CAPABILITY_OUTPUT_LIMIT_EXCEEDED'
+  | 'CAPABILITY_OUTPUT_INVALID'
+  | 'CAPABILITY_EXECUTION_TIMEOUT'
+  | 'CAPABILITY_PROVIDER_UNAVAILABLE';
+
+export class CapabilityExecutionError extends Error {
+  constructor(
+    readonly code: CapabilityExecutionFailure,
+    readonly providerCallStarted: boolean,
+    readonly outputChars = 0,
+  ) {
+    super(code);
+    this.name = 'CapabilityExecutionError';
+  }
+}
+
+export async function executeCapabilityAdapter<T>(input: {
+  inputSize: number;
+  maxInputSize: number;
+  maxOutputChars: number;
+  timeoutMs: number;
+  invoke: () => Promise<T>;
+}): Promise<{ output: T; outputChars: number }> {
+  if (!Number.isSafeInteger(input.inputSize) || input.inputSize < 0 || input.inputSize > input.maxInputSize) {
+    throw new CapabilityExecutionError('CAPABILITY_INPUT_LIMIT_EXCEEDED', false);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let providerCallStarted = false;
+  try {
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new CapabilityExecutionError('CAPABILITY_EXECUTION_TIMEOUT', true)), input.timeoutMs);
+    });
+    providerCallStarted = true;
+    const output = await Promise.race([Promise.resolve().then(input.invoke), timeout]);
+    let serialized: string | undefined;
+    try {
+      serialized = JSON.stringify(output);
+    } catch {
+      throw new CapabilityExecutionError('CAPABILITY_OUTPUT_INVALID', true);
+    }
+    if (typeof serialized !== 'string') throw new CapabilityExecutionError('CAPABILITY_OUTPUT_INVALID', true);
+    if (serialized.length > input.maxOutputChars) {
+      throw new CapabilityExecutionError(
+        'CAPABILITY_OUTPUT_LIMIT_EXCEEDED',
+        true,
+        Math.min(serialized.length, 100_000),
+      );
+    }
+    return { output, outputChars: serialized.length };
+  } catch (error) {
+    if (error instanceof CapabilityExecutionError) throw error;
+    throw new CapabilityExecutionError('CAPABILITY_PROVIDER_UNAVAILABLE', providerCallStarted);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 const shanghaiDateFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai',
   year: 'numeric',

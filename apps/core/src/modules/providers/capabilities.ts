@@ -8,6 +8,7 @@ import type {
 
 export interface VisionCapability {
   readonly descriptor: CapabilityAdapterDescriptor;
+  /** HTTP implementations must bound transport bytes before decoding; Core also bounds the returned object and total await. */
   extractCourseSchedule(input: {
     schemaVersion: 'COURSE_SCHEDULE_EXTRACTION_V1';
     image: Readonly<Uint8Array>;
@@ -18,11 +19,13 @@ export interface VisionCapability {
 
 export interface PublicSearchCapability {
   readonly descriptor: CapabilityAdapterDescriptor;
+  /** HTTP implementations must bound transport bytes before decoding; Core also bounds the returned object and total await. */
   search(input: { query: string; maxResults: 5 }): Promise<unknown>;
 }
 
 export interface LearningAdviceCapability {
   readonly descriptor: CapabilityAdapterDescriptor;
+  /** HTTP implementations must bound transport bytes before decoding; Core also bounds the returned object and total await. */
   generate(input: CitedLearningAdviceInput): Promise<unknown>;
 }
 

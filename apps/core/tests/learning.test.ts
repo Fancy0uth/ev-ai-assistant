@@ -3,12 +3,13 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app';
 import { createCalendarRepository } from '../src/modules/calendar/repository';
 import { createPublicResourceFetcher } from '../src/modules/learning/public-resource-fetcher';
 import { createDeepSeekLearningAdviceCapability } from '../src/modules/learning/deepseek-learning-advice';
 import type { LearningAdviceCapability, LearningAdviceCapabilityFactory, PublicSearchCapability } from '../src/modules/providers/capabilities';
+import { createCapabilityRunRepository } from '../src/modules/providers/capability-run-repository';
 import type { SecretStorePort } from '../src/modules/providers/secret-store';
 import { openDatabase } from '../src/storage/database';
 
@@ -39,9 +40,9 @@ describe('local course profiles and attributed resources', () => {
         request = { url, body: JSON.parse(init.body) as Record<string, unknown> };
         return {
           status: 200,
-          async json() {
-            return { choices: [{ message: { content: JSON.stringify({ schemaVersion: 'CITED_LEARNING_ADVICE_V1', title: '复习梯度下降', rationale: '从讲义开始。', citationIds: ['00000000-0000-4000-8000-000000000901'], durationMinutes: 45, priority: 'MEDIUM' }) } }] };
-          },
+          body: (async function* () {
+            yield Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ schemaVersion: 'CITED_LEARNING_ADVICE_V1', title: '复习梯度下降', rationale: '从讲义开始。', citationIds: ['00000000-0000-4000-8000-000000000901'], durationMinutes: 45, priority: 'MEDIUM' }) } }] }));
+          })(),
         };
       },
     });
@@ -54,6 +55,201 @@ describe('local course profiles and attributed resources', () => {
     expect(request?.body).toMatchObject({ stream: false, response_format: { type: 'json_object' } });
     expect(request?.body).not.toHaveProperty('tools');
     expect(request?.body).not.toHaveProperty('images');
+  });
+
+  it('rejects an oversized DeepSeek response body before JSON parsing', async () => {
+    let jsonCalls = 0;
+    let bodyReads = 0;
+    const adapter = createDeepSeekLearningAdviceCapability({
+      apiKey: 'test-only-key',
+      fetch: async () => ({
+        status: 200,
+        body: (async function* () {
+          bodyReads += 1;
+          yield Buffer.alloc(40_000, 0x20);
+        })(),
+        async json() {
+          jsonCalls += 1;
+          return { choices: [{ message: { content: JSON.stringify({ schemaVersion: 'CITED_LEARNING_ADVICE_V1', title: '不应解析', rationale: '不应解析', citationIds: ['00000000-0000-4000-8000-000000000901'], durationMinutes: 45, priority: 'MEDIUM' }) } }] };
+        },
+      }),
+    });
+
+    await expect(adapter.generate({
+      schemaVersion: 'CITED_LEARNING_ADVICE_V1', course: { id: '00000000-0000-4000-8000-000000000900', title: '机器学习', stage: 'PREPARING' }, objective: '理解梯度下降',
+      materials: [{ citationId: '00000000-0000-4000-8000-000000000901', title: '梯度讲义', publisher: 'example.edu', url: 'https://example.edu/gradient', contentHash: 'a'.repeat(64), untrustedText: '课程材料' }],
+    })).rejects.toMatchObject({ code: 'LEARNING_PROVIDER_UNAVAILABLE' });
+    expect(bodyReads).toBe(1);
+    expect(jsonCalls).toBe(0);
+  });
+
+  it('terminates a hanging Public Search adapter at the frozen deadline', async () => {
+    let releaseSearch: ((value: unknown) => void) | undefined;
+    const publicSearch: PublicSearchCapability = {
+      descriptor: { providerId: 'controlled-search', providerLabel: '受控 Search', adapterKind: 'PRODUCTION_ADAPTER' },
+      async search() {
+        return new Promise((resolve) => { releaseSearch = resolve; });
+      },
+    };
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'), logger: false, publicSearchCapability: publicSearch,
+      publicResourceFetcher: createPublicResourceFetcher({
+        resolveAll: async () => [{ address: '93.184.216.34', family: 4 as const }],
+        transport: async () => ({ statusCode: 200, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: (async function* () { yield Buffer.from('safe'); })() }),
+      }),
+    });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: { username: '超时主人', password: 'correct horse battery staple' } });
+    const token = tokenFrom(setup.headers['set-cookie']);
+    const term = await app.inject({ method: 'POST', url: '/v1/terms', cookies: { ev_session: token }, payload: { title: '2026 秋季', timezone: 'Asia/Shanghai', weekOneMonday: '2026-09-07' } });
+    const course = await app.inject({ method: 'POST', url: '/v1/courses', cookies: { ev_session: token }, payload: { termId: term.json().data.id, title: '超时课程' } });
+    const created = await app.inject({ method: 'POST', url: `/v1/courses/${course.json().data.id}/resource-searches`, cookies: { ev_session: token }, payload: { query: '超时边界' } });
+    vi.useFakeTimers();
+    let responseAtDeadline: Awaited<ReturnType<FastifyInstance['inject']>> | undefined;
+    const execution = app.inject({
+      method: 'POST', url: `/v1/resource-searches/${created.json().data.run.id}/execute`, cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v06-search-timeout-deadline-01' }, payload: { expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' },
+    }).then((response) => { responseAtDeadline = response; return response; });
+    for (let index = 0; index < 5; index += 1) await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(15_001);
+    for (let index = 0; index < 5; index += 1) await Promise.resolve();
+    const settledAtDeadline = responseAtDeadline;
+    releaseSearch?.({ results: [{ title: '延迟资料', url: 'https://example.edu/late' }] });
+    vi.useRealTimers();
+    await execution;
+
+    expect(settledAtDeadline?.statusCode).toBe(503);
+    expect(settledAtDeadline?.json().error.code).toBe('SEARCH_PROVIDER_UNAVAILABLE');
+    const database = openDatabase(join(directory, 'app.sqlite'));
+    try {
+      expect(database.prepare('select status, reserved_calls, actual_calls, evidence_kind, failure_code from external_capability_runs where resource_id = ?').get(created.json().data.run.id))
+        .toEqual({ status: 'FAILED', reserved_calls: 1, actual_calls: 1, evidence_kind: 'NONE', failure_code: 'SEARCH_PROVIDER_UNAVAILABLE' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('atomically recovers expired Search and Learning runs without calling their Providers', async () => {
+    const previousRunRoot = process.env.EV_E2E_RUN_DIR;
+    const previousFlag = process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS;
+    process.env.EV_E2E_RUN_DIR = directory;
+    process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS = '1';
+    let searchCalls = 0;
+    let learningCalls = 0;
+    const publicText = '用于建立真实 citation 的公开课程材料。';
+    const publicSearch: PublicSearchCapability = {
+      descriptor: { providerId: 'stale-search', providerLabel: 'Stale Test Search', adapterKind: 'TEST_FAKE' },
+      async search() {
+        searchCalls += 1;
+        return { results: [{ title: '公开课程材料', url: 'https://example.edu/stale-recovery' }] };
+      },
+    };
+    const learningAdvice: LearningAdviceCapability = {
+      descriptor: { providerId: 'stale-learning', providerLabel: 'Stale Test Learning', adapterKind: 'TEST_FAKE' },
+      async generate() {
+        learningCalls += 1;
+        throw new Error('stale recovery must not invoke Learning Advice');
+      },
+    };
+    const fetcher = createPublicResourceFetcher({
+      resolveAll: async () => [{ address: '93.184.216.34', family: 4 as const }],
+      transport: async () => ({
+        statusCode: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+        body: (async function* () { yield Buffer.from(publicText); })(),
+      }),
+    });
+    try {
+      app = await buildApp({
+        databasePath: join(directory, 'app.sqlite'), logger: false,
+        publicSearchCapability: publicSearch, publicResourceFetcher: fetcher, learningAdviceCapability: learningAdvice,
+      });
+      const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: { username: '租约恢复主人', password: 'correct horse battery staple' } });
+      const token = tokenFrom(setup.headers['set-cookie']);
+      const term = await app.inject({
+        method: 'POST', url: '/v1/terms', cookies: { ev_session: token },
+        payload: { title: '2026 秋季', timezone: 'Asia/Shanghai', weekOneMonday: '2026-09-07' },
+      });
+      const course = await app.inject({
+        method: 'POST', url: '/v1/courses', cookies: { ev_session: token },
+        payload: { termId: term.json().data.id, title: '租约恢复课程' },
+      });
+      const courseId = course.json().data.id as string;
+      const completedSearch = await app.inject({
+        method: 'POST', url: `/v1/courses/${courseId}/resource-searches`, cookies: { ev_session: token },
+        payload: { query: '建立真实引用' },
+      });
+      const completedSearchId = completedSearch.json().data.run.id as string;
+      const executedSearch = await app.inject({
+        method: 'POST', url: `/v1/resource-searches/${completedSearchId}/execute`, cookies: { ev_session: token },
+        headers: { 'idempotency-key': 'v06-stale-recovery-seed-search' },
+        payload: { expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' },
+      });
+      expect(executedSearch.statusCode).toBe(202);
+      const citationId = executedSearch.json().data.citations[0].id as string;
+      const staleSearch = await app.inject({
+        method: 'POST', url: `/v1/courses/${courseId}/resource-searches`, cookies: { ev_session: token },
+        payload: { query: '应由 stale sweep 恢复的检索' },
+      });
+      const staleSearchId = staleSearch.json().data.run.id as string;
+      const learning = await app.inject({
+        method: 'POST', url: `/v1/courses/${courseId}/learning-runs`, cookies: { ev_session: token },
+        payload: {
+          searchRunId: completedSearchId, citationIds: [citationId], objective: '恢复过期学习建议',
+          targetDate: '2026-09-09', earliestStartLocalTime: '19:00', latestEndLocalTime: '21:00',
+        },
+      });
+      expect(learning.statusCode).toBe(201);
+      const learningRunId = learning.json().data.run.id as string;
+      const claimAt = '2026-08-31T01:00:00.000Z';
+      const sweepAt = '2026-08-31T01:00:21.000Z';
+      const database = openDatabase(join(directory, 'app.sqlite'));
+      try {
+        const owner = database.prepare('select id from owners').get() as { id: string };
+        const staleSearchCapability = database.prepare('select capability_run_id from course_resource_search_runs where id = ? and owner_id = ?')
+          .get(staleSearchId, owner.id) as { capability_run_id: string };
+        const staleLearningCapability = database.prepare('select capability_run_id from learning_runs where id = ? and owner_id = ?')
+          .get(learningRunId, owner.id) as { capability_run_id: string };
+        const runs = createCapabilityRunRepository(database);
+        expect(runs.claim(owner.id, staleSearchCapability.capability_run_id, 'v06-stale-search-claim', 'f'.repeat(64), claimAt)).toBe(true);
+        expect(runs.claim(owner.id, staleLearningCapability.capability_run_id, 'v06-stale-learning-claim', '1'.repeat(64), claimAt)).toBe(true);
+        expect(database.prepare(`update course_resource_search_runs set status = 'SEARCHING', updated_at = ?, version = version + 1
+          where id = ? and owner_id = ? and capability_run_id = ? and status = 'AWAITING_DISCLOSURE'`)
+          .run(claimAt, staleSearchId, owner.id, staleSearchCapability.capability_run_id).changes).toBe(1);
+        expect(database.prepare(`update learning_runs set status = 'GENERATING', updated_at = ?, version = version + 1
+          where id = ? and owner_id = ? and capability_run_id = ? and status = 'AWAITING_DISCLOSURE'`)
+          .run(claimAt, learningRunId, owner.id, staleLearningCapability.capability_run_id).changes).toBe(1);
+
+        database.exec(`create trigger force_stale_recovery_rollback before update of status on learning_runs
+          when old.status = 'GENERATING' and new.failure_code = 'CAPABILITY_EXECUTION_STALE'
+          begin select raise(abort, 'forced stale recovery rollback'); end`);
+        expect({ searchCalls, learningCalls }).toEqual({ searchCalls: 1, learningCalls: 0 });
+        expect(() => runs.sweepExpired(sweepAt)).toThrow(/forced stale recovery rollback/);
+        expect(database.prepare('select status, reserved_calls, actual_calls from external_capability_runs where id = ?').get(staleSearchCapability.capability_run_id))
+          .toEqual({ status: 'RUNNING', reserved_calls: 1, actual_calls: 0 });
+        expect(database.prepare('select status from course_resource_search_runs where id = ?').get(staleSearchId)).toEqual({ status: 'SEARCHING' });
+        expect(database.prepare('select status from learning_runs where id = ?').get(learningRunId)).toEqual({ status: 'GENERATING' });
+        expect({ searchCalls, learningCalls }).toEqual({ searchCalls: 1, learningCalls: 0 });
+        database.exec('drop trigger force_stale_recovery_rollback');
+
+        const providerCallsBeforeSweep = { searchCalls, learningCalls };
+        expect(runs.sweepExpired(sweepAt)).toBe(2);
+        expect(database.prepare('select status, failure_code, updated_at, version from course_resource_search_runs where id = ?').get(staleSearchId))
+          .toEqual({ status: 'FAILED', failure_code: 'CAPABILITY_EXECUTION_STALE', updated_at: sweepAt, version: 3 });
+        expect(database.prepare('select status, failure_code, updated_at, version from learning_runs where id = ?').get(learningRunId))
+          .toEqual({ status: 'FAILED', failure_code: 'CAPABILITY_EXECUTION_STALE', updated_at: sweepAt, version: 3 });
+        for (const capabilityRunId of [staleSearchCapability.capability_run_id, staleLearningCapability.capability_run_id]) {
+          expect(database.prepare('select status, failure_code, reserved_calls, actual_calls, evidence_kind from external_capability_runs where id = ?').get(capabilityRunId))
+            .toEqual({ status: 'FAILED', failure_code: 'CAPABILITY_EXECUTION_STALE', reserved_calls: 1, actual_calls: 1, evidence_kind: 'NONE' });
+        }
+        expect(database.prepare("select count(*) as count from proposals where kind = 'LEARNING'").get()).toEqual({ count: 0 });
+        expect({ searchCalls, learningCalls }).toEqual(providerCallsBeforeSweep);
+      } finally {
+        database.close();
+      }
+    } finally {
+      if (previousRunRoot === undefined) delete process.env.EV_E2E_RUN_DIR; else process.env.EV_E2E_RUN_DIR = previousRunRoot;
+      if (previousFlag === undefined) delete process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS; else process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS = previousFlag;
+    }
   });
 
   it('creates a course under an owned term and attributes a user-provided resource', async () => {

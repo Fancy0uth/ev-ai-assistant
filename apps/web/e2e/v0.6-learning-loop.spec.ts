@@ -6,8 +6,8 @@ import {
 } from '@ev/contracts';
 
 const owner = {
-  username: 'v06-learning-e2e-owner',
-  password: 'v06-learning-e2e-password',
+  username: 'task16-e2e-owner',
+  password: 'task16-e2e-password',
 };
 
 const rawPngFixture = Buffer.from(
@@ -142,8 +142,8 @@ async function createAndAcceptLearningProposal(
   await page.getByRole('checkbox').check();
   await page.getByLabel('学习目标').fill('理解向量空间与线性变换');
   await page.getByLabel('目标日期').fill(targetDate);
-  await page.getByLabel('最早开始').fill(name === 'iphone' ? '14:00' : '12:00');
-  await page.getByLabel('最晚结束').fill(name === 'iphone' ? '15:00' : '13:00');
+  await page.getByLabel('最早开始').fill(name === 'iphone' ? '18:00' : '16:00');
+  await page.getByLabel('最晚结束').fill(name === 'iphone' ? '19:00' : '17:00');
   await page.getByRole('button', { name: '准备引用学习建议' }).click();
   await expect(page.getByText('DISCLOSURE_READY：将请求 自动测试 Fake Learning Advice；adapter=TEST_FAKE，evidence=AUTOMATED_FAKE。')).toBeVisible();
   await expect(page.getByText('自动测试 Fake 证据，不代表真实 Provider')).toBeVisible();
@@ -181,8 +181,12 @@ async function applyDailyPlan(page: Page, targetDate: string, timeRequestId: str
   await page.getByRole('button', { name: '批准外发内容' }).click();
   await expect(page.getByText('你的选择已保存，尚未调用 Provider。')).toBeVisible();
   await page.getByRole('button', { name: '调用 Provider 生成草案' }).click();
-  await expect(page.getByText('由测试 Fake Provider 生成的待审核安排。')).toBeVisible();
-  const applyButton = page.getByRole('button', { name: '采用安排', exact: true });
+  const currentProposalCard = page.locator('article.daily-plan-review-card').filter({
+    has: page.getByRole('button', { name: '采用安排', exact: true }),
+  });
+  await expect(currentProposalCard).toHaveCount(1);
+  await expect(currentProposalCard.getByText('由测试 Fake Provider 生成的待审核安排。', { exact: true })).toBeVisible();
+  const applyButton = currentProposalCard.getByRole('button', { name: '采用安排', exact: true });
   await expect(applyButton).toHaveCount(1);
   const appliedResponse = page.waitForResponse((response) =>
     response.request().method() === 'POST'

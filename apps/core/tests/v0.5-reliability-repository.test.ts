@@ -2,6 +2,7 @@ import { openDatabase } from '../src/storage/database';
 import { createProviderReliabilityRepository } from '../src/modules/providers/reliability-repository';
 import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
+import { APP_VERSION } from '@ev/contracts';
 
 const databases: Database.Database[] = [];
 
@@ -120,7 +121,7 @@ describe('v0.5 provider reliability repository', () => {
       output_chars: 73,
       policy_version: 'PROVIDER_POLICY_V1',
       contract_version: 'DAILY_PLAN_V1',
-      app_version: '0.5.0',
+      app_version: APP_VERSION,
       local_date: '2026-08-23',
       started_at: createdAt,
       finished_at: '2026-08-23T00:00:01.000Z',

@@ -170,7 +170,7 @@ export function createDefaultPublicResourceTransport(options: {
         statusCode: incoming.statusCode ?? 0,
         headers: incoming.headers,
         body: Readable.from([Buffer.concat(chunks)]),
-      }))); 
+      })));
     });
     requestSlot.outgoing = outgoing;
     outgoing.once('error', (error) => finish(() => reject(error)));

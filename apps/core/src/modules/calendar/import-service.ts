@@ -4,6 +4,8 @@ import type Database from 'better-sqlite3';
 import { APP_VERSION, courseImportRevisionSchema, visionCourseScheduleExtractionSchema, type CourseImport, type CourseImportRevision, type CreateCourseImportInput, type ExternalDisclosure, type LocalArtifact } from '@ev/contracts';
 import { ApiError } from '../../http/api-error';
 import { terminalEvidenceKind, type CapabilityRegistry } from '../providers/capabilities';
+import { createCapabilityRunRepository } from '../providers/capability-run-repository';
+import { CAPABILITY_POLICY, CapabilityExecutionError, executeCapabilityAdapter } from '../providers/provider-policy';
 import { createArtifactStore, type ArtifactStore } from './artifact-store';
 import { ImageMetadataError, readImageMetadata } from './image-metadata';
 import { createCourseImportRepository, type CourseImportRepository } from './import-repository';
@@ -31,6 +33,7 @@ export function createCourseImportService(
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? randomUUID;
   const repository = options.repository ?? createCourseImportRepository(database);
+  const capabilityRuns = createCapabilityRunRepository(database);
   const store = options.store ?? createArtifactStore(artifactRoot);
   const importDisclosures = new Map<string, ExternalDisclosure>();
 
@@ -101,17 +104,19 @@ export function createCourseImportService(
       const importId = newId();
       const capabilityRunId = newId();
       const status: CourseImport['status'] = capabilities.vision ? 'AWAITING_DISCLOSURE' : 'BLOCKED_PROVIDER';
-      repository.insertCapabilityRun({
-        id: capabilityRunId, ownerId, resourceId: importId,
-        status: status === 'BLOCKED_PROVIDER' ? 'BLOCKED_PROVIDER' : 'AWAITING_DISCLOSURE',
-        disclosure: disclosureValue, timestamp, appVersion: APP_VERSION,
-      });
-      const imported = repository.insertImport({
-        id: importId, ownerId, termId: input.termId, artifactId: input.artifactId, capabilityRunId, status,
-        currentRevisionId: null, scheduleProposalId: null,
-        failureCode: status === 'BLOCKED_PROVIDER' ? 'VISION_PROVIDER_NOT_CONFIGURED' : null,
-        version: 1, createdAt: timestamp, updatedAt: timestamp,
-      });
+      const imported = database.transaction(() => {
+        repository.insertCapabilityRun({
+          id: capabilityRunId, ownerId, resourceId: importId,
+          status: status === 'BLOCKED_PROVIDER' ? 'BLOCKED_PROVIDER' : 'AWAITING_DISCLOSURE',
+          disclosure: disclosureValue, timestamp, appVersion: APP_VERSION,
+        });
+        return repository.insertImport({
+          id: importId, ownerId, termId: input.termId, artifactId: input.artifactId, capabilityRunId, status,
+          currentRevisionId: null, scheduleProposalId: null,
+          failureCode: status === 'BLOCKED_PROVIDER' ? 'VISION_PROVIDER_NOT_CONFIGURED' : null,
+          version: 1, createdAt: timestamp, updatedAt: timestamp,
+        });
+      }).immediate();
       importDisclosures.set(imported.id, disclosureValue);
       return { import: imported, disclosure: disclosureValue, revision: null };
     },
@@ -121,30 +126,83 @@ export function createCourseImportService(
       return ownedResult(ownerId, imported, repository.findCurrentRevision(ownerId, importId) ?? null);
     },
     async extract(ownerId, importId, input, idempotencyKey) {
-      const imported = repository.findImport(ownerId, importId);
-      if (!imported) throw new ApiError(404, 'COURSE_IMPORT_NOT_FOUND', '课表导入记录不存在');
-      if (input.disclosureVersion !== 'CAPABILITY_DISCLOSURE_V1') throw new ApiError(409, 'VERSION_CONFLICT', '外发披露版本已变化');
-      if (imported.status !== 'AWAITING_DISCLOSURE' || imported.version !== input.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
-      if (!capabilities.vision) throw new ApiError(503, 'VISION_PROVIDER_NOT_CONFIGURED', 'Vision Provider 未配置');
-      const artifact = repository.findArtifact(ownerId, imported.artifactId);
-      const storageKey = repository.findArtifactStorageKey(ownerId, imported.artifactId);
-      if (!artifact || !storageKey || artifact.state !== 'ACTIVE') throw new ApiError(410, 'ARTIFACT_DELETED', '课表图片已删除');
-      const timestamp = now().toISOString();
-      const claimed = repository.updateImport(ownerId, importId, imported.version, { status: 'EXTRACTING', timestamp });
-      if (!claimed) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
-      database.prepare(`update external_capability_runs set status = 'RUNNING', idempotency_key = ?, request_hash = ?, updated_at = ?, version = version + 1 where id = ? and owner_id = ?`).run(idempotencyKey, hash(input), timestamp, imported.capabilityRunId, ownerId);
+      if (!repository.findImport(ownerId, importId)) throw new ApiError(404, 'COURSE_IMPORT_NOT_FOUND', '课表导入记录不存在');
+      const requestHash = hash({ importId, ...input });
+      const claimResult = database.transaction(() => {
+        const existing = capabilityRuns.findByOwnerAndIdempotencyKey(ownerId, idempotencyKey);
+        if (existing) {
+          if (existing.resourceId !== importId || existing.requestHash !== requestHash) {
+            throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', '幂等键已用于不同请求');
+          }
+          const replayImport = repository.findImport(ownerId, importId);
+          if (existing.status === 'SUCCEEDED' && replayImport) {
+            return { replay: ownedResult(ownerId, replayImport, repository.findCurrentRevision(ownerId, importId) ?? null) };
+          }
+          if (existing.status === 'FAILED') {
+            const unavailable = replayImport?.failureCode === 'VISION_PROVIDER_UNAVAILABLE';
+            throw new ApiError(unavailable ? 503 : 422, replayImport?.failureCode ?? 'VISION_RESPONSE_INVALID', unavailable ? 'Vision Provider 暂时不可用' : 'Vision 输出不符合严格课表契约');
+          }
+          throw new ApiError(409, 'VERSION_CONFLICT', '课表导入正在处理');
+        }
+        const imported = repository.findImport(ownerId, importId);
+        if (!imported) throw new ApiError(404, 'COURSE_IMPORT_NOT_FOUND', '课表导入记录不存在');
+        if (input.disclosureVersion !== 'CAPABILITY_DISCLOSURE_V1') throw new ApiError(409, 'VERSION_CONFLICT', '外发披露版本已变化');
+        if (imported.status !== 'AWAITING_DISCLOSURE' || imported.version !== input.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
+        if (!capabilities.vision) throw new ApiError(503, 'VISION_PROVIDER_NOT_CONFIGURED', 'Vision Provider 未配置');
+        const artifact = repository.findArtifact(ownerId, imported.artifactId);
+        const storageKey = repository.findArtifactStorageKey(ownerId, imported.artifactId);
+        if (!artifact || !storageKey || artifact.state !== 'ACTIVE') throw new ApiError(410, 'ARTIFACT_DELETED', '课表图片已删除');
+        const timestamp = now().toISOString();
+        if (!capabilityRuns.claim(ownerId, imported.capabilityRunId, idempotencyKey, requestHash, timestamp)) {
+          const collision = capabilityRuns.findByOwnerAndIdempotencyKey(ownerId, idempotencyKey);
+          if (collision) throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', '幂等键已用于不同请求');
+          if (capabilityRuns.quotaExhausted(ownerId, imported.capabilityRunId, timestamp)) {
+            throw new ApiError(429, 'CAPABILITY_PROVIDER_QUOTA_EXCEEDED', '今日 Vision Provider 调用额度已用尽');
+          }
+          throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
+        }
+        const claimed = repository.updateImport(ownerId, importId, imported.version, { status: 'EXTRACTING', timestamp });
+        if (!claimed) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
+        const capabilityRun = capabilityRuns.findByOwnerAndId(ownerId, imported.capabilityRunId);
+        if (!capabilityRun?.leaseToken) throw new Error('Vision capability lease is missing');
+        return { imported, claimed, artifact, storageKey, leaseToken: capabilityRun.leaseToken };
+      }).immediate();
+      if ('replay' in claimResult) return claimResult.replay;
+      const { imported, claimed, artifact, storageKey, leaseToken } = claimResult;
       let parsed: import('@ev/contracts').VisionCourseScheduleExtraction;
-      let providerCallStarted = false;
+      let outputChars = 0;
       try {
         options.onExternalOperation?.(database.inTransaction);
         const image = await readFile(store.resolveVerified(storageKey));
-        providerCallStarted = true;
-        parsed = visionCourseScheduleExtractionSchema.parse(await capabilities.vision.extractCourseSchedule({ schemaVersion: 'COURSE_SCHEDULE_EXTRACTION_V1', image, mediaType: artifact.mediaType, term: { timezone: calendarRepository.findTerm(ownerId, imported.termId)!.timezone, weekOneMonday: calendarRepository.findTerm(ownerId, imported.termId)!.weekOneMonday } }));
+        const term = calendarRepository.findTerm(ownerId, imported.termId);
+        if (!term) throw new Error('Course import term disappeared');
+        const execution = await executeCapabilityAdapter({
+          inputSize: image.byteLength,
+          maxInputSize: CAPABILITY_POLICY.vision.maxInputBytes,
+          maxOutputChars: CAPABILITY_POLICY.vision.maxOutputChars,
+          timeoutMs: CAPABILITY_POLICY.vision.totalTimeoutMs,
+          invoke: () => capabilities.vision!.extractCourseSchedule({
+            schemaVersion: 'COURSE_SCHEDULE_EXTRACTION_V1', image, mediaType: artifact.mediaType,
+            term: { timezone: term.timezone, weekOneMonday: term.weekOneMonday },
+          }),
+        });
+        outputChars = execution.outputChars;
+        parsed = visionCourseScheduleExtractionSchema.parse(execution.output);
       } catch (error) {
-        repository.updateImport(ownerId, importId, claimed.version, { status: 'FAILED', failureCode: 'VISION_RESPONSE_INVALID', timestamp: now().toISOString() });
-        database.prepare(`update external_capability_runs set status = 'FAILED', failure_code = 'VISION_RESPONSE_INVALID', evidence_kind = 'NONE', actual_calls = ?, updated_at = ? where id = ? and owner_id = ?`).run(providerCallStarted ? 1 : 0, now().toISOString(), imported.capabilityRunId, ownerId);
+        const providerCallStarted = error instanceof CapabilityExecutionError ? error.providerCallStarted : outputChars > 0;
+        const failureCode = error instanceof CapabilityExecutionError && ['CAPABILITY_EXECUTION_TIMEOUT', 'CAPABILITY_PROVIDER_UNAVAILABLE'].includes(error.code)
+          ? 'VISION_PROVIDER_UNAVAILABLE' : 'VISION_RESPONSE_INVALID';
+        const timestamp = now().toISOString();
+        database.transaction(() => {
+          const failed = repository.updateImport(ownerId, importId, claimed.version, { status: 'FAILED', failureCode, timestamp });
+          if (!failed || !capabilityRuns.complete(ownerId, imported.capabilityRunId, {
+            leaseToken, status: 'FAILED', actualCalls: providerCallStarted ? 1 : 0, inputChars: 0,
+            outputChars: error instanceof CapabilityExecutionError ? error.outputChars : outputChars,
+            failureCode, evidenceKind: 'NONE', now: timestamp,
+          })) throw new Error('Vision failure terminalization could not be committed');
+        }).immediate();
         if (error instanceof ApiError) throw error;
-        throw new ApiError(422, 'VISION_RESPONSE_INVALID', 'Vision 输出不符合严格课表契约');
+        throw new ApiError(failureCode === 'VISION_PROVIDER_UNAVAILABLE' ? 503 : 422, failureCode, failureCode === 'VISION_PROVIDER_UNAVAILABLE' ? 'Vision Provider 暂时不可用' : 'Vision 输出不符合严格课表契约');
       }
       const capturedAt = now().toISOString();
       const candidates = parsed.candidates.map((candidate) => ({ ...candidate, candidateId: newId(), included: true, provenance: [{ kind: 'VISION_OUTPUT' as const, providerId: capabilities.vision!.descriptor.providerId, capabilityRunId: imported.capabilityRunId, editedFields: [], capturedAt }] }));
@@ -153,9 +211,12 @@ export function createCourseImportService(
         repository.insertRevision({ ...revision, ownerId });
         const updated = repository.updateImport(ownerId, importId, claimed.version, { status: 'REVIEW_REQUIRED', currentRevisionId: revision.id, timestamp: capturedAt });
         if (!updated) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
-        database.prepare(`update external_capability_runs set status = 'SUCCEEDED', actual_calls = 1, evidence_kind = ?, updated_at = ?, version = version + 1 where id = ? and owner_id = ?`).run(terminalEvidenceKind(capabilities.vision!.descriptor.adapterKind), capturedAt, imported.capabilityRunId, ownerId);
+        if (!capabilityRuns.complete(ownerId, imported.capabilityRunId, {
+          leaseToken, status: 'SUCCEEDED', actualCalls: 1, inputChars: 0, outputChars,
+          failureCode: null, evidenceKind: terminalEvidenceKind(capabilities.vision!.descriptor.adapterKind), now: capturedAt,
+        })) throw new Error('Vision success terminalization could not be committed');
         return updated;
-      })();
+      }).immediate();
       return ownedResult(ownerId, finalized, revision);
     },
     saveRevision(ownerId, importId, input) {

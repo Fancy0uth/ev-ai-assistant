@@ -5,6 +5,7 @@ import {
 } from '@ev/contracts';
 import type { LearningAdviceCapability } from '../providers/capabilities';
 import { DEEPSEEK_CHAT_COMPLETIONS_URL, DEFAULT_DEEPSEEK_MODEL } from '../daily-planning/deepseek-provider';
+import { CAPABILITY_POLICY } from '../providers/provider-policy';
 
 const SYSTEM_PROMPT = [
   'Return exactly one JSON object and no markdown.',
@@ -15,7 +16,7 @@ const SYSTEM_PROMPT = [
 
 export interface DeepSeekLearningAdviceFetchResponse {
   status: number;
-  json(): Promise<unknown>;
+  body: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | null;
 }
 
 export interface DeepSeekLearningAdviceFetchInit {
@@ -36,8 +37,9 @@ export class DeepSeekLearningAdviceError extends Error {
   }
 }
 
-function defaultFetch(url: string, init: DeepSeekLearningAdviceFetchInit): Promise<DeepSeekLearningAdviceFetchResponse> {
-  return fetch(url, init);
+async function defaultFetch(url: string, init: DeepSeekLearningAdviceFetchInit): Promise<DeepSeekLearningAdviceFetchResponse> {
+  const response = await fetch(url, init);
+  return { status: response.status, body: response.body };
 }
 
 function requestBody(input: CitedLearningAdviceInput): string {
@@ -67,6 +69,62 @@ function extractOutput(response: unknown): unknown {
   }
 }
 
+const MAX_RESPONSE_BYTES = CAPABILITY_POLICY.learningAdvice.maxOutputChars * 4 + 4_096;
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE');
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener('abort', onAbort); reject(error); },
+    );
+  });
+}
+
+async function readBoundedBody(
+  body: DeepSeekLearningAdviceFetchResponse['body'],
+  signal: AbortSignal,
+): Promise<string> {
+  if (!body) throw new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE');
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  const append = (chunk: Uint8Array) => {
+    totalBytes += chunk.byteLength;
+    if (totalBytes > MAX_RESPONSE_BYTES) throw new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE');
+    chunks.push(chunk);
+  };
+  if (Symbol.asyncIterator in body) {
+    for await (const chunk of body as AsyncIterable<Uint8Array>) {
+      if (signal.aborted) throw new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE');
+      append(chunk);
+    }
+  } else {
+    const reader = (body as ReadableStream<Uint8Array>).getReader();
+    try {
+      while (true) {
+        const result = await abortable(reader.read(), signal);
+        if (result.done) break;
+        append(result.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(combined);
+  } catch {
+    throw new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE');
+  }
+}
+
 export function createDeepSeekLearningAdviceCapability(options: {
   apiKey: string;
   fetch?: DeepSeekLearningAdviceFetch;
@@ -86,17 +144,24 @@ export function createDeepSeekLearningAdviceCapability(options: {
       const headerTimer = setTimeout(() => { headerTimedOut = true; controller.abort(); }, headerTimeoutMs);
       const totalTimer = setTimeout(() => { totalTimedOut = true; controller.abort(); }, totalTimeoutMs);
       try {
-        const response = await fetchRequest(DEEPSEEK_CHAT_COMPLETIONS_URL, {
+        const response = await abortable(fetchRequest(DEEPSEEK_CHAT_COMPLETIONS_URL, {
           method: 'POST',
           headers: { authorization: `Bearer ${options.apiKey}`, 'content-type': 'application/json' },
           body: requestBody(validatedInput),
           signal: controller.signal,
-        });
+        }), controller.signal);
         clearTimeout(headerTimer);
         if (response.status < 200 || response.status >= 300 || controller.signal.aborted) {
           throw new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE');
         }
-        return citedLearningAdviceOutputSchema.parse(extractOutput(await response.json()));
+        const responseText = await abortable(readBoundedBody(response.body, controller.signal), controller.signal);
+        let responseJson: unknown;
+        try {
+          responseJson = JSON.parse(responseText) as unknown;
+        } catch {
+          throw new DeepSeekLearningAdviceError('LEARNING_PROVIDER_UNAVAILABLE');
+        }
+        return citedLearningAdviceOutputSchema.parse(extractOutput(responseJson));
       } catch (error) {
         if (error instanceof DeepSeekLearningAdviceError) throw error;
         if (headerTimedOut || totalTimedOut || controller.signal.aborted) {

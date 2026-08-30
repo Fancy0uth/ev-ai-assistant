@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
+import { APP_VERSION } from '@ev/contracts';
 import { createDailyPlanningContextService } from '../src/modules/daily-planning/context-service';
 import { createDailyPlanPreflightService } from '../src/modules/daily-planning/preflight-service';
 import { createDailyPlanRunRepository } from '../src/modules/daily-planning/repository';
@@ -66,7 +67,7 @@ describe('v0.5 Daily Plan Provider lease', () => {
       attemptCount: 2,
       leaseExpiresAt: '2026-08-24T00:00:41.000Z',
       deadlineAt: '2026-08-24T00:00:36.000Z',
-      appVersion: '0.5.0',
+      appVersion: APP_VERSION,
     });
     expect(() =>
       repository.failClaimedPreflight({

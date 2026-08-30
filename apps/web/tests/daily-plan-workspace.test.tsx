@@ -17,6 +17,33 @@ const itemId = '00000000-0000-4000-8000-000000000603';
 const timeRequestId = '00000000-0000-4000-8000-000000000604';
 const preflightId = '00000000-0000-4000-8000-000000000605';
 
+function collectMediaBlocks(css: string, mediaQuery: string): string {
+  const blocks: string[] = [];
+  let searchStart = 0;
+
+  while (searchStart < css.length) {
+    const blockStart = css.indexOf(mediaQuery, searchStart);
+    if (blockStart === -1) break;
+
+    let depth = 0;
+    let blockEnd = blockStart;
+    for (; blockEnd < css.length; blockEnd += 1) {
+      if (css[blockEnd] === '{') depth += 1;
+      if (css[blockEnd] !== '}') continue;
+      depth -= 1;
+      if (depth === 0) {
+        blockEnd += 1;
+        break;
+      }
+    }
+
+    blocks.push(css.slice(blockStart, blockEnd));
+    searchStart = blockEnd;
+  }
+
+  return blocks.join('\n');
+}
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -310,7 +337,7 @@ describe('DailyPlanWorkspace', () => {
     );
 
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
-    const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileCss = collectMediaBlocks(dashboardCss, '@media (max-width: 42rem) {');
     const mobileControlRule = mobileCss.match(
       /\.daily-plan-workspace__date-control input,[\s\S]*?\.daily-plan-workspace__failure a\s*\{[\s\S]*?\n\}/,
     )?.[0];

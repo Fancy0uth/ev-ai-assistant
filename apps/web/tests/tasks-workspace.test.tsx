@@ -428,7 +428,9 @@ describe('TasksWorkspace', () => {
       priority: 'LOW',
       targetDate: '2026-08-18',
     });
-    expect(screen.getByRole('button', { name: `编辑任务：${editedTask.title}` })).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: `编辑任务：${editedTask.title}` })).toHaveFocus(),
+    );
   });
 
   it('keeps an unsaved editor draft when another task mutation reloads the same task version', async () => {
@@ -507,7 +509,7 @@ describe('TasksWorkspace', () => {
       priority: task.priority,
       targetDate: task.targetDate,
     });
-    expect(screen.getByRole('heading', { name: '任务工作台' })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole('heading', { name: '任务工作台' })).toHaveFocus());
   });
 
   it('completes a task with exactly the current version and one write request', async () => {

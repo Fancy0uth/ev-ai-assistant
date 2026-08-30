@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { DailyPlanModelOutput } from '@ev/contracts';
+import { APP_VERSION, type DailyPlanModelOutput } from '@ev/contracts';
 import { createCalendarRepository } from '../src/modules/calendar/repository';
 import { createDailyPlanningContextService } from '../src/modules/daily-planning/context-service';
 import { createDailyPlanPreflightService } from '../src/modules/daily-planning/preflight-service';
@@ -262,7 +262,7 @@ describe('daily planning generation service', () => {
       operation: 'daily_plan.generate',
       status: 'SUCCEEDED',
       model: 'deepseek-v4-flash',
-      app_version: '0.5.0',
+      app_version: APP_VERSION,
     });
     for (const forbiddenColumn of [
       'api_key',

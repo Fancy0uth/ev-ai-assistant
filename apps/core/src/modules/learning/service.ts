@@ -26,6 +26,7 @@ import type { CalendarRepository } from '../calendar/repository';
 import { createCapabilityRunRepository, type CapabilityRunRepository } from '../providers/capability-run-repository';
 import { terminalEvidenceKind, type CapabilityRegistry, type LearningAdviceCapabilityFactory } from '../providers/capabilities';
 import type { ProviderCredentialService } from '../providers/credential-service';
+import { CAPABILITY_POLICY, CapabilityExecutionError, executeCapabilityAdapter } from '../providers/provider-policy';
 import type { ProposalService } from '../proposals/service';
 import { PublicResourceFetchError, type PublicResourceFetcher } from './public-resource-fetcher';
 import { createLearningRepository, type CitationDraft } from './repository';
@@ -90,12 +91,14 @@ export function createLearningService(
     database.prepare('insert into audit_events (id, owner_id, event_type, entity_type, entity_id, metadata_json, created_at) values (?, ?, ?, ?, ?, ?, ?)')
       .run(newId(), ownerId, eventType, eventType === 'COURSE_CONTEXT_UPDATED' ? 'COURSE' : eventType === 'LEARNING_PROPOSAL_CREATED' ? 'LEARNING_RUN' : 'COURSE_RESOURCE_SEARCH', entityId, JSON.stringify(metadata), createdAt);
   };
-  const finishFailure = (ownerId: string, searchRunId: string, capabilityRunId: string, failureCode: string, at: string, inputChars: number, outputChars: number) => database.transaction(() => {
+  const finishFailure = (ownerId: string, searchRunId: string, capabilityRunId: string, leaseToken: string, failureCode: string, at: string, actualCalls: number, inputChars: number, outputChars: number) => database.transaction(() => {
     const run = repository.failSearchRun(ownerId, searchRunId, failureCode, at);
-    capabilityRuns.complete(ownerId, capabilityRunId, { status: 'FAILED', actualCalls: 1, inputChars, outputChars, failureCode, evidenceKind: 'NONE', now: at });
+    if (!capabilityRuns.complete(ownerId, capabilityRunId, { leaseToken, status: 'FAILED', actualCalls, inputChars, outputChars, failureCode, evidenceKind: 'NONE', now: at })) {
+      throw new Error('Search failure terminalization could not be committed');
+    }
     audit(ownerId, 'RESOURCE_SEARCH_COMPLETED', searchRunId, { status: 'FAILED', failureCode }, at);
     return run;
-  })();
+  }).immediate();
 
   return {
     createCourse(ownerId: string, input: CreateCourseInput): Course {
@@ -163,25 +166,48 @@ export function createLearningService(
         if (!current || current.version !== input.expectedVersion || current.status !== 'AWAITING_DISCLOSURE') throw new ApiError(409, 'VERSION_CONFLICT', '公开资料检索已被更新，请刷新后重试', { currentRun: current });
         if (input.disclosureVersion !== 'CAPABILITY_DISCLOSURE_V1') throw new ApiError(422, 'DISCLOSURE_VERSION_MISMATCH', '外发披露版本不匹配');
         const at = timestamp();
-        if (!capabilityRuns.claim(ownerId, current.capabilityRunId, idempotencyKey, requestHash, at)) throw new ApiError(409, 'VERSION_CONFLICT', '公开资料检索已被更新，请刷新后重试');
+        if (!capabilityRuns.claim(ownerId, current.capabilityRunId, idempotencyKey, requestHash, at)) {
+          if (capabilityRuns.quotaExhausted(ownerId, current.capabilityRunId, at)) {
+            throw new ApiError(429, 'CAPABILITY_PROVIDER_QUOTA_EXCEEDED', '今日公开检索调用额度已用尽');
+          }
+          throw new ApiError(409, 'VERSION_CONFLICT', '公开资料检索已被更新，请刷新后重试');
+        }
         const search = repository.claimSearchRun(ownerId, searchRunId, input.expectedVersion, at);
         if (!search.run) throw new ApiError(409, 'VERSION_CONFLICT', '公开资料检索已被更新，请刷新后重试', { currentRun: search.current });
-        return { claimed: search.run };
-      })();
+        const capabilityRun = capabilityRuns.findByOwnerAndId(ownerId, current.capabilityRunId);
+        if (!capabilityRun?.leaseToken) throw new Error('Search capability lease is missing');
+        return { claimed: search.run, leaseToken: capabilityRun.leaseToken };
+      }).immediate();
       if ('replay' in claimed) return { run: claimed.replay, citations: repository.listCitations(ownerId, claimed.replay.id), replayed: true };
       const running = claimed.claimed;
       let rawSearch: unknown;
+      let outputChars = 0;
       try {
-        options.onExternalOperation?.(database.inTransaction);
-        rawSearch = await capability.search({ query: running.query, maxResults: 5 });
-      } catch {
-        const failed = finishFailure(ownerId, running.id, running.capabilityRunId, 'SEARCH_PROVIDER_UNAVAILABLE', timestamp(), running.query.length, 0);
-        throw new ApiError(503, 'SEARCH_PROVIDER_UNAVAILABLE', '匿名公开检索暂时不可用', { currentRun: failed });
+        const execution = await executeCapabilityAdapter({
+          inputSize: running.query.length,
+          maxInputSize: CAPABILITY_POLICY.publicSearch.maxInputChars,
+          maxOutputChars: CAPABILITY_POLICY.publicSearch.maxOutputChars,
+          timeoutMs: CAPABILITY_POLICY.publicSearch.totalTimeoutMs,
+          invoke: () => {
+            options.onExternalOperation?.(database.inTransaction);
+            return capability.search({ query: running.query, maxResults: 5 });
+          },
+        });
+        rawSearch = execution.output;
+        outputChars = execution.outputChars;
+      } catch (error) {
+        const policyError = error instanceof CapabilityExecutionError ? error : undefined;
+        const invalid = policyError?.code === 'CAPABILITY_OUTPUT_INVALID' || policyError?.code === 'CAPABILITY_OUTPUT_LIMIT_EXCEEDED' || policyError?.code === 'CAPABILITY_INPUT_LIMIT_EXCEEDED';
+        const failureCode = invalid ? 'SEARCH_RESPONSE_INVALID' : 'SEARCH_PROVIDER_UNAVAILABLE';
+        const failed = finishFailure(
+          ownerId, running.id, running.capabilityRunId, claimed.leaseToken, failureCode, timestamp(),
+          policyError?.providerCallStarted ? 1 : 0, running.query.length, policyError?.outputChars ?? 0,
+        );
+        throw new ApiError(invalid ? 422 : 503, failureCode, invalid ? '匿名公开检索返回格式无效' : '匿名公开检索暂时不可用', { currentRun: failed });
       }
       const parsed = publicSearchResponseSchema.safeParse(rawSearch);
-      const outputChars = providerOutputCharacterCount(rawSearch);
       if (!parsed.success) {
-        const failed = finishFailure(ownerId, running.id, running.capabilityRunId, 'SEARCH_RESPONSE_INVALID', timestamp(), running.query.length, outputChars);
+        const failed = finishFailure(ownerId, running.id, running.capabilityRunId, claimed.leaseToken, 'SEARCH_RESPONSE_INVALID', timestamp(), 1, running.query.length, outputChars);
         throw new ApiError(422, 'SEARCH_RESPONSE_INVALID', '匿名公开检索返回格式无效', { currentRun: failed });
       }
       if (!options.publicResourceFetcher) throw new Error('public resource fetcher is required when search is available');
@@ -198,17 +224,19 @@ export function createLearningService(
         }
       }
       if (citations.length === 0) {
-        const failed = finishFailure(ownerId, running.id, running.capabilityRunId, 'NO_SAFE_PUBLIC_RESULTS', timestamp(), running.query.length, outputChars);
+        const failed = finishFailure(ownerId, running.id, running.capabilityRunId, claimed.leaseToken, 'NO_SAFE_PUBLIC_RESULTS', timestamp(), 1, running.query.length, outputChars);
         throw new ApiError(422, 'NO_SAFE_PUBLIC_RESULTS', '没有可安全保存的公开资料', { currentRun: failed });
       }
       const completed = database.transaction(() => {
         const current = repository.findSearchRun(ownerId, running.id);
         if (!current || current.status !== 'SEARCHING') throw new ApiError(409, 'VERSION_CONFLICT', '公开资料检索已被更新，请刷新后重试', { currentRun: current });
         const result = repository.finishSearchRun(ownerId, running.id, { citations, rejectedCount, timestamp: timestamp() });
-        capabilityRuns.complete(ownerId, running.capabilityRunId, { status: 'SUCCEEDED', actualCalls: 1, inputChars: running.query.length, outputChars, failureCode: null, evidenceKind: terminalEvidenceKind(capability.descriptor.adapterKind), now: timestamp() });
+        if (!capabilityRuns.complete(ownerId, running.capabilityRunId, { leaseToken: claimed.leaseToken, status: 'SUCCEEDED', actualCalls: 1, inputChars: running.query.length, outputChars, failureCode: null, evidenceKind: terminalEvidenceKind(capability.descriptor.adapterKind), now: timestamp() })) {
+          throw new Error('Search success terminalization could not be committed');
+        }
         audit(ownerId, 'RESOURCE_SEARCH_COMPLETED', running.id, { status: 'SUCCEEDED', citationCount: result.citations.length, rejectedCount }, timestamp());
         return result;
-      })();
+      }).immediate();
       return { ...completed, replayed: false };
     },
     createLearningRun(ownerId: string, courseId: string, input: CreateLearningRunInput): { run: LearningRun; disclosure: CapabilityDescriptor } {
@@ -275,12 +303,17 @@ export function createLearningService(
         if (input.disclosureVersion !== 'CAPABILITY_DISCLOSURE_V1') throw new ApiError(422, 'DISCLOSURE_VERSION_MISMATCH', '外发披露版本不匹配');
         const at = timestamp();
         if (!capabilityRuns.claim(ownerId, current.capabilityRunId, idempotencyKey, requestHash, at)) {
+          if (capabilityRuns.quotaExhausted(ownerId, current.capabilityRunId, at)) {
+            throw new ApiError(429, 'CAPABILITY_PROVIDER_QUOTA_EXCEEDED', '今日学习建议调用额度已用尽');
+          }
           throw new ApiError(409, 'LEARNING_RUN_VERSION_CONFLICT', '学习建议运行已被更新，请刷新后重试');
         }
         const claimedRun = repository.claimLearningRun(ownerId, learningRunId, input.expectedVersion, at);
         if (!claimedRun.run) throw new ApiError(409, 'LEARNING_RUN_VERSION_CONFLICT', '学习建议运行已被更新，请刷新后重试', { currentRun: claimedRun.current });
-        return { running: claimedRun.run };
-      })();
+        const capabilityRun = capabilityRuns.findByOwnerAndId(ownerId, current.capabilityRunId);
+        if (!capabilityRun?.leaseToken) throw new Error('Learning capability lease is missing');
+        return { running: claimedRun.run, leaseToken: capabilityRun.leaseToken };
+      }).immediate();
       if ('replay' in claimed) {
         if (!claimed.proposal) throw new ApiError(409, 'LEARNING_RUN_NOT_READY', '学习建议提案不存在');
         return { run: claimed.replay, proposal: claimed.proposal, replayed: true };
@@ -288,12 +321,17 @@ export function createLearningService(
       const running = claimed.running;
       const fail = (failureCode: string, actualCalls: number, inputChars: number, outputChars: number) => database.transaction(() => {
         const run = repository.failLearningRun(ownerId, running.id, failureCode, timestamp());
-        capabilityRuns.complete(ownerId, running.capabilityRunId, { status: 'FAILED', actualCalls, inputChars, outputChars, failureCode, evidenceKind: 'NONE', now: timestamp() });
+        if (!capabilityRuns.complete(ownerId, running.capabilityRunId, { leaseToken: claimed.leaseToken, status: 'FAILED', actualCalls, inputChars, outputChars, failureCode, evidenceKind: 'NONE', now: timestamp() })) {
+          throw new Error('Learning failure terminalization could not be committed');
+        }
         return run;
-      })();
+      }).immediate();
       const command = repository.learningRunCommand(ownerId, running.id);
       const detail = repository.getCourseDetail(ownerId, running.courseId);
-      if (!command || !detail) throw new ApiError(409, 'LEARNING_RUN_VERSION_CONFLICT', '学习建议上下文已变化');
+      if (!command || !detail) {
+        fail('LEARNING_RUN_VERSION_CONFLICT', 0, 0, 0);
+        throw new ApiError(409, 'LEARNING_RUN_VERSION_CONFLICT', '学习建议上下文已变化');
+      }
       const citations = repository.listCitations(ownerId, running.searchRunId)
         .filter((citation) => command.citationIds.includes(citation.id));
       if (citations.length !== command.citationIds.length) {
@@ -322,34 +360,63 @@ export function createLearningService(
         fail(changed ? 'CITATION_CONTENT_CHANGED' : 'CITATION_REVALIDATION_FAILED', 0, 0, 0);
         throw new ApiError(changed ? 409 : 422, changed ? 'CITATION_CONTENT_CHANGED' : 'CITATION_REVALIDATION_FAILED', changed ? '公开资料内容已变化，无法生成学习建议' : '公开资料无法重新校验');
       }
+      const inputChars = providerOutputCharacterCount(adviceInput);
+      if (inputChars > CAPABILITY_POLICY.learningAdvice.maxInputChars) {
+        const failed = fail('LEARNING_ADVICE_INVALID', 0, inputChars, 0);
+        throw new ApiError(422, 'LEARNING_ADVICE_INVALID', '学习建议输入超过安全上限', { currentRun: failed });
+      }
       let rawAdvice: unknown;
+      let outputChars = 0;
       let actualAdapterKind: 'NONE' | 'TEST_FAKE' | 'PRODUCTION_ADAPTER' = 'NONE';
       let providerCallStarted = false;
       try {
         if (capability) {
           actualAdapterKind = capability.descriptor.adapterKind;
-          options.onExternalOperation?.(database.inTransaction, 'LEARNING_ADVICE_GENERATE');
+          const execution = await executeCapabilityAdapter({
+            inputSize: inputChars,
+            maxInputSize: CAPABILITY_POLICY.learningAdvice.maxInputChars,
+            maxOutputChars: CAPABILITY_POLICY.learningAdvice.maxOutputChars,
+            timeoutMs: CAPABILITY_POLICY.learningAdvice.totalTimeoutMs,
+            invoke: () => {
+              options.onExternalOperation?.(database.inTransaction, 'LEARNING_ADVICE_GENERATE');
+              return capability.generate(adviceInput);
+            },
+          });
           providerCallStarted = true;
-          rawAdvice = await capability.generate(adviceInput);
+          rawAdvice = execution.output;
+          outputChars = execution.outputChars;
         } else if (factory && options.credentialService) {
           await options.credentialService.withApiKey(ownerId, async (apiKey) => {
             const adapter = factory.create(apiKey);
             actualAdapterKind = adapter.descriptor.adapterKind;
-            options.onExternalOperation?.(database.inTransaction, 'LEARNING_ADVICE_GENERATE');
+            const execution = await executeCapabilityAdapter({
+              inputSize: inputChars,
+              maxInputSize: CAPABILITY_POLICY.learningAdvice.maxInputChars,
+              maxOutputChars: CAPABILITY_POLICY.learningAdvice.maxOutputChars,
+              timeoutMs: CAPABILITY_POLICY.learningAdvice.totalTimeoutMs,
+              invoke: () => {
+                options.onExternalOperation?.(database.inTransaction, 'LEARNING_ADVICE_GENERATE');
+                return adapter.generate(adviceInput);
+              },
+            });
             providerCallStarted = true;
-            rawAdvice = await adapter.generate(adviceInput);
+            rawAdvice = execution.output;
+            outputChars = execution.outputChars;
           }, {
             beforeUnprotect: () => options.onExternalOperation?.(database.inTransaction, 'LEARNING_CREDENTIAL_UNPROTECT'),
           });
         }
-      } catch {
-        const failed = fail('LEARNING_PROVIDER_UNAVAILABLE', providerCallStarted ? 1 : 0, providerOutputCharacterCount(adviceInput), 0);
-        throw new ApiError(503, 'LEARNING_PROVIDER_UNAVAILABLE', '学习建议暂时不可用', { currentRun: failed });
+      } catch (error) {
+        const policyError = error instanceof CapabilityExecutionError ? error : undefined;
+        providerCallStarted = policyError?.providerCallStarted ?? providerCallStarted;
+        const invalid = policyError?.code === 'CAPABILITY_OUTPUT_INVALID' || policyError?.code === 'CAPABILITY_OUTPUT_LIMIT_EXCEEDED' || policyError?.code === 'CAPABILITY_INPUT_LIMIT_EXCEEDED';
+        const failureCode = invalid ? 'LEARNING_ADVICE_INVALID' : 'LEARNING_PROVIDER_UNAVAILABLE';
+        const failed = fail(failureCode, providerCallStarted ? 1 : 0, inputChars, policyError?.outputChars ?? 0);
+        throw new ApiError(invalid ? 422 : 503, failureCode, invalid ? '学习建议返回格式或引用无效' : '学习建议暂时不可用', { currentRun: failed });
       }
-      const outputChars = providerOutputCharacterCount(rawAdvice);
       const advice = citedLearningAdviceOutputSchema.safeParse(rawAdvice);
       if (!advice.success || advice.data.citationIds.some((citationId) => !command.citationIds.includes(citationId))) {
-        const failed = fail('LEARNING_ADVICE_INVALID', providerCallStarted ? 1 : 0, providerOutputCharacterCount(adviceInput), outputChars);
+        const failed = fail('LEARNING_ADVICE_INVALID', providerCallStarted ? 1 : 0, inputChars, outputChars);
         throw new ApiError(422, 'LEARNING_ADVICE_INVALID', '学习建议返回格式或引用无效', { currentRun: failed });
       }
       const completed = database.transaction(() => {
@@ -365,10 +432,12 @@ export function createLearningService(
         });
         if (!proposal) throw new Error('proposal service is unavailable');
         const run = repository.finishLearningRun(ownerId, running.id, proposal.id, at);
-        capabilityRuns.complete(ownerId, running.capabilityRunId, { status: 'SUCCEEDED', actualCalls: providerCallStarted ? 1 : 0, inputChars: providerOutputCharacterCount(adviceInput), outputChars, failureCode: null, evidenceKind: terminalEvidenceKind(actualAdapterKind), now: at });
+        if (!capabilityRuns.complete(ownerId, running.capabilityRunId, { leaseToken: claimed.leaseToken, status: 'SUCCEEDED', actualCalls: providerCallStarted ? 1 : 0, inputChars, outputChars, failureCode: null, evidenceKind: terminalEvidenceKind(actualAdapterKind), now: at })) {
+          throw new Error('Learning success terminalization could not be committed');
+        }
         audit(ownerId, 'LEARNING_PROPOSAL_CREATED', running.id, { proposalId: proposal.id, citationIds: advice.data.citationIds }, at);
         return { run, proposal };
-      })();
+      }).immediate();
       return { ...completed, replayed: false };
     },
   };

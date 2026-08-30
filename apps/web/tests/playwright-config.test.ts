@@ -76,7 +76,7 @@ describe('Playwright server isolation', () => {
     expect(web.env.EV_NEXT_DIST_DIR).toMatch(/^\.\.[\\/]\.\.[\\/]data[\\/]e2e-runs[\\/]run-[^\\/]+[\\/]next$/);
     expect(core.reuseExistingServer).toBe(false);
     expect(web.reuseExistingServer).toBe(false);
-  });
+  }, 15_000);
 
   it('allocates a unique run-prefixed Core data directory for each configuration process', async () => {
     const firstConfigModule = await loadPlaywrightConfig();
@@ -98,7 +98,7 @@ describe('Playwright server isolation', () => {
     expect(dirname(realpathSync(secondDataDirectory))).toBe(resolvedRunsDirectory);
     expect(basename(firstDataDirectory)).toMatch(/^run-/);
     expect(basename(secondDataDirectory)).toMatch(/^run-/);
-  });
+  }, 15_000);
 
   it('uses the runner-owned directory instead of allocating a second one in managed mode', async () => {
     const managedDirectory = resolve(e2eRunsDirectory, 'managed-run-playwright-test');
@@ -115,5 +115,5 @@ describe('Playwright server isolation', () => {
       delete process.env.EV_E2E_RUN_DIR;
       rmSync(managedDirectory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

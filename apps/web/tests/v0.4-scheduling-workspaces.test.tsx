@@ -31,6 +31,33 @@ const taskIdB = '00000000-0000-4000-8000-000000000705';
 const projectIdA = '00000000-0000-4000-8000-000000000706';
 const projectIdB = '00000000-0000-4000-8000-000000000707';
 
+function collectMediaBlocks(css: string, mediaQuery: string): string {
+  const blocks: string[] = [];
+  let searchStart = 0;
+
+  while (searchStart < css.length) {
+    const blockStart = css.indexOf(mediaQuery, searchStart);
+    if (blockStart === -1) break;
+
+    let depth = 0;
+    let blockEnd = blockStart;
+    for (; blockEnd < css.length; blockEnd += 1) {
+      if (css[blockEnd] === '{') depth += 1;
+      if (css[blockEnd] !== '}') continue;
+      depth -= 1;
+      if (depth === 0) {
+        blockEnd += 1;
+        break;
+      }
+    }
+
+    blocks.push(css.slice(blockStart, blockEnd));
+    searchStart = blockEnd;
+  }
+
+  return blocks.join('\n');
+}
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -1308,7 +1335,7 @@ describe('V4-06 scheduling workspaces', () => {
 
   it('keeps review, manual Event, and detail controls keyboard-visible and stacked below 42rem', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
-    const mobileCss = css.slice(css.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileCss = collectMediaBlocks(css, '@media (max-width: 42rem) {');
 
     expect(css).toContain('.preflight-review-item__fields');
     expect(css).toContain('.manual-event-proposal-form');
