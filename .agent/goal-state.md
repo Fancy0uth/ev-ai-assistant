@@ -10,7 +10,7 @@ M1 / v0.6：课程、课表截图与学习排程闭环。
 
 ## 当前任务
 
-TASK-V6-02 已完成实现与验证，待创建 `feat(course-import): review timetable candidates before scheduling` 后连续进入 V6-03。
+TASK-V6-03 已完成实现与验证，待主 Agent 创建 `feat(learning): save safe public course citations` 后连续进入 V6-04。
 
 ## 已完成任务
 
@@ -29,14 +29,16 @@ TASK-V6-02 已完成实现与验证，待创建 `feat(course-import): review tim
 
 ## 最近测试结果
 
+V6-03：Contracts focused 19/19、Core focused 11/11、Web focused 4/4；三个 workspace typecheck、V6-03 focused ESLint、`git diff --check` 均 PASS。安全复核已证明 IPv6 special-use/reserved 前缀在 transport 前 fail closed，5s absolute header/15s total deadline 使用注入 timer 可观察；测试只使用 runner-owned 临时目录与注入 DNS/HTTPS transport，未打开真实 socket。
+
 v0.5 关版前主 Agent 复核：Core 20/20、Web 71/71、root typecheck 4/4、关键 E2E 1/1。本次只改规划/状态文档，未运行产品测试或构建。2026-08-31 Level 0：`git diff --check` PASS（仅 LF→CRLF advisory）、允许文件 PASS、基线/分支/必需输入 PASS、声明路径 PASS、package scripts PASS、四任务/关键契约覆盖 PASS、禁用标记与文本完整性扫描 PASS。
 
 ## 尚未验证风险
 
 - v0.6 视觉与公开搜索能力没有获批供应商或真实 Provider；兼容 adapter 未配置时完整外部链保持阻断。
 - v0.5 仍有一项 P2：自动 E2E 属于混合证据，不能替代真实 Provider 验收。
-- V6-01 已验证但未提交：主 Agent 需先解决 Git `index.lock` 权限并创建指定原子提交；随后才可执行 V6-02 的 immutable revision、Course/Rule/Proposal 与 Today Course 关联。
-- Node 内建 DNS pinning/HTTPS fetch 与 metadata-only citation 仍由 V6-03 实现并按冻结 adversarial probes 证明。
+- V6-01 与 V6-02 已分别提交为 `8ee52e1`、`4b4e218`；V6-03 仅待主 Agent 代办原子提交，已保留未暂存工作树。
+- V6-03 的 DNS pinning/HTTPS fetch/metadata-only citation 已完成自动边界验证；真实 Search Provider 和真实网络验收仍未获批。
 
 ## 最后更新时间
 

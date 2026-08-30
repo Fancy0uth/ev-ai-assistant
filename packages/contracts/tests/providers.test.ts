@@ -9,6 +9,7 @@ import {
   deepSeekCredentialStatusResponseSchema,
   deepSeekCredentialWriteInputSchema,
   capabilityMatrixResponseSchema,
+  capabilityDisclosureVersionSchema,
 } from '../src/index';
 
 const publicCredentialStatus = {
@@ -21,6 +22,11 @@ const publicCredentialStatus = {
 };
 
 describe('DeepSeek credential contracts', () => {
+  it('freezes the disclosure version used before a public-search request', () => {
+    expect(capabilityDisclosureVersionSchema.parse('CAPABILITY_DISCLOSURE_V1')).toBe('CAPABILITY_DISCLOSURE_V1');
+    expect(capabilityDisclosureVersionSchema.safeParse('CAPABILITY_DISCLOSURE_V2').success).toBe(false);
+  });
+
   it('describes capability availability and evidence without exposing a credential', () => {
     const parsed = capabilityMatrixResponseSchema.parse({
       data: [

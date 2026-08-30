@@ -9,6 +9,7 @@ export const capabilityKindSchema = z.enum([
 export const capabilityAdapterKindSchema = z.enum(['NONE', 'TEST_FAKE', 'PRODUCTION_ADAPTER']);
 export const capabilityEvidenceKindSchema = z.enum(['NONE', 'AUTOMATED_FAKE', 'REAL_PROVIDER']);
 export const capabilityAvailabilitySchema = z.enum(['READY', 'BLOCKED_PROVIDER']);
+export const capabilityDisclosureVersionSchema = z.literal('CAPABILITY_DISCLOSURE_V1');
 export const capabilityAdapterDescriptorSchema = z.object({
   providerId: z.string().min(1).max(120).nullable(),
   providerLabel: z.string().min(1).max(120),
@@ -142,6 +143,7 @@ export type CapabilityAdapterKind = z.infer<typeof capabilityAdapterKindSchema>;
 export type CapabilityEvidenceKind = z.infer<typeof capabilityEvidenceKindSchema>;
 export type CapabilityAdapterDescriptor = z.infer<typeof capabilityAdapterDescriptorSchema>;
 export type CapabilityDescriptor = z.infer<typeof capabilityDescriptorSchema>;
+export type CapabilityDisclosureVersion = z.infer<typeof capabilityDisclosureVersionSchema>;
 export type ProviderProfile = z.infer<typeof providerProfileSchema>;
 export type DeepSeekCredentialWriteInput = z.input<typeof deepSeekCredentialWriteInputSchema>;
 export type DeepSeekCredentialDeleteInput = z.input<typeof deepSeekCredentialDeleteInputSchema>;

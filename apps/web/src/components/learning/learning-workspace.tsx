@@ -12,6 +12,7 @@ import {
 } from '@ev/contracts';
 import { BookOpenCheck, Link2, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 
 function failureMessage(error: unknown): string {
@@ -119,7 +120,7 @@ export function LearningWorkspace() {
           <p className="section-kicker">COURSE PROFILE</p>
           {courses.length === 0 ? <><h2>还没有课程档案</h2><p>建立后，可以将每门课的官网、周纲和资料与它绑定。</p></> : <>
             <h2>选择课程</h2>
-            <ul className="course-list">{courses.map((course) => <li key={course.id}><button aria-pressed={course.id === courseId} type="button" onClick={() => setCourseId(course.id)}>选择课程：{course.title}</button></li>)}</ul>
+            <ul className="course-list">{courses.map((course) => <li key={course.id}><button aria-pressed={course.id === courseId} type="button" onClick={() => setCourseId(course.id)}>选择课程：{course.title}</button><Link href={`/courses/${course.id}`}>打开课程详情</Link></li>)}</ul>
             {selectedCourse?.officialUrl ? <a className="course-profile__link" href={selectedCourse.officialUrl} rel="noreferrer" target="_blank">打开课程官网</a> : null}
           </>}
         </aside>

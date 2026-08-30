@@ -23,6 +23,7 @@ import { registerFitnessRoutes } from './modules/fitness/routes';
 import { createFitnessService } from './modules/fitness/service';
 import { registerLearningRoutes } from './modules/learning/routes';
 import { createLearningService } from './modules/learning/service';
+import { createPublicResourceFetcher, type PublicResourceFetcher } from './modules/learning/public-resource-fetcher';
 import { registerMemoryRoutes } from './modules/memory/routes';
 import { createMemoryService } from './modules/memory/service';
 import { registerProjectScopeRoutes } from './modules/projects/routes';
@@ -73,8 +74,10 @@ export interface AppOptions {
   artifactRoot?: string;
   visionCapability?: VisionCapability;
   publicSearchCapability?: PublicSearchCapability;
+  publicResourceFetcher?: PublicResourceFetcher;
   learningAdviceCapability?: LearningAdviceCapability;
   courseImportExternalOperationObserver?: (inTransaction: boolean) => void;
+  learningExternalOperationObserver?: (inTransaction: boolean) => void;
   domainAgentProvider?: DomainAgentProvider;
   domainAgentProviders?: Partial<Record<ProviderKey, DomainAgentProvider>>;
   secretStore?: SecretStorePort;
@@ -104,7 +107,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     ...(options.publicSearchCapability ? { publicSearch: options.publicSearchCapability } : {}),
     ...(options.learningAdviceCapability ? { learningAdvice: options.learningAdviceCapability } : {}),
   });
-  createCapabilityRunRepository(database).sweepExpired((options.providerReliabilityNow ?? (() => new Date()))().toISOString());
+  const capabilityRunRepository = createCapabilityRunRepository(database);
+  capabilityRunRepository.sweepExpired((options.providerReliabilityNow ?? (() => new Date()))().toISOString());
 
   registerErrorHandling(app);
   await app.register(cookie);
@@ -134,7 +138,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     }),
   });
   const fitnessService = createFitnessService(calendarRepository);
-  const learningService = createLearningService(database, calendarRepository);
+  const learningService = createLearningService(database, calendarRepository, {
+    capabilityRegistry,
+    capabilityRuns: capabilityRunRepository,
+    publicResourceFetcher: options.publicResourceFetcher ?? createPublicResourceFetcher(),
+    ...(options.learningExternalOperationObserver ? { onExternalOperation: options.learningExternalOperationObserver } : {}),
+  });
   const dayPlanningService = createDayPlanningService(
     calendarRepository,
     taskService,

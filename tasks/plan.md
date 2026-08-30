@@ -2,7 +2,7 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 状态 | Active — v0.4、v0.5 已关闭；V6-02 已完成验证，待 Git 原子提交后继续。 |
+| 状态 | Active — v0.4、v0.5 已关闭；V6-01/V6-02 已提交，V6-03 已完成验证，待主 Agent 原子提交后继续。 |
 | 当前实现基线 | `155b172de91a62feb2762469536555f9a6b2b025`；v0.5 工程 PASS，真实 DeepSeek 仍为独立证据债。 |
 | 权威设计 | [v0.4–v0.9 绑定设计](../docs/superpowers/specs/2026-08-23-v0.4-v0.9-mvp-design.md) |
 | 执行路线 | [v0.4–v0.9 总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) |
@@ -14,7 +14,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | v0.4 | 已关闭 | 兼容排程输入、ACTIVE/CLOSED TimeRequest、Task/Calendar Unit of Work、事务外 preflight Provider、手工 Event、详情路由与 UI-origin 闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.4-action-scheduling-foundation.md) | `docs/reviews/2026-08-23-v0.4-sol-smoke-review.md` |
 | 2 | v0.5 | 已关闭于 `155b172` | DeepSeek/DPAPI 通路、幂等、Run 恢复、超时/配额、脱敏日志、版本一致；真实调用未运行证据债保留 | [计划](../docs/superpowers/plans/2026-08-23-v0.5-provider-reliability.md) | `docs/reviews/2026-08-24-v0.5-sol-final-review.md` |
-| 3 | v0.6 | V6-01 已验证，等待 atomic commit | 私有 raw artifact、Provider 外发披露、可编辑 revision、Course/Rule/SCHEDULE Proposal、课程详情、安全公开 citation、Learning Action→TimeRequest、响应式闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md) | `docs/reviews/2026-08-23-v0.6-sol-smoke-review.md` |
+| 3 | v0.6 | V6-01/V6-02 已提交；V6-03 安全 P1=0，待主 Agent atomic commit | 私有 raw artifact、Provider 外发披露、可编辑 revision、Course/Rule/SCHEDULE Proposal、课程详情、安全公开 citation、Learning Action→TimeRequest、响应式闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md) | `docs/reviews/2026-08-23-v0.6-sol-smoke-review.md` |
 | 4 | v0.7 | 待开始 | 健身/恢复与权威营养数据闭环，无医疗诊断 | [计划](../docs/superpowers/plans/2026-08-23-v0.7-fitness-nutrition-loop.md) | `docs/reviews/2026-08-23-v0.7-sol-smoke-review.md` |
 | 5 | v0.8 | 待开始 | 只读项目分析、本地长期记忆、跨模块唯一排程 Proposal | [计划](../docs/superpowers/plans/2026-08-23-v0.8-project-memory-coordination.md) | `docs/reviews/2026-08-23-v0.8-sol-smoke-review.md` |
 | 6 | v0.9 | 待开始 | 私有 iPhone、Windows 运维、WAL 备份恢复与最终完整门禁 | [计划](../docs/superpowers/plans/2026-08-23-v0.9-private-iphone-operations.md) | `docs/reviews/2026-08-23-v0.9-sol-smoke-review.md` |
