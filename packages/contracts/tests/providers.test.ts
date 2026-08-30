@@ -8,6 +8,7 @@ import {
   deepSeekCredentialDeleteInputSchema,
   deepSeekCredentialStatusResponseSchema,
   deepSeekCredentialWriteInputSchema,
+  capabilityMatrixResponseSchema,
 } from '../src/index';
 
 const publicCredentialStatus = {
@@ -20,6 +21,45 @@ const publicCredentialStatus = {
 };
 
 describe('DeepSeek credential contracts', () => {
+  it('describes capability availability and evidence without exposing a credential', () => {
+    const parsed = capabilityMatrixResponseSchema.parse({
+      data: [
+        {
+          capability: 'COURSE_SCHEDULE_VISION',
+          providerId: null,
+          providerLabel: '未配置',
+          adapterKind: 'NONE',
+          evidenceKind: 'NONE',
+          availability: 'BLOCKED_PROVIDER',
+        },
+        {
+          capability: 'PUBLIC_LEARNING_SEARCH',
+          providerId: null,
+          providerLabel: '未配置',
+          adapterKind: 'NONE',
+          evidenceKind: 'NONE',
+          availability: 'BLOCKED_PROVIDER',
+        },
+        {
+          capability: 'LEARNING_TEXT_ANALYSIS',
+          providerId: null,
+          providerLabel: '未配置',
+          adapterKind: 'NONE',
+          evidenceKind: 'NONE',
+          availability: 'BLOCKED_PROVIDER',
+        },
+      ],
+    });
+
+    expect(parsed.data[0]).toMatchObject({
+      capability: 'COURSE_SCHEDULE_VISION',
+      adapterKind: 'NONE',
+      evidenceKind: 'NONE',
+      availability: 'BLOCKED_PROVIDER',
+    });
+    expect(JSON.stringify(parsed)).not.toMatch(/api.?key|secret|credential/i);
+  });
+
   it('freezes the v0.5 reliability version and DeepSeek allowlists', () => {
     expect(APP_VERSION).toBe('0.5.0');
     expect(deepSeekModelSchema.safeParse('deepseek-v4-flash').success).toBe(true);

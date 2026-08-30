@@ -1,38 +1,48 @@
 import {
+  courseArtifactPathParamsSchema,
+  courseArtifactResponseSchema,
   courseImportPathParamsSchema,
   courseImportResponseSchema,
   createCourseImportSchema,
+  courseScheduleImageMediaTypeSchema,
 } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
+import { ApiError } from '../../http/api-error';
 import { parseRequestInput } from '../../http/validation';
 import { authenticatedOwnerId, createAuthGuard } from '../auth/guard';
 import type { AuthService } from '../auth/service';
 import type { CourseImportService } from './import-service';
 
-interface CourseImportRouteOptions {
-  authService: AuthService;
-  courseImportService: CourseImportService;
-}
+const imageMediaTypes = ['image/png', 'image/jpeg', 'image/webp'] as const;
+const rawBodyLimit = 5_000_000;
 
-export async function registerCourseImportRoutes(
-  app: FastifyInstance,
-  options: CourseImportRouteOptions,
-): Promise<void> {
+interface CourseImportRouteOptions { authService: AuthService; courseImportService: CourseImportService; }
+
+export async function registerCourseImportRoutes(app: FastifyInstance, options: CourseImportRouteOptions): Promise<void> {
   const authGuard = createAuthGuard(options.authService);
-
-  app.post('/v1/course-imports', { preHandler: authGuard }, async (request, reply) => {
-    const input = parseRequestInput(createCourseImportSchema, request.body, '课表截图不符合要求');
-    const result = await options.courseImportService.create(authenticatedOwnerId(request), input);
-    return reply.status(202).send(courseImportResponseSchema.parse({ data: result }));
-  });
-
-  app.get('/v1/course-imports/:id', { preHandler: authGuard }, async (request) => {
-    const { id } = parseRequestInput(
-      courseImportPathParamsSchema,
-      request.params,
-      '课表导入路径参数不符合要求',
+  for (const mediaType of imageMediaTypes) {
+    app.addContentTypeParser(mediaType, { parseAs: 'buffer', bodyLimit: rawBodyLimit }, (_request, body, done) => done(null, body));
+  }
+  app.post('/v1/course-artifacts', { preHandler: authGuard, bodyLimit: rawBodyLimit }, async (request, reply) => {
+    const mediaType = courseScheduleImageMediaTypeSchema.safeParse(request.headers['content-type']?.split(';', 1)[0]);
+    if (!mediaType.success) throw new ApiError(415, 'UNSUPPORTED_IMAGE_TYPE', '仅支持 PNG、JPEG 或 WebP 图片');
+    const result = await options.courseImportService.uploadArtifact(
+      authenticatedOwnerId(request), mediaType.data, request.body as Uint8Array,
     );
-    const result = options.courseImportService.findById(authenticatedOwnerId(request), id);
-    return courseImportResponseSchema.parse({ data: result });
+    return reply.status(result.deduplicated ? 200 : 201).send(courseArtifactResponseSchema.parse({ data: result }));
+  });
+  app.delete('/v1/course-artifacts/:id', { preHandler: authGuard }, async (request, reply) => {
+    const { id } = parseRequestInput(courseArtifactPathParamsSchema, request.params, '图片路径参数不符合要求');
+    await options.courseImportService.deleteArtifact(authenticatedOwnerId(request), id);
+    return reply.status(204).send();
+  });
+  app.post('/v1/course-imports', { preHandler: authGuard }, async (request, reply) => {
+    const input = parseRequestInput(createCourseImportSchema, request.body, '课表导入请求不符合要求');
+    const result = options.courseImportService.create(authenticatedOwnerId(request), input);
+    return reply.status(201).send(courseImportResponseSchema.parse({ data: result }));
+  });
+  app.get('/v1/course-imports/:id', { preHandler: authGuard }, async (request) => {
+    const { id } = parseRequestInput(courseImportPathParamsSchema, request.params, '课表导入路径参数不符合要求');
+    return courseImportResponseSchema.parse({ data: options.courseImportService.findById(authenticatedOwnerId(request), id) });
   });
 }

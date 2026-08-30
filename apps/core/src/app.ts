@@ -46,8 +46,14 @@ import { createTaskSchedulingUnitOfWork } from './modules/tasks/task-scheduling-
 import { registerTodayRoutes } from './modules/today/routes';
 import { openDatabase } from './storage/database';
 import type { AgentProvider } from './modules/agent/provider';
-import type { CourseScheduleVisionProvider } from './modules/agents/provider';
 import type { DomainAgentProvider } from './modules/agents/provider';
+import {
+  createCapabilityRegistry,
+  type LearningAdviceCapability,
+  type PublicSearchCapability,
+  type VisionCapability,
+} from './modules/providers/capabilities';
+import { createCapabilityRunRepository } from './modules/providers/capability-run-repository';
 import { createDailyPlanningContextService } from './modules/daily-planning/context-service';
 import { createDailyPlanAutomationService } from './modules/daily-planning/automation-service';
 import { createDeepSeekDailyPlanningProvider } from './modules/daily-planning/deepseek-provider';
@@ -64,7 +70,10 @@ import { registerDailyPlanningRoutes } from './routes/daily-planning';
 
 export interface AppOptions {
   agentProvider?: AgentProvider;
-  courseScheduleVisionProvider?: CourseScheduleVisionProvider;
+  artifactRoot?: string;
+  visionCapability?: VisionCapability;
+  publicSearchCapability?: PublicSearchCapability;
+  learningAdviceCapability?: LearningAdviceCapability;
   domainAgentProvider?: DomainAgentProvider;
   domainAgentProviders?: Partial<Record<ProviderKey, DomainAgentProvider>>;
   secretStore?: SecretStorePort;
@@ -86,6 +95,15 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   });
   const databasePath = options.databasePath ?? ':memory:';
   const database = openDatabase(databasePath);
+  const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
+  const artifactRoot = options.artifactRoot ?? join(dataRoot, 'artifacts');
+  const capabilityRegistry = createCapabilityRegistry({
+    dataRoot,
+    ...(options.visionCapability ? { vision: options.visionCapability } : {}),
+    ...(options.publicSearchCapability ? { publicSearch: options.publicSearchCapability } : {}),
+    ...(options.learningAdviceCapability ? { learningAdvice: options.learningAdviceCapability } : {}),
+  });
+  createCapabilityRunRepository(database).sweepExpired((options.providerReliabilityNow ?? (() => new Date()))().toISOString());
 
   registerErrorHandling(app);
   await app.register(cookie);
@@ -124,10 +142,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const courseImportService = createCourseImportService(
     database,
     calendarRepository,
-    proposalRepository,
-    options.courseScheduleVisionProvider
-      ? { provider: options.courseScheduleVisionProvider }
-      : {},
+    artifactRoot,
+    capabilityRegistry,
   );
   const providerService = createProviderService(database, {
     providers: {
@@ -224,7 +240,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerMemoryRoutes(app, { authService, memoryService });
   await registerProjectScopeRoutes(app, { authService, projectScopeService });
   await registerProposalRoutes(app, { authService, proposalService, idempotencyService });
-  await registerProviderRoutes(app, { authService, providerService, providerCredentialService });
+  await registerProviderRoutes(app, { authService, providerService, providerCredentialService, capabilityRegistry });
   await registerDailyPlanningRoutes(app, {
     authService,
     dailyPlanningService,

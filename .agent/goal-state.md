@@ -10,7 +10,7 @@ M1 / v0.6：课程、课表截图与学习排程闭环。
 
 ## 当前任务
 
-TASK-V6-01：以产品比较基线 `155b172`、运行时代码基线 `d5d4ea5` 开始实现 bounded raw 课表图片、Owner 私有 artifact、能力披露和 additive migration v19；Terra 从最新干净控制面 HEAD 启动，尚未开始产品代码。
+TASK-V6-01 已完成实现与验证，等待主 Agent 提交 `feat(course-import): secure local timetable artifacts`；Git worktree 无法创建 `index.lock`，在该原子提交存在前不得开始 V6-02。
 
 ## 已完成任务
 
@@ -35,8 +35,8 @@ v0.5 关版前主 Agent 复核：Core 20/20、Web 71/71、root typecheck 4/4、�
 
 - v0.6 视觉与公开搜索能力没有获批供应商或真实 Provider；兼容 adapter 未配置时完整外部链保持阻断。
 - v0.5 仍有一项 P2：自动 E2E 属于混合证据，不能替代真实 Provider 验收。
-- 当前产品代码仍以 Base64 JSON 传输，高置信候选会直接生成 Proposal，BFF raw body 也没有上限；这些是 V6-01/V6-02 的首要 RED 事实。
-- Node 内建 DNS pinning/HTTPS fetch、安全图片 header parser 和 v19 原子 lineage 需要 Terra 按冻结 adversarial probes 证明。
+- V6-01 已验证但未提交：主 Agent 需先解决 Git `index.lock` 权限并创建指定原子提交；随后才可执行 V6-02 的 immutable revision、Course/Rule/Proposal 与 Today Course 关联。
+- Node 内建 DNS pinning/HTTPS fetch 与 metadata-only citation 仍由 V6-03 实现并按冻结 adversarial probes 证明。
 
 ## 最后更新时间
 

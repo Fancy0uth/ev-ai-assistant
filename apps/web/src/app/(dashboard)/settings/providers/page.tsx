@@ -190,6 +190,11 @@ export default function ProviderSettingsPage() {
       <p>密钥只保留在这台设备上。保存后浏览器不会显示或保留该密钥。</p>
       <p>每日计划模型：deepseek-v4-flash（仅允许 deepseek-v4-flash / deepseek-v4-pro）</p>
       <p>真实连接测试只会在你主动点击后发送最小请求；本页面不会自动调用 Provider。</p>
+      <section className="provider-credential-card" aria-label="学习能力状态">
+        <h2>课程学习能力</h2>
+        <p>课表视觉识别与匿名公开检索当前未配置：系统会显示 BLOCKED_PROVIDER，不会上传图片、抓取网页或伪造结果。</p>
+        <p>DeepSeek 仅可用于文本学习建议；它不会被用作视觉识别或公开检索 Provider。</p>
+      </section>
 
       {error ? <p className="dashboard-alert" role="alert">{error}</p> : null}
       <p className="provider-credential-live" aria-live="polite" aria-busy={isLoading}>

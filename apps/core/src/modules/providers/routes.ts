@@ -7,6 +7,7 @@ import {
   deepSeekCredentialStatusResponseSchema,
   deepSeekCredentialWriteInputSchema,
   providerListResponseSchema,
+  capabilityMatrixResponseSchema,
 } from '@ev/contracts';
 import type { FastifyInstance, RouteShorthandOptions } from 'fastify';
 import { ApiError } from '../../http/api-error';
@@ -19,11 +20,13 @@ import {
 } from './credential-service';
 import { SecretStoreUnavailableError } from './secret-store';
 import type { ProviderService } from './service';
+import type { CapabilityRegistry } from './capabilities';
 
 interface ProviderRouteOptions {
   authService: AuthService;
   providerService: ProviderService;
   providerCredentialService: ProviderCredentialService;
+  capabilityRegistry: CapabilityRegistry;
 }
 
 function rethrowCredentialError(error: unknown): never {
@@ -59,6 +62,9 @@ export async function registerProviderRoutes(
   };
   app.get('/v1/providers', { preHandler: authGuard }, async () => {
     return providerListResponseSchema.parse({ data: options.providerService.listProfiles() });
+  });
+  app.get('/v1/provider-capabilities', { preHandler: authGuard }, async () => {
+    return capabilityMatrixResponseSchema.parse({ data: options.capabilityRegistry.list() });
   });
   app.get('/v1/providers/deepseek/credential', credentialRouteOptions, async (request) => {
     return deepSeekCredentialStatusResponseSchema.parse({

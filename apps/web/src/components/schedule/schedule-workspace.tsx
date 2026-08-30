@@ -1,6 +1,12 @@
 'use client';
 
-import { courseImportResponseSchema, termListResponseSchema, termResponseSchema, type Term } from '@ev/contracts';
+import {
+  courseArtifactResponseSchema,
+  courseImportResponseSchema,
+  termListResponseSchema,
+  termResponseSchema,
+  type Term,
+} from '@ev/contracts';
 import { CalendarPlus, FileImage, Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
@@ -8,19 +14,6 @@ import { ManualEventProposalPanel } from './manual-event-proposal-panel';
 
 function failureMessage(error: unknown): string {
   return error instanceof CoreClientError ? error.message : '本地日程操作暂时未完成，请稍后重试。';
-}
-
-function imageAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('课表截图无法读取'));
-    reader.onload = () => {
-      const result = String(reader.result ?? '');
-      const base64 = result.includes(',') ? result.slice(result.indexOf(',') + 1) : result;
-      resolve(base64);
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function todayInShanghai(): string {
@@ -87,9 +80,14 @@ export function ScheduleWorkspace() {
         throw new Error('仅支持 PNG、JPEG 或 WebP 课表截图');
       }
       if (file.size > 5_000_000) throw new Error('课表截图不能超过 5 MB');
+      const uploaded = courseArtifactResponseSchema.parse(await requestCore('course-artifacts', {
+        method: 'POST',
+        headers: { 'content-type': file.type },
+        body: file,
+      })).data;
       const payload = await requestCore('course-imports', {
         method: 'POST',
-        body: JSON.stringify({ termId, image: { mimeType: file.type, base64: await imageAsBase64(file) } }),
+        body: JSON.stringify({ termId, artifactId: uploaded.artifact.id }),
       });
       setImportResult(courseImportResponseSchema.parse(payload).data);
       setFile(null);
@@ -105,7 +103,7 @@ export function ScheduleWorkspace() {
       <header className="domain-workspace__header">
         <p className="section-kicker">SCHEDULE / REVIEW GATE</p>
         <h1 id="schedule-heading">日程与课表</h1>
-        <p>课表截图先变成候选时间块；只有你确认的提案才能写入日程。原图不会保存在本地数据库。</p>
+        <p>课表截图先作为私有本地文件保存，再变成候选时间块；只有你确认的提案才能写入日程。</p>
       </header>
 
       <div className="domain-workspace__grid">
@@ -138,8 +136,8 @@ export function ScheduleWorkspace() {
             课表截图
             <input aria-label="课表截图" accept="image/png,image/jpeg,image/webp" type="file" disabled={terms.length === 0} onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
           </label>
-          <p className="domain-form__hint">PNG、JPEG 或 WebP，最大 5 MB；原图仅用于本次识别请求。</p>
-          <button disabled={!file || !termId || isImporting} type="submit"><FileImage aria-hidden="true" size={16} /> {isImporting ? '正在识别…' : '生成待审核日程'}</button>
+          <p className="domain-form__hint">PNG、JPEG 或 WebP，最大 5 MB；图片会先安全保存在本地，确认外发前不会发送给 Provider。</p>
+          <button disabled={!file || !termId || isImporting} type="submit"><FileImage aria-hidden="true" size={16} /> {isImporting ? '正在保存…' : '保存并查看外发披露'}</button>
         </form>
       </div>
 
@@ -151,13 +149,14 @@ export function ScheduleWorkspace() {
 }
 
 function ImportResult({ result }: { result: ReturnType<typeof courseImportResponseSchema.parse>['data'] }) {
+  const blocked = result.import.status === 'BLOCKED_PROVIDER';
   return (
     <section className="domain-card import-result" aria-live="polite">
       <p className="section-kicker">IMPORT RESULT</p>
-      <h2>{result.run.status === 'PROPOSED' ? '已生成待确认提案' : result.run.status === 'REVIEW_REQUIRED' ? '需要人工核对候选' : '导入暂未完成'}</h2>
-      <p>识别到 {result.run.candidateCount} 个候选时间块；状态：{result.run.status}</p>
-      {result.run.candidates.length > 0 ? <ul>{result.run.candidates.map((candidate) => <li key={`${candidate.title}-${candidate.weekday}-${candidate.startLocalTime}`}><strong>{candidate.title}</strong><small>周{candidate.weekday} · {candidate.startLocalTime}–{candidate.endLocalTime} · 置信度 {Math.round(candidate.confidence * 100)}%</small></li>)}</ul> : null}
-      {result.proposal ? <p className="domain-result__boundary">提案“{result.proposal.title}”正在等待你的确认，尚未写入日程。</p> : null}
+      <h2>{blocked ? 'Provider 未配置，外发已阻断' : '请先确认外发披露'}</h2>
+      <p>图片已保存到 Owner 私有本地 artifact；状态：{result.import.status}</p>
+      <p className="domain-result__boundary">用途：{result.disclosure.purpose}。Provider：{result.disclosure.providerLabel}；证据：{result.disclosure.evidenceKind}。</p>
+      <p>将发送：{result.disclosure.selectedData.join('、')}。本任务尚未调用任何外部 Provider。</p>
     </section>
   );
 }

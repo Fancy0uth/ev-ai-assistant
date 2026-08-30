@@ -25,7 +25,7 @@
 ## v0.6：Learning and Schedule Loop
 
 - [x] V6-00：Sol 基于 `155b172` 完成一次整版分析，冻结四个垂直任务、v19 lineage、REST/状态/错误、Provider 证据边界和最终单次审查矩阵。
-- [ ] V6-01：用 bounded raw image 替换 Base64 JSON，交付 Owner 私有 artifact、MIME/magic/字节/像素/hash/清理、能力披露、生产 `BLOCKED_PROVIDER` 和无损 migration v19。
+- [ ] V6-01：实现与验证完成，等待主 Agent 解决 Git `index.lock` 权限并提交 `feat(course-import): secure local timetable artifacts`。
 - [ ] V6-02：将任意置信度 Vision strict data 固化为可编辑/可排除 immutable revision；Owner 确认后创建 Course/Rule/SCHEDULE Proposal，Proposal 接受后才展开 Today Event。
 - [ ] V6-03：交付独立 Course 详情、官方/用户/公开来源和学习进度；以 DNS-pinned HTTPS、逐跳重验、大小/类型限制保存 metadata-only citation。
 - [ ] V6-04：基于哈希一致的 citation 生成 strict 学习建议；确认后原子创建 Learning Action + ACTIVE TimeRequest，进入已有日计划，完成桌面/iPhone Fake E2E 并同步 0.6.0。

@@ -28,6 +28,17 @@ export function registerErrorHandling(app: FastifyInstance): void {
   });
 
   app.setErrorHandler((error, request, reply) => {
+    const fastifyCode = (error as { code?: string }).code;
+    if (fastifyCode === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return reply.status(413).send(apiErrorSchema.parse({
+        error: { code: 'IMAGE_TOO_LARGE', message: '课表截图不能超过 5 MB' },
+      }));
+    }
+    if (fastifyCode === 'FST_ERR_CTP_INVALID_MEDIA_TYPE') {
+      return reply.status(415).send(apiErrorSchema.parse({
+        error: { code: 'UNSUPPORTED_IMAGE_TYPE', message: '仅支持 PNG、JPEG 或 WebP 图片' },
+      }));
+    }
     if (error instanceof ApiError) {
       const details = error.details === undefined ? {} : { details: error.details };
       return reply.status(error.statusCode).send(

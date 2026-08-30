@@ -3,6 +3,26 @@ import * as z from 'zod';
 export const providerKeySchema = z.enum(['DEEPSEEK', 'CODEX_LOCAL']);
 export const providerAvailabilitySchema = z.enum(['READY', 'NOT_CONFIGURED', 'UNAVAILABLE']);
 
+export const capabilityKindSchema = z.enum([
+  'COURSE_SCHEDULE_VISION', 'PUBLIC_LEARNING_SEARCH', 'LEARNING_TEXT_ANALYSIS',
+]);
+export const capabilityAdapterKindSchema = z.enum(['NONE', 'TEST_FAKE', 'PRODUCTION_ADAPTER']);
+export const capabilityEvidenceKindSchema = z.enum(['NONE', 'AUTOMATED_FAKE', 'REAL_PROVIDER']);
+export const capabilityAvailabilitySchema = z.enum(['READY', 'BLOCKED_PROVIDER']);
+export const capabilityAdapterDescriptorSchema = z.object({
+  providerId: z.string().min(1).max(120).nullable(),
+  providerLabel: z.string().min(1).max(120),
+  adapterKind: capabilityAdapterKindSchema,
+}).strict();
+export const capabilityDescriptorSchema = capabilityAdapterDescriptorSchema.extend({
+  capability: capabilityKindSchema,
+  evidenceKind: capabilityEvidenceKindSchema,
+  availability: capabilityAvailabilitySchema,
+}).strict();
+export const capabilityMatrixResponseSchema = z.object({
+  data: z.array(capabilityDescriptorSchema).length(3),
+}).strict();
+
 export const providerProfileSchema = z
   .object({
     key: providerKeySchema,
@@ -117,6 +137,11 @@ export const agentRunResponseSchema = z.object({ data: agentRunSchema }).strict(
 export const agentRunListResponseSchema = z.object({ data: z.array(agentRunSchema) }).strict();
 
 export type ProviderKey = z.infer<typeof providerKeySchema>;
+export type CapabilityKind = z.infer<typeof capabilityKindSchema>;
+export type CapabilityAdapterKind = z.infer<typeof capabilityAdapterKindSchema>;
+export type CapabilityEvidenceKind = z.infer<typeof capabilityEvidenceKindSchema>;
+export type CapabilityAdapterDescriptor = z.infer<typeof capabilityAdapterDescriptorSchema>;
+export type CapabilityDescriptor = z.infer<typeof capabilityDescriptorSchema>;
 export type ProviderProfile = z.infer<typeof providerProfileSchema>;
 export type DeepSeekCredentialWriteInput = z.input<typeof deepSeekCredentialWriteInputSchema>;
 export type DeepSeekCredentialDeleteInput = z.input<typeof deepSeekCredentialDeleteInputSchema>;

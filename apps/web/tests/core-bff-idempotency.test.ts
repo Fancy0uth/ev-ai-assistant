@@ -7,6 +7,27 @@ afterEach(() => {
 });
 
 describe('Core BFF idempotency headers', () => {
+  it('rejects a raw upload stream over 5 MB before it calls Core', async () => {
+    vi.stubEnv('EV_CORE_URL', 'http://127.0.0.1:4311');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(
+      new Request('http://localhost/api/core/course-artifacts', {
+        method: 'POST',
+        headers: { 'content-type': 'image/png' },
+        body: new Uint8Array(5_000_001),
+      }),
+      { params: Promise.resolve({ path: ['course-artifacts'] }) },
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: 'BFF_BODY_TOO_LARGE', message: '上传内容超过 5 MB 限制' },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('forwards only the approved Idempotency request header and exposes the approved response headers', async () => {
     vi.stubEnv('EV_CORE_URL', 'http://127.0.0.1:4311');
     const fetchMock = vi.fn().mockResolvedValue(

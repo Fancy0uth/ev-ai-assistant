@@ -207,3 +207,13 @@ V6-01 启动检查、Terra 交接记录和最终 BASE→TARGET 审查。控制�
 ### 是否可逆
 
 可逆；若计划提交被重组，只需更新执行基线，不改变产品比较基线。
+
+## V6-01 执行记录：raw artifact 边界已落地
+
+### 决定
+
+V6-01 用 Fastify raw Buffer parser、BFF bounded stream、Node 内建图片 header parser 和随机 private storage key 替换 Base64 JSON。Capability registry 只暴露 descriptor；没有注册 Vision adapter 时 import 持久化为 `BLOCKED_PROVIDER`，绝不调用 Provider。
+
+### 保留约束
+
+v19 仅追加表、索引、immutable trigger；artifact bytes 不进入 SQLite。Fake registry 继续要求 test 环境、显式开关和 resolved runner-owned data root 三重同时满足。V6-02 负责首次读取 artifact 并在事务外调用 Vision。

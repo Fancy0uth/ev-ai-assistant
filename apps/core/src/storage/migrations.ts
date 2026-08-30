@@ -999,6 +999,192 @@ const migrations: readonly Migration[] = [
         where status = 'GENERATING';
     `,
   },
+  {
+    version: 19,
+    name: 'add_v06_learning_schedule_loop',
+    sql: `
+      create table local_artifacts (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        kind text not null check (kind = 'COURSE_SCHEDULE_IMAGE'),
+        storage_key text not null check (length(storage_key) between 1 and 512 and storage_key not like '/%' and storage_key not like '%..%'),
+        media_type text not null check (media_type in ('image/png', 'image/jpeg', 'image/webp')),
+        byte_size integer not null check (byte_size between 1 and 5000000),
+        width integer not null check (width between 1 and 12000),
+        height integer not null check (height between 1 and 12000),
+        pixel_count integer not null check (pixel_count between 1 and 40000000),
+        sha256 text not null check (length(sha256) = 64),
+        state text not null check (state in ('ACTIVE', 'DELETE_PENDING', 'DELETED')),
+        created_at text not null,
+        delete_requested_at text,
+        deleted_at text,
+        version integer not null check (version >= 1)
+      );
+      create index local_artifacts_owner_sha256_idx on local_artifacts(owner_id, sha256);
+
+      create table external_capability_runs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        capability text not null check (capability in ('COURSE_SCHEDULE_VISION', 'PUBLIC_LEARNING_SEARCH', 'LEARNING_TEXT_ANALYSIS')),
+        operation text not null check (operation in ('COURSE_IMPORT_EXTRACT', 'COURSE_RESOURCE_SEARCH', 'LEARNING_ADVICE_GENERATE')),
+        resource_id text not null,
+        provider_id text,
+        provider_label text,
+        adapter_kind text not null check (adapter_kind in ('NONE', 'TEST_FAKE', 'PRODUCTION_ADAPTER')),
+        evidence_kind text not null check (evidence_kind in ('NONE', 'AUTOMATED_FAKE', 'REAL_PROVIDER')),
+        disclosure_json text not null check (json_valid(disclosure_json)),
+        disclosure_version text not null check (disclosure_version = 'CAPABILITY_DISCLOSURE_V1'),
+        idempotency_key text,
+        request_hash text check (request_hash is null or length(request_hash) = 64),
+        status text not null check (status in ('BLOCKED_PROVIDER', 'AWAITING_DISCLOSURE', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+        lease_token text,
+        lease_expires_at text,
+        deadline_at text,
+        policy_version text not null check (policy_version = 'CAPABILITY_POLICY_V1'),
+        local_date text not null,
+        reserved_calls integer not null default 0 check (reserved_calls between 0 and 20),
+        actual_calls integer not null default 0 check (actual_calls between 0 and 20),
+        input_chars integer not null default 0 check (input_chars between 0 and 20000),
+        output_chars integer not null default 0 check (output_chars between 0 and 100000),
+        failure_code text,
+        app_version text not null check (length(app_version) between 5 and 64),
+        created_at text not null,
+        updated_at text not null,
+        version integer not null check (version >= 1)
+      );
+      create unique index external_capability_runs_owner_idempotency_idx
+        on external_capability_runs(owner_id, idempotency_key) where idempotency_key is not null;
+      create index external_capability_runs_owner_date_capability_idx
+        on external_capability_runs(owner_id, local_date, capability, status, created_at);
+
+      create table course_imports_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        term_id text not null references terms(id) on delete cascade,
+        artifact_id text not null references local_artifacts(id) on delete restrict,
+        capability_run_id text not null references external_capability_runs(id) on delete restrict,
+        status text not null check (status in ('BLOCKED_PROVIDER', 'AWAITING_DISCLOSURE', 'EXTRACTING', 'REVIEW_REQUIRED', 'SCHEDULE_PROPOSAL_PENDING', 'CONFIRMED', 'SCHEDULE_REJECTED', 'FAILED')),
+        current_revision_id text,
+        schedule_proposal_id text references proposals(id) on delete set null,
+        confirm_idempotency_key text,
+        confirm_request_hash text check (confirm_request_hash is null or length(confirm_request_hash) = 64),
+        failure_code text,
+        created_at text not null,
+        updated_at text not null,
+        version integer not null check (version >= 1)
+      );
+      create index course_imports_v2_owner_created_idx on course_imports_v2(owner_id, created_at desc, id);
+
+      create table course_import_revisions (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        import_id text not null references course_imports_v2(id) on delete cascade,
+        parent_revision_id text references course_import_revisions(id) on delete restrict,
+        revision_no integer not null check (revision_no >= 1),
+        candidates_json text not null check (json_valid(candidates_json)),
+        content_hash text not null check (length(content_hash) = 64),
+        created_by text not null check (created_by in ('VISION', 'OWNER')),
+        created_at text not null,
+        unique(import_id, revision_no)
+      );
+      create trigger course_import_revisions_immutable_update before update on course_import_revisions begin select raise(abort, 'course import revisions are immutable'); end;
+      create trigger course_import_revisions_immutable_delete before delete on course_import_revisions begin select raise(abort, 'course import revisions are immutable'); end;
+
+      create table course_import_entities (
+        owner_id text not null references owners(id) on delete cascade,
+        import_id text not null references course_imports_v2(id) on delete cascade,
+        candidate_id text not null,
+        course_id text not null references courses(id) on delete restrict,
+        calendar_rule_id text not null references calendar_rules(id) on delete restrict,
+        created_at text not null,
+        primary key(import_id, candidate_id),
+        unique(calendar_rule_id)
+      );
+
+      create table course_learning_contexts (
+        owner_id text not null references owners(id) on delete cascade,
+        course_id text not null references courses(id) on delete cascade,
+        stage text not null check (stage in ('NOT_STARTED', 'PREPARING', 'IN_PROGRESS', 'REVIEWING', 'COMPLETE')),
+        progress_note text not null default '' check (length(progress_note) <= 2000),
+        created_at text not null,
+        updated_at text not null,
+        version integer not null check (version >= 1),
+        primary key(owner_id, course_id)
+      );
+
+      create table course_resource_search_runs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        course_id text not null references courses(id) on delete cascade,
+        capability_run_id text not null references external_capability_runs(id) on delete restrict,
+        query text not null check (length(query) between 1 and 300),
+        status text not null check (status in ('BLOCKED_PROVIDER', 'AWAITING_DISCLOSURE', 'SEARCHING', 'SUCCEEDED', 'FAILED')),
+        citation_count integer not null default 0 check (citation_count between 0 and 5),
+        rejected_count integer not null default 0 check (rejected_count between 0 and 5),
+        failure_code text,
+        created_at text not null,
+        updated_at text not null,
+        version integer not null check (version >= 1)
+      );
+
+      create table course_resource_citations (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        course_id text not null references courses(id) on delete cascade,
+        course_resource_id text not null references course_resources(id) on delete restrict,
+        search_run_id text not null references course_resource_search_runs(id) on delete restrict,
+        title text not null,
+        url text not null check (url like 'https://%'),
+        publisher text not null,
+        retrieved_at text not null,
+        content_hash text not null check (length(content_hash) = 64),
+        media_type text not null check (media_type in ('text/html', 'text/plain')),
+        created_at text not null
+      );
+      create trigger course_resource_citations_immutable_update before update on course_resource_citations begin select raise(abort, 'course resource citations are immutable'); end;
+      create trigger course_resource_citations_immutable_delete before delete on course_resource_citations begin select raise(abort, 'course resource citations are immutable'); end;
+
+      create table learning_runs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        course_id text not null references courses(id) on delete cascade,
+        search_run_id text not null references course_resource_search_runs(id) on delete restrict,
+        capability_run_id text not null references external_capability_runs(id) on delete restrict,
+        citation_ids_json text not null check (json_valid(citation_ids_json)),
+        status text not null check (status in ('BLOCKED_PROVIDER', 'AWAITING_DISCLOSURE', 'GENERATING', 'PROPOSAL_PENDING', 'ACCEPTED', 'REJECTED', 'FAILED')),
+        proposal_id text references proposals(id) on delete set null,
+        failure_code text,
+        created_at text not null,
+        updated_at text not null,
+        version integer not null check (version >= 1)
+      );
+      create table learning_actions (
+        owner_id text not null references owners(id) on delete cascade,
+        action_id text primary key references actions(id) on delete cascade,
+        course_id text not null references courses(id) on delete restrict,
+        learning_run_id text not null references learning_runs(id) on delete restrict,
+        created_at text not null
+      );
+      create table learning_action_citations (
+        owner_id text not null references owners(id) on delete cascade,
+        action_id text not null references actions(id) on delete cascade,
+        citation_id text not null references course_resource_citations(id) on delete restrict,
+        created_at text not null,
+        primary key(action_id, citation_id)
+      );
+      create table audit_events (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        event_type text not null check (event_type in ('ARTIFACT_UPLOADED', 'ARTIFACT_DELETE_REQUESTED', 'ARTIFACT_DELETED', 'DISCLOSURE_ACCEPTED', 'IMPORT_REVISION_SAVED', 'COURSE_IMPORT_CONFIRMED', 'COURSE_CONTEXT_UPDATED', 'RESOURCE_SEARCH_COMPLETED', 'LEARNING_PROPOSAL_CREATED', 'LEARNING_PROPOSAL_MATERIALIZED')),
+        entity_type text not null,
+        entity_id text not null,
+        metadata_json text not null check (json_valid(metadata_json)),
+        created_at text not null
+      );
+      create trigger audit_events_immutable_update before update on audit_events begin select raise(abort, 'audit events are immutable'); end;
+      create trigger audit_events_immutable_delete before delete on audit_events begin select raise(abort, 'audit events are immutable'); end;
+    `,
+  },
 ];
 
 export function runMigrations(

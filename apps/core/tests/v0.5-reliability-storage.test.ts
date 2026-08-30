@@ -9,6 +9,35 @@ afterEach(() => {
 });
 
 describe('v0.5 reliability storage migration', () => {
+  it('adds v19 learning loop lineage without rewriting a v18 historical app version', () => {
+    const database = new Database(':memory:');
+    databases.push(database);
+    database.pragma('foreign_keys = ON');
+    runMigrations(database, 18);
+    const createdAt = '2026-08-31T00:00:00.000Z';
+    database.prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+      .run('v18-owner', 'v18-owner', 'hash', createdAt);
+    database.prepare(
+      `insert into daily_plan_runs (
+        id, owner_id, contract_version, local_date, trigger, status, context_manifest_json,
+        proposal_id, failure_code, created_at, completed_at, app_version
+      ) values (?, ?, 'DAILY_PLAN_V1', '2026-08-31', 'MANUAL', 'CONTEXT_READY', '{}', null, null, ?, null, '0.5.0')`,
+    ).run('v18-run', 'v18-owner', createdAt);
+
+    runMigrations(database);
+
+    expect(database.prepare('select version, name from schema_migrations where version = 19').get()).toEqual({
+      version: 19,
+      name: 'add_v06_learning_schedule_loop',
+    });
+    expect(database.prepare('select app_version from daily_plan_runs where id = ?').get('v18-run'))
+      .toEqual({ app_version: '0.5.0' });
+    const artifactColumns = database.prepare("select name from pragma_table_info('local_artifacts')").all()
+      .map((row) => (row as { name: string }).name);
+    expect(artifactColumns).toEqual(expect.arrayContaining(['owner_id', 'storage_key', 'sha256', 'state']));
+    expect(artifactColumns).not.toEqual(expect.arrayContaining(['blob', 'base64', 'absolute_path']));
+  });
+
   it('upgrades v17 data additively and exposes no raw Provider payload columns', () => {
     const database = new Database(':memory:');
     databases.push(database);
