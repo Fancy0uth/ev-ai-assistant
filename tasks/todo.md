@@ -1,6 +1,6 @@
 # EV AI Dashboard MVP 任务清单
 
-执行边界、依赖和命令以 [总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) 与各版独立计划为准。以下 ID 与计划一一对应；版本之间不得跳序。
+执行边界、依赖和命令以 [总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) 与各版独立计划为准。v0.5 已在 `155b172` 工程关版；v0.6 整版计划已冻结，产品实现尚未开始。以下 ID 与计划一一对应；版本之间不得跳序。
 
 ## v0.4：Action Scheduling Foundation
 
@@ -20,15 +20,17 @@
 - [x] V5-04：持久化脱敏 Provider 调用日志与分层 health 元数据。
 - [x] V5-05：建立单一版本事实并同步 0.5.0 package/health/run 元数据。
 - [x] V5-R1：按 Sol FAIL review 集中关闭 atomic UoW、STALE、quota、recovery、migration 五个 P1，并通过最小验证矩阵。
-- [ ] V5-06：test-only Fake、DPAPI port 与脱敏自动证据已完成；真实 DeepSeek 人工验收仍为 `NOT RUN — APPROVAL REQUIRED`。
+- [x] V5-06：v0.5 工程关版于 `155b172`；test-only Fake、DPAPI port 与脱敏自动证据完成，真实 DeepSeek 人工验收以 `NOT RUN — APPROVAL REQUIRED` 证据债保留。
 
 ## v0.6：Learning and Schedule Loop
 
-- [ ] V6-01：冻结 artifact/import revision/citation 契约并完成无损 migration v19。
-- [ ] V6-02：实现私有 artifact store 与真实 Vision Provider adapter。
-- [ ] V6-03：完成低置信候选编辑确认到 Course/Rule/Event Proposal。
-- [ ] V6-04：公开检索带来源地生成 Learning Action→TimeRequest Proposal。
-- [ ] V6-05：交付课程 UI、聚焦 E2E、真实截图/检索证据并同步 0.6.0 元数据。
+- [x] V6-00：Sol 基于 `155b172` 完成一次整版分析，冻结四个垂直任务、v19 lineage、REST/状态/错误、Provider 证据边界和最终单次审查矩阵。
+- [ ] V6-01：用 bounded raw image 替换 Base64 JSON，交付 Owner 私有 artifact、MIME/magic/字节/像素/hash/清理、能力披露、生产 `BLOCKED_PROVIDER` 和无损 migration v19。
+- [ ] V6-02：将任意置信度 Vision strict data 固化为可编辑/可排除 immutable revision；Owner 确认后创建 Course/Rule/SCHEDULE Proposal，Proposal 接受后才展开 Today Event。
+- [ ] V6-03：交付独立 Course 详情、官方/用户/公开来源和学习进度；以 DNS-pinned HTTPS、逐跳重验、大小/类型限制保存 metadata-only citation。
+- [ ] V6-04：基于哈希一致的 citation 生成 strict 学习建议；确认后原子创建 Learning Action + ACTIVE TimeRequest，进入已有日计划，完成桌面/iPhone Fake E2E 并同步 0.6.0。
+
+v0.6 的 Vision/Search 供应商、真实 Key 和真实调用均未获批准。生产保持未配置，自动测试 Fake 必须满足 `NODE_ENV=test`、显式 v0.6 flag 和 runner-owned 临时数据目录；真实成功证据继续记录为 `NOT RUN — APPROVAL REQUIRED`。
 
 ## v0.7：Fitness and Nutrition Loop
 
