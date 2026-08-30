@@ -75,6 +75,43 @@ describe('calendar and proposal contracts', () => {
     }).success).toBe(true);
   });
 
+  it('permits a Learning Proposal to carry only a cited Study Action and scheduling request', () => {
+    const proposal = {
+      kind: 'LEARNING',
+      source: 'LEARNING_AGENT',
+      title: '确认后安排矩阵复习',
+      changes: [{
+        operation: 'CREATE_LEARNING_ACTION',
+        action: {
+          id: '00000000-0000-4000-8000-000000000801',
+          courseId: '00000000-0000-4000-8000-000000000802',
+          title: '复习奇异值分解',
+          targetDate: '2026-09-08',
+          status: 'OPEN',
+          kind: 'STUDY',
+          version: 1,
+          createdAt: '2026-08-31T00:00:00.000Z',
+          updatedAt: '2026-08-31T00:00:00.000Z',
+        },
+        scheduling: {
+          timeRequestId: '00000000-0000-4000-8000-000000000803',
+          durationMinutes: 60,
+          priority: 'HIGH',
+          earliestStartLocalTime: '18:00',
+          latestEndLocalTime: '21:00',
+          isFixed: false,
+        },
+        citationIds: ['00000000-0000-4000-8000-000000000804'],
+      }],
+    };
+    expect(createProposalSchema.parse(proposal)).toEqual(proposal);
+    expect(createProposalSchema.safeParse({ ...proposal, source: 'DAILY_SCHEDULER' }).success).toBe(false);
+    const [learningChange] = proposal.changes;
+    if (!learningChange) throw new Error('learning proposal fixture requires one change');
+    expect(createProposalSchema.safeParse({ ...proposal, changes: [{ ...learningChange, action: { ...learningChange.action, kind: 'WORK' } }] }).success).toBe(false);
+    expect(createProposalSchema.safeParse({ ...proposal, changes: [{ ...proposal.changes[0], citationIds: [] }] }).success).toBe(false);
+  });
+
   it('keeps Event, Signal and TimeRequest distinct for the daily coordination loop', () => {
     const base = {
       id: 'c52c9b3e-65f4-45c1-8de9-3f10db3f4d1c',

@@ -1,7 +1,7 @@
 import * as z from 'zod';
 
-/** The only application version fact exposed by v0.5 runtime contracts. */
-export const APP_VERSION = '0.5.0' as const;
+/** The only application version fact exposed by runtime contracts. */
+export const APP_VERSION = '0.6.0' as const;
 
 export const appVersionSchema = z
   .string()

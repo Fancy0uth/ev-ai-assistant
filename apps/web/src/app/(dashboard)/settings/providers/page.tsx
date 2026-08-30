@@ -192,8 +192,9 @@ export default function ProviderSettingsPage() {
       <p>真实连接测试只会在你主动点击后发送最小请求；本页面不会自动调用 Provider。</p>
       <section className="provider-credential-card" aria-label="学习能力状态">
         <h2>课程学习能力</h2>
-        <p>课表视觉识别与匿名公开检索当前未配置：系统会显示 BLOCKED_PROVIDER，不会上传图片、抓取网页或伪造结果。</p>
-        <p>DeepSeek 仅可用于文本学习建议；它不会被用作视觉识别或公开检索 Provider。</p>
+        <p>课表视觉识别、匿名公开检索和文本学习建议未配置时均显示 BLOCKED_PROVIDER；系统不会上传图片、抓取网页或伪造结果。</p>
+        <p>保存 DeepSeek 凭据后，课程详情仍会先要求确认文本学习建议的外发披露；视觉识别和匿名公开检索不会使用 DeepSeek。</p>
+        <p>自动测试 Fake 证据，不代表真实 Provider（仅在受控自动测试运行中出现）。</p>
       </section>
 
       {error ? <p className="dashboard-alert" role="alert">{error}</p> : null}

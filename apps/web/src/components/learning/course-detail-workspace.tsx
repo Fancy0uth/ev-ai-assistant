@@ -6,9 +6,12 @@ import {
   courseResourceSearchCreateResponseSchema,
   courseResourceSearchRunSchema,
   courseResourceSearchResponseSchema,
+  learningRunCreateResponseSchema,
+  learningRunGenerateResponseSchema,
   type CourseDetail,
   type CourseResourceCitation,
   type CourseResourceSearchRun,
+  type LearningRun,
 } from '@ev/contracts';
 import { ExternalLink, LoaderCircle, Save, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -30,6 +33,10 @@ function currentRunFromError(error: unknown): CourseResourceSearchRun | undefine
   return parsed.success ? parsed.data : undefined;
 }
 
+function fakeEvidenceLabel(disclosure: { evidenceKind: string } | null): string | null {
+  return disclosure?.evidenceKind === 'AUTOMATED_FAKE' ? '自动测试 Fake 证据，不代表真实 Provider' : null;
+}
+
 export function CourseDetailWorkspace({ courseId }: { courseId: string }) {
   const [detail, setDetail] = useState<CourseDetail | null>(null);
   const [stage, setStage] = useState('NOT_STARTED');
@@ -39,6 +46,14 @@ export function CourseDetailWorkspace({ courseId }: { courseId: string }) {
   const [executionKey, setExecutionKey] = useState<string | null>(null);
   const [citations, setCitations] = useState<CourseResourceCitation[]>([]);
   const [disclosure, setDisclosure] = useState<{ availability: string; adapterKind: string; evidenceKind: string; providerLabel: string } | null>(null);
+  const [selectedCitationIds, setSelectedCitationIds] = useState<string[]>([]);
+  const [objective, setObjective] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [earliestStartLocalTime, setEarliestStartLocalTime] = useState('19:00');
+  const [latestEndLocalTime, setLatestEndLocalTime] = useState('21:00');
+  const [learningRun, setLearningRun] = useState<LearningRun | null>(null);
+  const [learningDisclosure, setLearningDisclosure] = useState<{ availability: string; adapterKind: string; evidenceKind: string; providerLabel: string } | null>(null);
+  const [learningExecutionKey, setLearningExecutionKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -111,10 +126,76 @@ export function CourseDetailWorkspace({ courseId }: { courseId: string }) {
       const completed = courseResourceSearchResponseSchema.parse(payload).data;
       setRun(completed.run);
       setCitations(completed.citations);
+      setSelectedCitationIds([]);
     } catch (error) {
       const currentRun = currentRunFromError(error);
       if (currentRun) setRun(currentRun);
       if (!isUncertainCoreWriteFailure(error)) setExecutionKey(null);
+      setFailure(failureMessage(error));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function toggleCitation(citation: CourseResourceCitation): void {
+    setSelectedCitationIds((current) => {
+      if (current.includes(citation.id)) return current.filter((citationId) => citationId !== citation.id);
+      if (current.length >= 3) return current;
+      const first = citations.find((candidate) => candidate.id === current[0]);
+      if (first && first.searchRunId !== citation.searchRunId) return current;
+      return [...current, citation.id];
+    });
+  }
+
+  async function prepareLearningAdvice(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const firstCitation = citations.find((citation) => citation.id === selectedCitationIds[0]);
+    if (!firstCitation) return;
+    setFailure(null);
+    setSearching(true);
+    try {
+      const payload = await requestCore(`courses/${courseId}/learning-runs`, {
+        method: 'POST',
+        body: JSON.stringify({
+          searchRunId: firstCitation.searchRunId,
+          citationIds: selectedCitationIds,
+          objective,
+          targetDate,
+          earliestStartLocalTime: earliestStartLocalTime || null,
+          latestEndLocalTime: latestEndLocalTime || null,
+        }),
+      });
+      const created = learningRunCreateResponseSchema.parse(payload).data;
+      setLearningRun(created.run);
+      setLearningDisclosure(created.disclosure);
+      setLearningExecutionKey(null);
+    } catch (error) {
+      setFailure(failureMessage(error));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function generateLearningAdvice(): Promise<void> {
+    if (!learningRun) return;
+    const idempotencyKey = learningExecutionKey ?? newIdempotencyKey();
+    setLearningExecutionKey(idempotencyKey);
+    setFailure(null);
+    setSearching(true);
+    setLearningRun((current) => current ? { ...current, status: 'GENERATING' } : current);
+    try {
+      const payload = await requestCore(`learning-runs/${learningRun.id}/generate`, {
+        method: 'POST',
+        headers: { 'idempotency-key': idempotencyKey },
+        body: JSON.stringify({ expectedVersion: learningRun.version, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' }),
+      });
+      const generated = learningRunGenerateResponseSchema.parse(payload).data;
+      setLearningRun(generated.run);
+    } catch (error) {
+      if (error instanceof CoreClientError && error.code === 'CITATION_CONTENT_CHANGED') {
+        setLearningRun((current) => current ? { ...current, status: 'FAILED', failureCode: 'CITATION_CONTENT_CHANGED' } : current);
+      }
+      if (!isUncertainCoreWriteFailure(error)) setLearningExecutionKey(null);
       setFailure(failureMessage(error));
     } finally {
       setSearching(false);
@@ -167,6 +248,36 @@ export function CourseDetailWorkspace({ courseId }: { courseId: string }) {
         {run?.status === 'SEARCHING' ? <p className="course-detail-status" role="status">SEARCHING：正在验证公开 URL、DNS、重定向和响应边界。</p> : null}
         {run?.status === 'SUCCEEDED' ? <p className="course-detail-status" role="status">CITATIONS_READY：已保存 {run.citationCount} 条 metadata-only citation。{run.rejectedCount > 0 ? ` PARTIAL_RESULTS_REJECTED：拒绝 ${run.rejectedCount} 条不安全结果。` : ''}</p> : null}
         {run?.status === 'FAILED' ? <p className="course-detail-status" role="alert">FAILED：{run.failureCode ?? '公开资料检索未完成'}。</p> : null}
+      </section>
+      <section className="course-detail-advice" aria-labelledby="course-advice-heading">
+        <div className="course-detail-section-heading"><p className="section-kicker">CITED LEARNING ADVICE</p><h2 id="course-advice-heading">基于引用的学习行动</h2><p>只会向文本能力发送最多 3 条重新校验通过的公开资料；接受 Proposal 前不会创建学习行动或排程请求。</p></div>
+        {citations.length === 0 ? <p className="course-detail-status">先保存匿名公开检索的 citation，才能准备学习建议。</p> : (
+          <form className="course-detail-advice__form" onSubmit={(event) => void prepareLearningAdvice(event)}>
+            <fieldset>
+              <legend>选择 1–3 条 citation（不可跨检索运行混选）</legend>
+              <ul className="course-detail-list">{citations.map((citation) => {
+                const selected = selectedCitationIds.includes(citation.id);
+                const first = citations.find((candidate) => candidate.id === selectedCitationIds[0]);
+                const incompatible = Boolean(first && first.searchRunId !== citation.searchRunId && !selected);
+                return <li key={citation.id}><label><input aria-label={`选择${citation.title}`} type="checkbox" checked={selected} disabled={incompatible} onChange={() => toggleCitation(citation)} />{citation.title}</label><small>{`${citation.publisher} · ${citation.retrievedAt.slice(0, 10)} · ${shortHash(citation.contentHash)}`}</small></li>;
+              })}</ul>
+            </fieldset>
+            <label>学习目标<textarea aria-label="学习目标" required maxLength={2000} value={objective} onChange={(event) => setObjective(event.target.value)} /></label>
+            <div className="course-detail-advice__schedule">
+              <label>目标日期<input aria-label="目标日期" required type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>
+              <label>最早开始<input aria-label="最早开始" type="time" value={earliestStartLocalTime} onChange={(event) => setEarliestStartLocalTime(event.target.value)} /></label>
+              <label>最晚结束<input aria-label="最晚结束" type="time" value={latestEndLocalTime} onChange={(event) => setLatestEndLocalTime(event.target.value)} /></label>
+            </div>
+            <button disabled={selectedCitationIds.length === 0 || !objective.trim() || !targetDate || searching} type="submit">准备引用学习建议</button>
+          </form>
+        )}
+        {learningRun?.status === 'BLOCKED_PROVIDER' ? <p className="course-detail-status" role="status">BLOCKED_PROVIDER：{learningDisclosure?.providerLabel ?? '学习建议能力尚未配置'}。没有生成样例内容。</p> : null}
+        {learningRun?.status === 'AWAITING_DISCLOSURE' ? <div className="course-detail-disclosure"><p>DISCLOSURE_READY：将请求 {learningDisclosure?.providerLabel}；adapter={learningDisclosure?.adapterKind}，evidence={learningDisclosure?.evidenceKind}。</p>{fakeEvidenceLabel(learningDisclosure) ? <p>{fakeEvidenceLabel(learningDisclosure)}</p> : null}<button disabled={searching} type="button" onClick={() => void generateLearningAdvice()}>确认披露并生成学习建议</button></div> : null}
+        {learningRun?.status === 'GENERATING' ? <p className="course-detail-status" role="status">GENERATING：正在重新校验引用内容并生成严格学习 Proposal。</p> : null}
+        {learningRun?.status === 'PROPOSAL_PENDING' ? <p className="course-detail-status" role="status">PROPOSAL_PENDING：学习行动仍待你在 Today 确认；尚未创建 Action 或排程请求。</p> : null}
+        {learningRun?.status === 'ACCEPTED' ? <p className="course-detail-status" role="status">ACTION_SCHEDULE_REQUESTED：已创建课程学习 Action，等待 Daily Plan 审核排程。</p> : null}
+        {learningRun?.status === 'FAILED' && learningRun.failureCode === 'CITATION_CONTENT_CHANGED' ? <p className="course-detail-status" role="alert">MATERIAL_CHANGED：引用内容已变化，已安全停止，未生成 Proposal。</p> : null}
+        {learningRun?.status === 'FAILED' && learningRun.failureCode !== 'CITATION_CONTENT_CHANGED' ? <p className="course-detail-status" role="alert">FAILED：{learningRun.failureCode ?? '学习建议未完成'}。</p> : null}
       </section>
       {failure ? <p className="dashboard-alert" role="alert">{failure}</p> : null}
     </section>

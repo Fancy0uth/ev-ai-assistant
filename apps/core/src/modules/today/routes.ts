@@ -13,6 +13,7 @@ import type { DailyPlanReviewService } from '../daily-planning/review-service';
 import type { DailyPlanRunRepository } from '../daily-planning/repository';
 import type { DailyPlanAutomationService } from '../daily-planning/automation-service';
 import type { ProposalService } from '../proposals/service';
+import type { createLearningService } from '../learning/service';
 import type { ProviderCredentialService } from '../providers/credential-service';
 import type { TaskService } from '../tasks/service';
 
@@ -25,6 +26,7 @@ interface TodayRouteOptions {
   providerCredentialService: ProviderCredentialService;
   dailyPlanRepository: DailyPlanRunRepository;
   dailyPlanAutomationService: DailyPlanAutomationService;
+  learningService: ReturnType<typeof createLearningService>;
 }
 
 function dailyPlanSummary(
@@ -88,6 +90,7 @@ export async function registerTodayRoutes(
     providerCredentialService,
     dailyPlanRepository,
     dailyPlanAutomationService,
+    learningService,
   } = options;
   const authGuard = createAuthGuard(authService);
 
@@ -100,6 +103,7 @@ export async function registerTodayRoutes(
     );
     dailyPlanAutomationService.ensureForFirstVisit(ownerId, date);
     const tasks = taskService.listForDate(ownerId, date);
+    const learningEventCourseIds = learningService.listScheduledLearningEventCourseIds(ownerId, date);
     const yesterday = null;
     const status = calculateDailyStatus({ tasks, yesterday });
 
@@ -108,8 +112,12 @@ export async function registerTodayRoutes(
         date,
         status,
         tasks,
-        events: calendarRepository.listEventsForDate(ownerId, date),
+        events: calendarRepository.listEventsForDate(ownerId, date).map((event) => ({
+          ...event,
+          courseId: event.courseId ?? learningEventCourseIds.get(event.id) ?? null,
+        })),
         signals: calendarRepository.listSignalsForDate(ownerId, date),
+        learningActions: learningService.listLearningActionsForDate(ownerId, date),
         pendingProposals: proposalService.listPending(ownerId),
         yesterday,
         dailyPlan: dailyPlanSummary(

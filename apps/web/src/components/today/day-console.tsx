@@ -23,6 +23,7 @@ export function DayConsole({
   onDecision: (proposalId: string, input: ProposalDecisionInput) => Promise<void>;
 }) {
   const openTasks = snapshot.tasks.filter((task) => task.status !== 'DONE');
+  const learningActions = snapshot.learningActions.filter((summary) => !['DONE', 'CANCELLED'].includes(summary.action.status));
   const recoverySignal = snapshot.signals.filter((signal) => signal.kind === 'RECOVERY').slice(-1)[0];
 
   return (
@@ -55,6 +56,7 @@ export function DayConsole({
                     <small>
                       {event.endLocalTime} · {event.kind === 'COURSE' ? '课程' : event.kind === 'WORKOUT' ? '训练' : '安排'}
                     </small>
+                    {event.courseId ? <Link aria-label={`查看课程：${event.title}`} href={`/courses/${event.courseId}`}>查看课程学习链路</Link> : null}
                   </div>
                 </li>
               ))}
@@ -64,6 +66,12 @@ export function DayConsole({
 
         <div className="day-console__actions">
           <h3><ListChecks aria-hidden="true" size={16} /> 具体行动</h3>
+          {learningActions.length > 0 ? <ul className="day-console__learning-actions">{learningActions.map((summary) => (
+            <li key={summary.action.id}>
+              <div><strong>{summary.action.title}</strong><small>{`${summary.courseTitle} · ${summary.citationCount} 条 citation`}</small></div>
+              <Link aria-label={`查看课程学习行动：${summary.action.title}`} href={`/courses/${summary.courseId}`}>课程链路</Link>
+            </li>
+          ))}</ul> : null}
           {openTasks.length === 0 ? (
             <p className="day-console__actions-empty">今天还没有待处理事项。先添加一件真实要完成的事。</p>
           ) : (

@@ -9,10 +9,15 @@ import {
   courseResourceListResponseSchema,
   courseResourceResponseSchema,
   courseResponseSchema,
+  createLearningRunSchema,
   createCourseResourceSchema,
   createCourseResourceSearchSchema,
   createCourseSchema,
   updateCourseLearningContextSchema,
+  learningRunGenerateResponseSchema,
+  learningRunGenerateSchema,
+  learningRunResponseSchema,
+  learningRunCreateResponseSchema,
 } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { ApiError } from '../../http/api-error';
@@ -94,5 +99,29 @@ export async function registerLearningRoutes(
     );
     if (result.replayed) reply.header('idempotency-replayed', 'true');
     return reply.status(202).send(courseResourceSearchResponseSchema.parse({ data: { run: result.run, citations: result.citations } }));
+  });
+
+  app.post('/v1/courses/:id/learning-runs', { preHandler: guard }, (request, reply) => {
+    const { id } = parseRequestInput(coursePathParamsSchema, request.params, '课程路径参数不符合要求');
+    return reply.status(201).send(learningRunCreateResponseSchema.parse({
+      data: options.learningService.createLearningRun(authenticatedOwnerId(request), id, parseRequestInput(createLearningRunSchema, request.body, '学习建议请求不符合要求')),
+    }));
+  });
+
+  app.get('/v1/learning-runs/:id', { preHandler: guard }, (request) => {
+    const { id } = parseRequestInput(coursePathParamsSchema, request.params, '学习建议路径参数不符合要求');
+    return learningRunResponseSchema.parse({ data: options.learningService.getLearningRun(authenticatedOwnerId(request), id) });
+  });
+
+  app.post('/v1/learning-runs/:id/generate', { preHandler: guard }, async (request, reply) => {
+    const { id } = parseRequestInput(coursePathParamsSchema, request.params, '学习建议路径参数不符合要求');
+    const key = request.headers['idempotency-key'];
+    if (typeof key !== 'string' || !key) throw new ApiError(400, 'IDEMPOTENCY_KEY_REQUIRED', '学习建议需要 Idempotency-Key');
+    const result = await options.learningService.executeLearningRun(
+      authenticatedOwnerId(request), id,
+      parseRequestInput(learningRunGenerateSchema, request.body, '学习建议执行请求不符合要求'), key,
+    );
+    if (result.replayed) reply.header('idempotency-replayed', 'true');
+    return reply.status(202).send(learningRunGenerateResponseSchema.parse({ data: { run: result.run, proposal: result.proposal } }));
   });
 }

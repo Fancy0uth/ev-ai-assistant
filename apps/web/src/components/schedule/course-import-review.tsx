@@ -22,7 +22,7 @@ export function CourseImportReview({ initial, onUpdated }: { initial: ImportData
         body: JSON.stringify({ expectedVersion: value.import.version, disclosureVersion: value.disclosure.version }),
       });
       const next = courseImportResponseSchema.parse(payload).data;
-      setValue(next); onUpdated(next);
+      setValue(next); setDraftCandidates(next.revision?.candidates ?? []); setSavedReview(false); onUpdated(next);
     } catch (error) { setFailure(error instanceof Error ? error.message : '课表提取未完成'); }
     finally { setBusy(false); }
   }

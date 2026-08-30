@@ -66,8 +66,8 @@ describe('DeepSeek credential contracts', () => {
     expect(JSON.stringify(parsed)).not.toMatch(/api.?key|secret|credential/i);
   });
 
-  it('freezes the v0.5 reliability version and DeepSeek allowlists', () => {
-    expect(APP_VERSION).toBe('0.5.0');
+  it('freezes the v0.6 reliability version and DeepSeek allowlists', () => {
+    expect(APP_VERSION).toBe('0.6.0');
     expect(deepSeekModelSchema.safeParse('deepseek-v4-flash').success).toBe(true);
     expect(deepSeekModelSchema.safeParse('deepseek-v4-pro').success).toBe(true);
     expect(deepSeekModelSchema.safeParse('deepseek-chat').success).toBe(false);

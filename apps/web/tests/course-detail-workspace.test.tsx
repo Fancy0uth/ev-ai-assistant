@@ -39,7 +39,7 @@ describe('CourseDetailWorkspace', () => {
     await user.click(screen.getByRole('button', { name: '准备匿名公开检索' }));
     expect(await screen.findByText(/DISCLOSURE_READY/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '确认披露并开始检索' }));
-    expect(await screen.findByText(/public\.example/)).toBeInTheDocument();
+    expect(await screen.findAllByText(/public\.example/)).toHaveLength(2);
     expect(fetchMock).toHaveBeenCalledWith(`/api/core/courses/${courseId}/learning-context`, expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ expectedVersion: 1, stage: 'IN_PROGRESS', progressNote: '第一章已复习' }) }));
     const executeCall = fetchMock.mock.calls.find(([url]) => url === '/api/core/resource-searches/00000000-0000-4000-8000-000000000704/execute');
     expect(executeCall?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' }) });
@@ -77,5 +77,44 @@ describe('CourseDetailWorkspace', () => {
     await user.click(await screen.findByRole('button', { name: '确认披露并开始检索' }));
     expect(await screen.findByText(/FAILED：NO_SAFE_PUBLIC_RESULTS/)).toBeInTheDocument();
     expect(screen.queryByText(/SEARCHING：/)).not.toBeInTheDocument();
+  });
+
+  it('selects immutable citations and sends the saved course objective only after a LearningAdvice disclosure', async () => {
+    const citation = {
+      id: '00000000-0000-4000-8000-000000000706', courseId, courseResourceId: '00000000-0000-4000-8000-000000000707', searchRunId: '00000000-0000-4000-8000-000000000704',
+      title: '公开矩阵教程', url: 'https://public.example/matrix', publisher: 'public.example', retrievedAt: '2026-08-31T00:00:01.000Z', contentHash: 'a'.repeat(64), mediaType: 'text/html', createdAt: '2026-08-31T00:00:01.000Z',
+    };
+    const learningRun = {
+      id: '00000000-0000-4000-8000-000000000712', courseId, searchRunId: citation.searchRunId, capabilityRunId: '00000000-0000-4000-8000-000000000713', citationIds: [citation.id],
+      status: 'AWAITING_DISCLOSURE', proposalId: null, failureCode: null, version: 1, createdAt: '2026-08-31T00:00:02.000Z', updatedAt: '2026-08-31T00:00:02.000Z',
+    };
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === `/api/core/courses/${courseId}`) return Promise.resolve(response({ data: { ...detail.data, sources: { ...detail.data.sources, public: [citation] } } }));
+      if (url === `/api/core/courses/${courseId}/learning-runs`) return Promise.resolve(response({ data: { run: learningRun, disclosure: { capability: 'LEARNING_TEXT_ANALYSIS', providerId: 'test-learning', providerLabel: '自动测试 Fake Learning', adapterKind: 'TEST_FAKE', evidenceKind: 'AUTOMATED_FAKE', availability: 'READY' } } }, 201));
+      if (url === `/api/core/learning-runs/${learningRun.id}/generate`) return Promise.resolve(response({
+        data: { run: { ...learningRun, status: 'PROPOSAL_PENDING', proposalId: '00000000-0000-4000-8000-000000000714', version: 3 }, proposal: { id: '00000000-0000-4000-8000-000000000714', kind: 'LEARNING', status: 'PENDING', source: 'LEARNING_AGENT', title: '复习矩阵分解', changes: [{ operation: 'CREATE_LEARNING_ACTION', action: { id: '00000000-0000-4000-8000-000000000715', courseId, title: '复习矩阵分解', targetDate: '2026-09-09', status: 'OPEN', kind: 'STUDY', version: 1, createdAt: '2026-08-31T00:00:03.000Z', updatedAt: '2026-08-31T00:00:03.000Z' }, scheduling: { timeRequestId: '00000000-0000-4000-8000-000000000716', durationMinutes: 45, priority: 'MEDIUM', earliestStartLocalTime: '19:00', latestEndLocalTime: '21:00', isFixed: false }, citationIds: [citation.id] }], version: 1, createdAt: '2026-08-31T00:00:03.000Z', expiresAt: null } },
+      }, 202));
+      return Promise.reject(new Error(`unexpected ${url} ${init?.method}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<CourseDetailWorkspace courseId={courseId} />);
+    await screen.findByRole('heading', { name: '机器学习导论' });
+    await user.click(screen.getByLabelText('选择公开矩阵教程'));
+    await user.type(screen.getByLabelText('学习目标'), '完成矩阵分解复习');
+    await user.clear(screen.getByLabelText('目标日期'));
+    await user.type(screen.getByLabelText('目标日期'), '2026-09-09');
+    await user.click(screen.getByRole('button', { name: '准备引用学习建议' }));
+    expect(await screen.findByText(/DISCLOSURE_READY/)).toBeInTheDocument();
+    expect(screen.getByText('自动测试 Fake 证据，不代表真实 Provider')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认披露并生成学习建议' }));
+    expect(await screen.findByText(/PROPOSAL_PENDING/)).toBeInTheDocument();
+    const createCall = fetchMock.mock.calls.find(([url]) => url === `/api/core/courses/${courseId}/learning-runs`);
+    expect(createCall?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ searchRunId: citation.searchRunId, citationIds: [citation.id], objective: '完成矩阵分解复习', targetDate: '2026-09-09', earliestStartLocalTime: '19:00', latestEndLocalTime: '21:00' }),
+    });
+    const generateCall = fetchMock.mock.calls.find(([url]) => url === `/api/core/learning-runs/${learningRun.id}/generate`);
+    expect(new Headers((generateCall?.[1] as RequestInit).headers).get('idempotency-key')).toMatch(/\S/);
   });
 });

@@ -332,6 +332,32 @@ describe('TodayDashboard', () => {
     );
   });
 
+  it('links a Today STUDY event and its cited Action back to the owning course', async () => {
+    const courseId = '00000000-0000-4000-8000-000000000620';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      data: {
+        ...emptySnapshot.data,
+        events: [{
+          id: '00000000-0000-4000-8000-000000000621', calendarRuleId: null, courseId,
+          title: '复习梯度下降', kind: 'STUDY', localDate: '2026-08-07', startLocalTime: '19:00', endLocalTime: '19:45',
+          isHard: false, status: 'CONFIRMED', version: 1, createdAt: '2026-08-07T01:00:00.000Z', updatedAt: '2026-08-07T01:00:00.000Z',
+        }],
+        learningActions: [{
+          action: { id: '00000000-0000-4000-8000-000000000622', eventId: null, title: '复习梯度下降', kind: 'STUDY', status: 'OPEN', targetDate: '2026-08-07', version: 1, createdAt: '2026-08-07T01:00:00.000Z', updatedAt: '2026-08-07T01:00:00.000Z' },
+          courseId, courseTitle: '机器学习', citationCount: 1,
+        }],
+      },
+    })));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    const eventLink = await screen.findByRole('link', { name: '查看课程：复习梯度下降' });
+    expect(eventLink).toHaveAttribute('href', `/courses/${courseId}`);
+    const actionLink = screen.getByRole('link', { name: '查看课程学习行动：复习梯度下降' });
+    expect(actionLink).toHaveAttribute('href', `/courses/${courseId}`);
+    expect(screen.getByText('机器学习 · 1 条 citation')).toBeInTheDocument();
+  });
+
   it('explains that external context awaits approval without claiming Provider generation ran', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       data: {

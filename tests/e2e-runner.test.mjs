@@ -31,6 +31,7 @@ test('managed E2E runner owns isolated servers and always tears them down', asyn
 
   assert.match(source, /EV_E2E_MANAGED/);
   assert.match(source, /EV_E2E_RUN_DIR/);
+  assert.match(source, /EV_E2E_V06_LEARNING_TEST_ADAPTERS/);
   assert.match(source, /EV_DATA_DIR/);
   assert.equal((source.match(/root, 'ignore'\)/g) ?? []).length, 2);
   assert.match(source, /finally/);

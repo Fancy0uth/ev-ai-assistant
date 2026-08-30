@@ -2,6 +2,7 @@ import { relative, resolve, sep } from 'node:path';
 import type {
   CapabilityAdapterDescriptor,
   CapabilityDescriptor,
+  CitedLearningAdviceInput,
   CourseScheduleImageMediaType,
 } from '@ev/contracts';
 
@@ -22,7 +23,12 @@ export interface PublicSearchCapability {
 
 export interface LearningAdviceCapability {
   readonly descriptor: CapabilityAdapterDescriptor;
-  generate(input: unknown): Promise<unknown>;
+  generate(input: CitedLearningAdviceInput): Promise<unknown>;
+}
+
+export interface LearningAdviceCapabilityFactory {
+  readonly descriptor: CapabilityAdapterDescriptor;
+  create(apiKey: string): LearningAdviceCapability;
 }
 
 export interface CapabilityRegistry {
@@ -56,9 +62,15 @@ function descriptor(
   return {
     capability,
     ...adapter,
-    evidenceKind: adapter.adapterKind === 'TEST_FAKE' ? 'AUTOMATED_FAKE' : 'REAL_PROVIDER',
+    evidenceKind: adapter.adapterKind === 'TEST_FAKE' ? 'AUTOMATED_FAKE' : 'NONE',
     availability: 'READY',
   };
+}
+
+export function terminalEvidenceKind(adapterKind: CapabilityAdapterDescriptor['adapterKind']): CapabilityDescriptor['evidenceKind'] {
+  if (adapterKind === 'TEST_FAKE') return 'AUTOMATED_FAKE';
+  if (adapterKind === 'PRODUCTION_ADAPTER') return 'REAL_PROVIDER';
+  return 'NONE';
 }
 
 export function createCapabilityRegistry(input: {

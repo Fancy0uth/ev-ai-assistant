@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { eventSchema, signalSchema } from './calendar';
+import { actionSchema, eventSchema, signalSchema } from './calendar';
 import { proposalSchema } from './proposals';
 import { localDateSchema, taskAreaSchema, taskPrioritySchema, taskSchema, taskStatusSchema } from './tasks';
 
@@ -91,6 +91,15 @@ export const todayDailyPlanSummarySchema = z
     pendingItemCount: 0,
   });
 
+export const courseLearningActionSummarySchema = z
+  .object({
+    action: actionSchema,
+    courseId: z.uuid(),
+    courseTitle: z.string().min(1).max(200),
+    citationCount: z.number().int().min(1).max(3),
+  })
+  .strict();
+
 export const todaySnapshotSchema = z
   .object({
     data: z
@@ -100,6 +109,7 @@ export const todaySnapshotSchema = z
           tasks: z.array(taskSchema),
           events: z.array(eventSchema).default([]),
           signals: z.array(signalSchema).default([]),
+          learningActions: z.array(courseLearningActionSummarySchema).default([]),
           pendingProposals: z.array(proposalSchema).default([]),
           yesterday: yesterdaySummarySchema.nullable(),
           dailyPlan: todayDailyPlanSummarySchema,
@@ -118,3 +128,4 @@ export type DailyStatus = z.infer<typeof dailyStatusSchema>;
 export type TodaySnapshot = z.infer<typeof todaySnapshotSchema>;
 export type DayView = z.infer<typeof dayViewSchema>;
 export type TodayDailyPlanSummary = z.infer<typeof todayDailyPlanSummarySchema>;
+export type CourseLearningActionSummary = z.infer<typeof courseLearningActionSummarySchema>;

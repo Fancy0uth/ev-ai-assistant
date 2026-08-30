@@ -4,13 +4,15 @@ import { APP_VERSION, type CapabilityDescriptor } from '@ev/contracts';
 export interface CapabilityRunRepository {
   sweepExpired(now: string): number;
   create(input: {
-    id: string; ownerId: string; resourceId: string; capability: 'PUBLIC_LEARNING_SEARCH'; operation: 'COURSE_RESOURCE_SEARCH';
+    id: string; ownerId: string; resourceId: string;
+    capability: 'PUBLIC_LEARNING_SEARCH' | 'LEARNING_TEXT_ANALYSIS';
+    operation: 'COURSE_RESOURCE_SEARCH' | 'LEARNING_ADVICE_GENERATE';
     descriptor: CapabilityDescriptor; status: 'BLOCKED_PROVIDER' | 'AWAITING_DISCLOSURE'; createdAt: string;
   }): void;
   findByOwnerAndId(ownerId: string, id: string): CapabilityRun | undefined;
   findByOwnerAndIdempotencyKey(ownerId: string, idempotencyKey: string): CapabilityRun | undefined;
   claim(ownerId: string, id: string, idempotencyKey: string, requestHash: string, now: string): boolean;
-  complete(ownerId: string, id: string, input: { status: 'SUCCEEDED' | 'FAILED'; actualCalls: number; inputChars: number; outputChars: number; failureCode: string | null; now: string }): void;
+  complete(ownerId: string, id: string, input: { status: 'SUCCEEDED' | 'FAILED'; actualCalls: number; inputChars: number; outputChars: number; failureCode: string | null; evidenceKind: CapabilityDescriptor['evidenceKind']; now: string }): void;
 }
 
 export interface CapabilityRun {
@@ -41,7 +43,7 @@ export function createCapabilityRunRepository(database: Database.Database): Capa
     set idempotency_key = ?, request_hash = ?, status = 'RUNNING', lease_token = ?, lease_expires_at = ?, deadline_at = ?, reserved_calls = 1, updated_at = ?, version = version + 1
     where owner_id = ? and id = ? and status = 'AWAITING_DISCLOSURE' and idempotency_key is null`);
   const complete = database.prepare(`update external_capability_runs
-    set status = ?, lease_token = null, lease_expires_at = null, actual_calls = ?, input_chars = ?, output_chars = ?, failure_code = ?, updated_at = ?, version = version + 1
+    set status = ?, lease_token = null, lease_expires_at = null, actual_calls = ?, input_chars = ?, output_chars = ?, failure_code = ?, evidence_kind = ?, updated_at = ?, version = version + 1
     where owner_id = ? and id = ? and status = 'RUNNING'`);
   const toRun = (row: {
     id: string; owner_id: string; resource_id: string; status: CapabilityRun['status']; idempotency_key: string | null; request_hash: string | null; version: number;
@@ -69,7 +71,7 @@ export function createCapabilityRunRepository(database: Database.Database): Capa
       return claim.run(idempotencyKey, requestHash, `${idempotencyKey}:${now}`, new Date(Date.parse(now) + 30_000).toISOString(), new Date(Date.parse(now) + 15_000).toISOString(), now, ownerId, id).changes === 1;
     },
     complete(ownerId, id, input) {
-      complete.run(input.status, input.actualCalls, input.inputChars, input.outputChars, input.failureCode, input.now, ownerId, id);
+      complete.run(input.status, input.actualCalls, input.inputChars, input.outputChars, input.failureCode, input.evidenceKind, input.now, ownerId, id);
     },
   };
 }

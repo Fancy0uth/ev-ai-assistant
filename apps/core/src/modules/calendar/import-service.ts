@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type Database from 'better-sqlite3';
 import { APP_VERSION, courseImportRevisionSchema, visionCourseScheduleExtractionSchema, type CourseImport, type CourseImportRevision, type CreateCourseImportInput, type ExternalDisclosure, type LocalArtifact } from '@ev/contracts';
 import { ApiError } from '../../http/api-error';
-import type { CapabilityRegistry } from '../providers/capabilities';
+import { terminalEvidenceKind, type CapabilityRegistry } from '../providers/capabilities';
 import { createArtifactStore, type ArtifactStore } from './artifact-store';
 import { ImageMetadataError, readImageMetadata } from './image-metadata';
 import { createCourseImportRepository, type CourseImportRepository } from './import-repository';
@@ -134,13 +134,15 @@ export function createCourseImportService(
       if (!claimed) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
       database.prepare(`update external_capability_runs set status = 'RUNNING', idempotency_key = ?, request_hash = ?, updated_at = ?, version = version + 1 where id = ? and owner_id = ?`).run(idempotencyKey, hash(input), timestamp, imported.capabilityRunId, ownerId);
       let parsed: import('@ev/contracts').VisionCourseScheduleExtraction;
+      let providerCallStarted = false;
       try {
         options.onExternalOperation?.(database.inTransaction);
         const image = await readFile(store.resolveVerified(storageKey));
+        providerCallStarted = true;
         parsed = visionCourseScheduleExtractionSchema.parse(await capabilities.vision.extractCourseSchedule({ schemaVersion: 'COURSE_SCHEDULE_EXTRACTION_V1', image, mediaType: artifact.mediaType, term: { timezone: calendarRepository.findTerm(ownerId, imported.termId)!.timezone, weekOneMonday: calendarRepository.findTerm(ownerId, imported.termId)!.weekOneMonday } }));
       } catch (error) {
         repository.updateImport(ownerId, importId, claimed.version, { status: 'FAILED', failureCode: 'VISION_RESPONSE_INVALID', timestamp: now().toISOString() });
-        database.prepare(`update external_capability_runs set status = 'FAILED', failure_code = 'VISION_RESPONSE_INVALID', updated_at = ? where id = ? and owner_id = ?`).run(now().toISOString(), imported.capabilityRunId, ownerId);
+        database.prepare(`update external_capability_runs set status = 'FAILED', failure_code = 'VISION_RESPONSE_INVALID', evidence_kind = 'NONE', actual_calls = ?, updated_at = ? where id = ? and owner_id = ?`).run(providerCallStarted ? 1 : 0, now().toISOString(), imported.capabilityRunId, ownerId);
         if (error instanceof ApiError) throw error;
         throw new ApiError(422, 'VISION_RESPONSE_INVALID', 'Vision 输出不符合严格课表契约');
       }
@@ -151,7 +153,7 @@ export function createCourseImportService(
         repository.insertRevision({ ...revision, ownerId });
         const updated = repository.updateImport(ownerId, importId, claimed.version, { status: 'REVIEW_REQUIRED', currentRevisionId: revision.id, timestamp: capturedAt });
         if (!updated) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
-        database.prepare(`update external_capability_runs set status = 'SUCCEEDED', actual_calls = 1, updated_at = ?, version = version + 1 where id = ? and owner_id = ?`).run(capturedAt, imported.capabilityRunId, ownerId);
+        database.prepare(`update external_capability_runs set status = 'SUCCEEDED', actual_calls = 1, evidence_kind = ?, updated_at = ?, version = version + 1 where id = ? and owner_id = ?`).run(terminalEvidenceKind(capabilities.vision!.descriptor.adapterKind), capturedAt, imported.capabilityRunId, ownerId);
         return updated;
       })();
       return ownedResult(ownerId, finalized, revision);

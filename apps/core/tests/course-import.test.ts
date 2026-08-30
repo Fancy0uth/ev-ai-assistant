@@ -105,9 +105,11 @@ describe('v0.6 local course artifacts', () => {
     const priorFlag = process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS;
     process.env.EV_E2E_RUN_DIR = directory;
     process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS = '1';
+    let invalidVisionOutput = false;
     const vision: VisionCapability = {
-      descriptor: { providerId: 'test-vision', providerLabel: '自动测试 Fake Vision', adapterKind: 'TEST_FAKE' },
+      descriptor: { providerId: 'production-vision', providerLabel: '受控生产 Vision 测试适配器', adapterKind: 'PRODUCTION_ADAPTER' },
       async extractCourseSchedule() {
+        if (invalidVisionOutput) return { candidates: [{ title: 'strict schema must reject this provider output' }] };
         return {
           candidates: [{
             title: '数据库系统', location: null, weekday: 1, startLocalTime: '08:00', endLocalTime: '09:40',
@@ -125,6 +127,8 @@ describe('v0.6 local course artifacts', () => {
       const term = await app.inject({ method: 'POST', url: '/v1/terms', cookies: { ev_session: token }, payload: { title: '2026 秋季学期', timezone: 'Asia/Shanghai', weekOneMonday: '2026-09-07' } });
       const uploaded = await app.inject({ method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token }, headers: { 'content-type': 'image/png' }, payload: validPng });
       const imported = await app.inject({ method: 'POST', url: '/v1/course-imports', cookies: { ev_session: token }, payload: { termId: term.json().data.id, artifactId: uploaded.json().data.artifact.id } });
+      expect(imported.statusCode).toBe(201);
+      expect(imported.json().data).toMatchObject({ disclosure: { adapterKind: 'PRODUCTION_ADAPTER', evidenceKind: 'NONE' } });
 
       const extracted = await app.inject({
         method: 'POST', url: `/v1/course-imports/${imported.json().data.import.id}/extract`, cookies: { ev_session: token },
@@ -140,9 +144,47 @@ describe('v0.6 local course artifacts', () => {
       try {
         expect(database.prepare('select count(*) as count from courses').get()).toEqual({ count: 0 });
         expect(database.prepare('select count(*) as count from proposals').get()).toEqual({ count: 0 });
+        expect(database.prepare('select evidence_kind, actual_calls from external_capability_runs where id = ?').get(imported.json().data.import.capabilityRunId))
+          .toEqual({ evidence_kind: 'REAL_PROVIDER', actual_calls: 1 });
       } finally {
         database.close();
       }
+
+      invalidVisionOutput = true;
+      const failedImport = await app.inject({ method: 'POST', url: '/v1/course-imports', cookies: { ev_session: token }, payload: { termId: term.json().data.id, artifactId: uploaded.json().data.artifact.id } });
+      const failedExtraction = await app.inject({
+        method: 'POST', url: `/v1/course-imports/${failedImport.json().data.import.id}/extract`, cookies: { ev_session: token },
+        headers: { 'idempotency-key': 'v06-review-invalid-output-01' },
+        payload: { expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' },
+      });
+      expect(failedExtraction.statusCode).toBe(422);
+      expect(failedExtraction.json().error.code).toBe('VISION_RESPONSE_INVALID');
+      const failedDatabase = openDatabase(databasePath);
+      try {
+        expect(failedDatabase.prepare('select status, evidence_kind, actual_calls, failure_code from external_capability_runs where id = ?').get(failedImport.json().data.import.capabilityRunId))
+          .toEqual({ status: 'FAILED', evidence_kind: 'NONE', actual_calls: 1, failure_code: 'VISION_RESPONSE_INVALID' });
+        const storedArtifact = failedDatabase.prepare('select storage_key from local_artifacts where id = ?').get(uploaded.json().data.artifact.id) as { storage_key: string };
+        rmSync(join(directory, 'artifacts', storedArtifact.storage_key), { force: true });
+      } finally {
+        failedDatabase.close();
+      }
+
+      const unreadableImport = await app.inject({ method: 'POST', url: '/v1/course-imports', cookies: { ev_session: token }, payload: { termId: term.json().data.id, artifactId: uploaded.json().data.artifact.id } });
+      const unreadableExtraction = await app.inject({
+        method: 'POST', url: `/v1/course-imports/${unreadableImport.json().data.import.id}/extract`, cookies: { ev_session: token },
+        headers: { 'idempotency-key': 'v06-review-artifact-read-01' },
+        payload: { expectedVersion: 1, disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' },
+      });
+      expect(unreadableExtraction.statusCode).toBe(422);
+      expect(unreadableExtraction.json().error.code).toBe('VISION_RESPONSE_INVALID');
+      const unreadableDatabase = openDatabase(databasePath);
+      try {
+        expect(unreadableDatabase.prepare('select status, evidence_kind, actual_calls, failure_code from external_capability_runs where id = ?').get(unreadableImport.json().data.import.capabilityRunId))
+          .toEqual({ status: 'FAILED', evidence_kind: 'NONE', actual_calls: 0, failure_code: 'VISION_RESPONSE_INVALID' });
+      } finally {
+        unreadableDatabase.close();
+      }
+      expect(externalTransactionStates).toEqual([false, false, false]);
     } finally {
       if (priorRunDirectory === undefined) delete process.env.EV_E2E_RUN_DIR; else process.env.EV_E2E_RUN_DIR = priorRunDirectory;
       if (priorFlag === undefined) delete process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS; else process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS = priorFlag;

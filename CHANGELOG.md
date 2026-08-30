@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0] — Unreleased（待合并）
+
+此版本仍待合并，尚未发布。真实 Vision、公开 Search 与 DeepSeek Learning Provider 验收均为 `NOT RUN — APPROVAL REQUIRED`；自动证据仅来自三重门保护的 `AUTOMATED_FAKE` adapter。
+
+### Added
+
+- 私有课表图片的受限原始上传、可编辑的 Owner revision、Course/Rule lineage 和确认后才展开的排程 Proposal。
+- 每门课程的公开 citation metadata、HTTPS/DNS-pinned 安全抓取边界、严格 cited learning advice 与 Course-linked Action/TimeRequest/Today STUDY Event 闭环。
+- desktop 与 iPhone 受管 E2E，基于真实 Core UUID lineage 证明同名历史事实不会重复物化。
+
+### Changed
+
+- 新的 health、capability run 与 Daily Plan 写入报告 `0.6.0`；既有持久化的 `0.5.0` app version 不被迁移改写。
+
 ## [0.5.0] — Unreleased（待合并）
 
 此版本仍待合并，尚未发布。真实 DeepSeek 人工验收为 `NOT RUN — APPROVAL REQUIRED`；自动测试只使用显式注入的 Fake Provider。

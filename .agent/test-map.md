@@ -32,6 +32,22 @@ npm run test:e2e -- e2e/v0.6-learning-loop.spec.ts
 
 预计耗时：约 2–6 分钟。
 
+## V6-04 已执行证据
+
+```powershell
+npm test --workspace @ev/contracts -- tests/courses.test.ts tests/calendar-proposals.test.ts tests/providers.test.ts
+npm test --workspace @ev/core -- tests/course-import.test.ts tests/calendar-repository.test.ts tests/learning.test.ts tests/public-resource-fetcher.test.ts tests/proposal-api.test.ts tests/today.test.ts tests/migrations.test.ts tests/v0.5-reliability-storage.test.ts tests/v0.6-capability-gate.test.ts
+npm test --workspace @ev/web -- tests/core-client.test.ts tests/core-bff-idempotency.test.ts tests/schedule-workspace.test.tsx tests/learning-workspace.test.tsx tests/course-detail-workspace.test.tsx tests/provider-settings.test.tsx tests/today-dashboard.test.tsx
+npm run typecheck
+npx eslint [V6-04 focused files and apps/web/e2e/v0.6-learning-loop.spec.ts]
+npm run build --workspace @ev/web
+npm run test:e2e -- e2e/v0.6-learning-loop.spec.ts
+git diff --check
+git diff --exit-code -- apps/core/src/storage/migrations.ts
+```
+
+已验证：immutable citation hash/refetch、Owner credential metadata→READY disclosure→一次 DeepSeek text adapter、缺失 credential→BLOCKED/零 call、SecretStore/adapter/CredentialNotConfigured 的稳定 503、解密/模型事务外和 key 不入可见 persistence/response、strict Learning Proposal、ACCEPT 原子 Action/TimeRequest、Today course/action lineage、三重 Fake 门、0.6.0 版本一致性，以及同一 Owner 两轮 desktop/iPhone 实际 Core response UUID lineage 的精确集合。最后 capability P1 另证明 production preflight evidence=NONE、仅成功 terminal 按实际 adapterKind 写 REAL_PROVIDER/AUTOMATED_FAKE、Learning 的 credential/unprotect/factory=0 calls 与 generate failure=1、Vision runner-owned artifact read failure=0 与 strict output failure=1。结果：原矩阵 Contracts 25/25、Core 43/43、Web 47/47、E2E 1/1；P1 focused Core 16/16、Contracts 25/25，其余命令 PASS。真实 Provider smoke 不属于自动层，保持 `NOT RUN — APPROVAL REQUIRED`。
+
 ## check_full
 
 命令：

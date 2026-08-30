@@ -9,6 +9,7 @@ import { expandCalendarRule } from '@ev/domain';
 import { ApiError } from '../../http/api-error';
 import type Database from 'better-sqlite3';
 import type { CalendarRepository, NewCalendarRule, NewEvent } from '../calendar/repository';
+import { createLearningProposalApplier } from '../learning/proposal-applier';
 import type { ProposalRepository } from './repository';
 
 interface ProposalServiceOptions {
@@ -38,6 +39,9 @@ export function createProposalService(
 ): ProposalService {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? randomUUID;
+  const learningProposalApplier = options.database
+    ? createLearningProposalApplier(options.database, calendarRepository, { now, newId })
+    : undefined;
 
   function findById(ownerId: string, proposalId: string): Proposal {
     const proposal = proposalRepository.findById(ownerId, proposalId);
@@ -111,6 +115,8 @@ export function createProposalService(
       } else if (change.operation === 'CREATE_EVENT') {
         const event: NewEvent = { ...change.event, ownerId };
         calendarRepository.createEvent(event);
+      } else {
+        throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', '当前日程提案包含不支持的变更');
       }
     }
   }
@@ -148,7 +154,13 @@ export function createProposalService(
         input,
         now().toISOString(),
         (proposal) => {
-          if (input.decision === 'ACCEPT') applyAcceptedScheduleChanges(ownerId, proposal);
+          if (proposal.kind === 'LEARNING') {
+            if (!learningProposalApplier) throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', '学习提案不可应用');
+            if (input.decision === 'ACCEPT') learningProposalApplier.applyAccepted(ownerId, proposal);
+            else learningProposalApplier.applyRejected(ownerId, proposal);
+          } else if (input.decision === 'ACCEPT') {
+            applyAcceptedScheduleChanges(ownerId, proposal);
+          }
           if (options.database && proposal.source === 'COURSE_IMPORT') {
             const status = input.decision === 'ACCEPT' ? 'CONFIRMED' : 'SCHEDULE_REJECTED';
             options.database.prepare(`update course_imports_v2 set status = ?, updated_at = ?, version = version + 1 where owner_id = ? and schedule_proposal_id = ? and status = 'SCHEDULE_PROPOSAL_PENDING'`).run(status, now().toISOString(), ownerId, proposal.id);

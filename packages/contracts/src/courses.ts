@@ -1,9 +1,10 @@
 import * as z from 'zod';
-import { calendarRuleSchema } from './calendar';
+import { calendarRuleSchema, localTimeSchema } from './calendar';
 import {
   capabilityDescriptorSchema,
   capabilityDisclosureVersionSchema,
 } from './providers';
+import { proposalSchema } from './proposals';
 
 const titleSchema = z.string().trim().min(1).max(200);
 const urlSchema = z.url().max(2000).refine(
@@ -124,12 +125,89 @@ export const courseResourceSearchCreateResponseSchema = z.object({
 export const courseResourceSearchResponseSchema = z.object({
   data: z.object({ run: courseResourceSearchRunSchema, citations: z.array(courseResourceCitationSchema) }).strict(),
 }).strict();
+
+const citationIdSelectionSchema = z.array(z.uuid()).min(1).max(3).superRefine((citationIds, context) => {
+  if (new Set(citationIds).size !== citationIds.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: '引用不能重复' });
+  }
+});
+const learningObjectiveSchema = z.string().trim().min(1).max(2_000);
+
+export const createLearningRunSchema = z.object({
+  searchRunId: z.uuid(),
+  citationIds: citationIdSelectionSchema,
+  objective: learningObjectiveSchema,
+  targetDate: z.iso.date(),
+  earliestStartLocalTime: localTimeSchema.nullable(),
+  latestEndLocalTime: localTimeSchema.nullable(),
+}).strict().superRefine((input, context) => {
+  if (
+    input.earliestStartLocalTime !== null
+    && input.latestEndLocalTime !== null
+    && input.latestEndLocalTime <= input.earliestStartLocalTime
+  ) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latestEndLocalTime'], message: '最晚结束时间必须晚于最早开始时间' });
+  }
+});
+export const learningRunStatusSchema = z.enum([
+  'BLOCKED_PROVIDER', 'AWAITING_DISCLOSURE', 'GENERATING', 'PROPOSAL_PENDING', 'ACCEPTED', 'REJECTED', 'FAILED',
+]);
+export const learningRunSchema = z.object({
+  id: z.uuid(),
+  courseId: z.uuid(),
+  searchRunId: z.uuid(),
+  capabilityRunId: z.uuid(),
+  citationIds: citationIdSelectionSchema,
+  status: learningRunStatusSchema,
+  proposalId: z.uuid().nullable(),
+  failureCode: z.string().min(1).max(100).nullable(),
+  version: z.number().int().positive(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+}).strict();
+export const learningRunGenerateSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  disclosureVersion: capabilityDisclosureVersionSchema,
+}).strict();
+export const citedLearningAdviceInputSchema = z.object({
+  schemaVersion: z.literal('CITED_LEARNING_ADVICE_V1'),
+  course: z.object({ id: z.uuid(), title: titleSchema, stage: courseLearningStageSchema }).strict(),
+  objective: learningObjectiveSchema,
+  materials: z.array(z.object({
+    citationId: z.uuid(),
+    title: titleSchema,
+    publisher: z.string().trim().min(1).max(253),
+    url: publicHttpsUrlSchema,
+    contentHash: contentHashSchema,
+    untrustedText: z.string().min(1).max(4_000),
+  }).strict()).min(1).max(3),
+}).strict();
+export const citedLearningAdviceOutputSchema = z.object({
+  schemaVersion: z.literal('CITED_LEARNING_ADVICE_V1'),
+  title: titleSchema,
+  rationale: z.string().trim().min(1).max(2_000),
+  citationIds: citationIdSelectionSchema,
+  durationMinutes: z.number().int().min(5).max(960),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+}).strict();
+export const learningRunCreateResponseSchema = z.object({
+  data: z.object({ run: learningRunSchema, disclosure: capabilityDescriptorSchema }).strict(),
+}).strict();
+export const learningRunResponseSchema = z.object({ data: learningRunSchema }).strict();
+export const learningRunGenerateResponseSchema = z.object({
+  data: z.object({ run: learningRunSchema, proposal: proposalSchema }).strict(),
+}).strict();
 export type Course = z.infer<typeof courseSchema>;
 export type CourseResource = z.infer<typeof courseResourceSchema>;
 export type CourseLearningStage = z.infer<typeof courseLearningStageSchema>;
 export type CourseLearningContext = z.infer<typeof courseLearningContextSchema>;
 export type CourseResourceCitation = z.infer<typeof courseResourceCitationSchema>;
 export type CourseResourceSearchRun = z.infer<typeof courseResourceSearchRunSchema>;
+export type CreateLearningRunInput = z.infer<typeof createLearningRunSchema>;
+export type LearningRun = z.infer<typeof learningRunSchema>;
+export type LearningRunStatus = z.infer<typeof learningRunStatusSchema>;
+export type CitedLearningAdviceInput = z.infer<typeof citedLearningAdviceInputSchema>;
+export type CitedLearningAdviceOutput = z.infer<typeof citedLearningAdviceOutputSchema>;
 export type CourseDetail = z.infer<typeof courseDetailSchema>;
 export type CreateCourseInput = z.infer<typeof createCourseSchema>;
 export type CreateCourseResourceInput = z.infer<typeof createCourseResourceSchema>;

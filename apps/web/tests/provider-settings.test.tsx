@@ -65,6 +65,9 @@ describe('ProviderSettingsPage', () => {
     expect(screen.getByLabelText('DeepSeek API Key')).toHaveAttribute('autocomplete', 'off');
     expect(screen.getByText('每日计划模型：deepseek-v4-flash（仅允许 deepseek-v4-flash / deepseek-v4-pro）')).toBeInTheDocument();
     expect(screen.getByText('真实连接测试只会在你主动点击后发送最小请求；本页面不会自动调用 Provider。')).toBeInTheDocument();
+    expect(screen.getByText(/文本学习建议未配置时均显示 BLOCKED_PROVIDER/)).toBeInTheDocument();
+    expect(screen.getByText('保存 DeepSeek 凭据后，课程详情仍会先要求确认文本学习建议的外发披露；视觉识别和匿名公开检索不会使用 DeepSeek。')).toBeInTheDocument();
+    expect(screen.getByText(/自动测试 Fake 证据，不代表真实 Provider/)).toBeInTheDocument();
     expect(requestCoreMock).toHaveBeenCalledWith(
       'providers/deepseek/credential',
       expect.objectContaining({ method: 'GET', signal: expect.anything() }),

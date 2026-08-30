@@ -23,6 +23,7 @@ import { registerFitnessRoutes } from './modules/fitness/routes';
 import { createFitnessService } from './modules/fitness/service';
 import { registerLearningRoutes } from './modules/learning/routes';
 import { createLearningService } from './modules/learning/service';
+import { createDeepSeekLearningAdviceCapability } from './modules/learning/deepseek-learning-advice';
 import { createPublicResourceFetcher, type PublicResourceFetcher } from './modules/learning/public-resource-fetcher';
 import { registerMemoryRoutes } from './modules/memory/routes';
 import { createMemoryService } from './modules/memory/service';
@@ -51,6 +52,7 @@ import type { DomainAgentProvider } from './modules/agents/provider';
 import {
   createCapabilityRegistry,
   type LearningAdviceCapability,
+  type LearningAdviceCapabilityFactory,
   type PublicSearchCapability,
   type VisionCapability,
 } from './modules/providers/capabilities';
@@ -76,8 +78,9 @@ export interface AppOptions {
   publicSearchCapability?: PublicSearchCapability;
   publicResourceFetcher?: PublicResourceFetcher;
   learningAdviceCapability?: LearningAdviceCapability;
+  learningAdviceCapabilityFactory?: LearningAdviceCapabilityFactory;
   courseImportExternalOperationObserver?: (inTransaction: boolean) => void;
-  learningExternalOperationObserver?: (inTransaction: boolean) => void;
+  learningExternalOperationObserver?: (inTransaction: boolean, operation?: 'LEARNING_CREDENTIAL_UNPROTECT' | 'LEARNING_ADVICE_GENERATE') => void;
   domainAgentProvider?: DomainAgentProvider;
   domainAgentProviders?: Partial<Record<ProviderKey, DomainAgentProvider>>;
   secretStore?: SecretStorePort;
@@ -101,11 +104,14 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const database = openDatabase(databasePath);
   const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
   const artifactRoot = options.artifactRoot ?? join(dataRoot, 'artifacts');
+  const explicitLearningAdviceCapability = options.learningAdviceCapability?.descriptor.adapterKind === 'TEST_FAKE'
+    ? options.learningAdviceCapability
+    : undefined;
   const capabilityRegistry = createCapabilityRegistry({
     dataRoot,
     ...(options.visionCapability ? { vision: options.visionCapability } : {}),
     ...(options.publicSearchCapability ? { publicSearch: options.publicSearchCapability } : {}),
-    ...(options.learningAdviceCapability ? { learningAdvice: options.learningAdviceCapability } : {}),
+    ...(explicitLearningAdviceCapability ? { learningAdvice: explicitLearningAdviceCapability } : {}),
   });
   const capabilityRunRepository = createCapabilityRunRepository(database);
   capabilityRunRepository.sweepExpired((options.providerReliabilityNow ?? (() => new Date()))().toISOString());
@@ -138,10 +144,24 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     }),
   });
   const fitnessService = createFitnessService(calendarRepository);
+  const providerCredentialService = createProviderCredentialService(
+    database,
+    options.secretStore ?? createWindowsDpapiSecretStore(),
+    options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
+  );
+  const learningAdviceCapabilityFactory = explicitLearningAdviceCapability
+    ? undefined
+    : options.learningAdviceCapabilityFactory ?? {
+        descriptor: { providerId: 'deepseek', providerLabel: 'DeepSeek 文本学习建议', adapterKind: 'PRODUCTION_ADAPTER' as const },
+        create(apiKey: string) { return createDeepSeekLearningAdviceCapability({ apiKey }); },
+      };
   const learningService = createLearningService(database, calendarRepository, {
     capabilityRegistry,
     capabilityRuns: capabilityRunRepository,
+    proposalService,
     publicResourceFetcher: options.publicResourceFetcher ?? createPublicResourceFetcher(),
+    credentialService: providerCredentialService,
+    ...(learningAdviceCapabilityFactory ? { learningAdviceCapabilityFactory } : {}),
     ...(options.learningExternalOperationObserver ? { onExternalOperation: options.learningExternalOperationObserver } : {}),
   });
   const dayPlanningService = createDayPlanningService(
@@ -162,11 +182,6 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       ...options.domainAgentProviders,
     },
   });
-  const providerCredentialService = createProviderCredentialService(
-    database,
-    options.secretStore ?? createWindowsDpapiSecretStore(),
-    options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
-  );
   const providerReliabilityRepository = createProviderReliabilityRepository(database);
   const dailyPlanRepository = createDailyPlanRunRepository(database);
   const dailyPlanExecutionUnitOfWork = createDailyPlanExecutionUnitOfWork({
@@ -269,6 +284,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     providerCredentialService,
     dailyPlanRepository,
     dailyPlanAutomationService,
+    learningService,
   });
 
   return app;

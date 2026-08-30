@@ -29,6 +29,20 @@ describe('v0.6 capability fake gate', () => {
     ).toThrow(/runner-owned/i);
   });
 
+  it('keeps a configured production adapter at NONE until an execution terminalizes it', () => {
+    const registry = createCapabilityRegistry({
+      dataRoot: 'C:/test-data',
+      publicSearch: {
+        descriptor: { providerId: 'production-search', providerLabel: 'Controlled Search', adapterKind: 'PRODUCTION_ADAPTER' },
+        async search() { return { results: [] }; },
+      },
+    });
+
+    expect(registry.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capability: 'PUBLIC_LEARNING_SEARCH', adapterKind: 'PRODUCTION_ADAPTER', availability: 'READY', evidenceKind: 'NONE' }),
+    ]));
+  });
+
   it('terminalizes an expired capability lease without calling a Provider', () => {
     const database = new Database(':memory:');
     try {
