@@ -2,7 +2,7 @@
 
 ## 目标
 
-以产品比较基线 `155b172`、计划执行基线 `d5d4ea5` 开始，用 bounded raw image 替换 Base64 JSON，交付 Owner 私有 artifact、MIME/magic/字节/像素/hash/清理、Provider 中立能力披露和 additive migration v19。
+以产品比较基线 `155b172`、运行时代码基线 `d5d4ea5` 开始，用 bounded raw image 替换 Base64 JSON，交付 Owner 私有 artifact、MIME/magic/字节/像素/hash/清理、Provider 中立能力披露和 additive migration v19。
 
 ## 用户或系统价值
 
@@ -10,7 +10,7 @@ Owner 可先把课表截图安全保存在本地并看清 Provider、外发字�
 
 ## 输入
 
-- 产品比较 BASE `155b172de91a62feb2762469536555f9a6b2b025`；Terra 执行 HEAD `d5d4ea5`。
+- 产品比较 BASE `155b172de91a62feb2762469536555f9a6b2b025`；运行时代码 BASE `d5d4ea5`。Terra 从包含该提交且其后仅有 `.agent` 控制面提交的最新干净 HEAD 开始。
 - 冻结计划 `docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md` 的 Global Constraints、migration v19 和 V6-01。
 - 当前 Base64 `course-import.ts`、calendar import service/routes、BFF/Core client、schedule/settings UI、v18 migration 与 Provider reliability 模式。
 
@@ -25,7 +25,7 @@ Owner 可先把课表截图安全保存在本地并看清 Provider、外发字�
 
 ## 前置条件
 
-- 分支 `codex/product-prd`，HEAD `d5d4ea5`。
+- 分支 `codex/product-prd`；HEAD 必须包含 `d5d4ea5`，且 `d5d4ea5..HEAD` 在首个产品实现提交前只能有 `.agent` 控制面提交。
 - 工作树在本次状态提交后必须干净，没有用户产品改动。
 - 不安装依赖；Fastify 5 raw content parser 和 Node built-ins 足以实现。
 

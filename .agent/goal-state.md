@@ -10,7 +10,7 @@ M1 / v0.6：课程、课表截图与学习排程闭环。
 
 ## 当前任务
 
-TASK-V6-01：以产品比较基线 `155b172`、计划执行基线 `d5d4ea5` 开始实现 bounded raw 课表图片、Owner 私有 artifact、能力披露和 additive migration v19；尚未开始产品代码。
+TASK-V6-01：以产品比较基线 `155b172`、运行时代码基线 `d5d4ea5` 开始实现 bounded raw 课表图片、Owner 私有 artifact、能力披露和 additive migration v19；Terra 从最新干净控制面 HEAD 启动，尚未开始产品代码。
 
 ## 已完成任务
 
