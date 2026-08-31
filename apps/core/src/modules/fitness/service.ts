@@ -1,14 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   APP_VERSION,
+  type Action,
+  type ActivitySession,
   type CheckInInput,
   type CreateFitnessCheckInInput,
   type CreateWorkoutInput,
   type ExerciseCitation,
   type HealthTextProvider,
+  type NormalizedTimeRequest,
   type Signal,
+  type Proposal,
   type Workout,
   type WorkoutRevision,
+  type WorkoutFeedbackInput,
   workoutTextSelectionOutputSchema,
 } from '@ev/contracts';
 import {
@@ -22,7 +27,7 @@ import type { CalendarRepository } from '../calendar/repository';
 import type { V07IdempotencyService } from '../health-loop/idempotency-service';
 import type { V07HealthLoopRepository } from '../health-loop/repository';
 import { loadInternalExerciseCatalog, type LoadedInternalExerciseCatalog } from './catalog';
-import type { FitnessRepository } from './repository';
+import { WorkoutProposalStateConflictError, type FitnessRepository } from './repository';
 
 type CheckIn = NonNullable<ReturnType<FitnessRepository['findCheckIn']>>;
 type WorkoutRevisionInput = {
@@ -42,8 +47,10 @@ export interface FitnessService {
   listExercises(ownerId: string, query: { checkInId: string; goal?: CreateWorkoutInput['goal']; equipment?: string[]; query?: string; page: number; pageSize: number }): { safety: CheckIn['safety']; manifest: LoadedInternalExerciseCatalog['manifest']; items: LoadedInternalExerciseCatalog['items']; pagination: Pagination };
   createWorkout(ownerId: string, input: CreateWorkoutInput, idempotencyKey: string): Promise<{ workout: Workout; revision: WorkoutRevision; disclosure: unknown | null; replayed: boolean }>;
   reviseWorkout(ownerId: string, workoutId: string, input: WorkoutRevisionInput, idempotencyKey: string): { workout: Workout; revision: WorkoutRevision; replayed: boolean };
+  createWorkoutProposal(ownerId: string, workoutId: string, input: { expectedVersion: number; revisionId: string }, idempotencyKey: string): { workout: Workout; proposal: Proposal; replayed: boolean };
+  recordWorkoutFeedback(ownerId: string, workoutId: string, input: WorkoutFeedbackInput, idempotencyKey: string): { workout: Workout; feedback: Record<string, unknown>; action: Action; activitySession: ActivitySession | null; safetyNotice: 'STOP_EXERCISE_AND_SEEK_PROFESSIONAL_HELP' | null; replayed: boolean };
   listWorkouts(ownerId: string, query: { state?: Workout['state']; localDate?: string; page: number; pageSize: number }): { items: Workout[]; pagination: Pagination };
-  getWorkout(ownerId: string, workoutId: string): { workout: Workout; checkIn: CheckIn; revision: WorkoutRevision; proposal: null; action: null; timeRequest: null; feedback: null };
+  getWorkout(ownerId: string, workoutId: string): { workout: Workout; checkIn: CheckIn; revision: WorkoutRevision; proposal: Proposal | null; action: Action | null; timeRequest: NormalizedTimeRequest | null; feedback: Record<string, unknown> | null };
 }
 
 function pagination(page: number, pageSize: number, total: number): Pagination {
@@ -284,6 +291,65 @@ export function createFitnessService(
       if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
       return { ...(result.body as { workout: Workout; revision: WorkoutRevision }), replayed: result.replayed };
     },
+    createWorkoutProposal(ownerId, workoutId, input, idempotencyKey) {
+      const result = v07IdempotencyService.executeLocal({ ownerId, key: idempotencyKey, operation: 'fitness.workout.propose', resourceId: workoutId, body: input }, () => {
+        const workout = fitnessRepository.findWorkout(ownerId, workoutId);
+        if (!workout) throw new ApiError(404, 'WORKOUT_NOT_FOUND', '训练草稿不存在');
+        if (workout.state !== 'DRAFT' || workout.currentRevisionId !== input.revisionId) throw new ApiError(422, 'WORKOUT_NOT_PROPOSABLE', '当前训练不可提交确认');
+        if (workout.version !== input.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '训练版本已变化');
+        const checkIn = fitnessRepository.findCheckIn(ownerId, workout.checkInId);
+        if (!checkIn) throw new ApiError(404, 'FITNESS_CHECK_IN_NOT_FOUND', '训练状态记录不存在');
+        const revision = fitnessRepository.findWorkoutRevision(ownerId, input.revisionId);
+        if (!revision) throw new ApiError(422, 'WORKOUT_NOT_PROPOSABLE', '训练修订不存在');
+        validateScheduling(checkIn, revision.scheduling);
+        const timestamp = now().toISOString();
+        const actionId = newId();
+        const timeRequestId = newId();
+        const proposal: Proposal = {
+          id: newId(), kind: 'WORKOUT', status: 'PENDING', source: 'FITNESS_AGENT', title: revision.title,
+          changes: [{
+            operation: 'CREATE_WORKOUT_ACTION',
+            workout: { workoutId, revisionId: revision.id, expectedWorkoutVersion: workout.version + 1, contentHash: revision.contentHash },
+            action: { id: actionId, title: revision.title, targetDate: revision.scheduling.targetDate, status: 'OPEN', kind: 'FITNESS', version: 1, createdAt: timestamp, updatedAt: timestamp },
+            scheduling: { timeRequestId, durationMinutes: revision.scheduling.durationMinutes, priority: revision.scheduling.priority, earliestStartLocalTime: revision.scheduling.earliestStartLocalTime, latestEndLocalTime: revision.scheduling.latestEndLocalTime, isFixed: false },
+            citationIds: revision.items.map((item) => item.citation.citationId),
+          }],
+          version: 1, createdAt: timestamp, expiresAt: null,
+        };
+        let marked: Workout;
+        try {
+          marked = fitnessRepository.createWorkoutProposal({ ownerId, workoutId, expectedVersion: input.expectedVersion, revisionId: revision.id, proposal, updatedAt: timestamp });
+        } catch (error) {
+          if (error instanceof WorkoutProposalStateConflictError) {
+            throw new ApiError(409, 'VERSION_CONFLICT', '训练版本已变化');
+          }
+          throw error;
+        }
+        healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_PROPOSAL_CREATED', entityType: 'WORKOUT', entityId: workoutId, entityVersion: marked.version, metadata: { proposalId: proposal.id, revisionId: revision.id }, createdAt: timestamp });
+        return { status: 201, body: { workout: marked, proposal } };
+      });
+      if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
+      return { ...(result.body as { workout: Workout; proposal: Proposal }), replayed: result.replayed };
+    },
+    recordWorkoutFeedback(ownerId, workoutId, input, idempotencyKey) {
+      const result = v07IdempotencyService.executeLocal({ ownerId, key: idempotencyKey, operation: 'fitness.workout.feedback', resourceId: workoutId, body: input }, () => {
+        const workout = fitnessRepository.findWorkout(ownerId, workoutId);
+        if (!workout) throw new ApiError(404, 'WORKOUT_NOT_FOUND', '训练草稿不存在');
+        if (workout.state !== 'ACCEPTED') throw new ApiError(422, 'WORKOUT_NOT_ACCEPTED', '训练尚未确认，不能记录反馈');
+        if (workout.version !== input.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '训练版本已变化');
+        const timestamp = now().toISOString();
+        const stored = fitnessRepository.recordWorkoutFeedback({
+          ownerId, workoutId, expectedVersion: input.expectedVersion, outcome: input.outcome,
+          perceivedEffort: input.perceivedEffort, hadPain: input.hadPain, note: input.note,
+          startedAt: input.startedAt, endedAt: input.endedAt, feedbackId: newId(), activitySessionId: newId(), now: timestamp,
+        });
+        if (!stored) throw new ApiError(409, 'VERSION_CONFLICT', '训练版本已变化');
+        healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_FEEDBACK_RECORDED', entityType: 'WORKOUT', entityId: workoutId, entityVersion: stored.workout.version, metadata: { hadPain: input.hadPain, outcome: input.outcome }, createdAt: timestamp });
+        return { status: 201, body: { ...stored, safetyNotice: input.hadPain ? 'STOP_EXERCISE_AND_SEEK_PROFESSIONAL_HELP' as const : null } };
+      });
+      if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
+      return { ...(result.body as Omit<ReturnType<FitnessService['recordWorkoutFeedback']>, 'replayed'>), replayed: result.replayed };
+    },
     listWorkouts(ownerId, query) {
       const result = fitnessRepository.listWorkouts(ownerId, query);
       return { items: result.items, pagination: pagination(query.page, query.pageSize, result.total) };
@@ -294,7 +360,13 @@ export function createFitnessService(
       const checkIn = fitnessRepository.findCheckIn(ownerId, workout.checkInId);
       const revision = fitnessRepository.findWorkoutRevision(ownerId, workout.currentRevisionId);
       if (!checkIn || !revision) throw new Error('WORKOUT_LINEAGE_CORRUPT');
-      return { workout, checkIn, revision, proposal: null, action: null, timeRequest: null, feedback: null };
+      const proposal = fitnessRepository.findWorkoutProposal(ownerId, workout.id) ?? null;
+      const action = fitnessRepository.findWorkoutAction(ownerId, workout.id) ?? null;
+      const timeRequest = action
+        ? calendarRepository.listTimeRequestHistoryForOrigin(ownerId, { kind: 'ACTION', entityId: action.id }).at(-1) ?? null
+        : null;
+      const feedback = fitnessRepository.findWorkoutFeedback(ownerId, workout.id) ?? null;
+      return { workout, checkIn, revision, proposal, action, timeRequest, feedback };
     },
   };
 }

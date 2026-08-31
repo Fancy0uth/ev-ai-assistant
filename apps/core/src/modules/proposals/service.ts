@@ -10,6 +10,7 @@ import { ApiError } from '../../http/api-error';
 import type Database from 'better-sqlite3';
 import type { CalendarRepository, NewCalendarRule, NewEvent } from '../calendar/repository';
 import { createLearningProposalApplier } from '../learning/proposal-applier';
+import { createWorkoutProposalApplier } from '../fitness/proposal-applier';
 import type { ProposalRepository } from './repository';
 
 interface ProposalServiceOptions {
@@ -41,6 +42,9 @@ export function createProposalService(
   const newId = options.newId ?? randomUUID;
   const learningProposalApplier = options.database
     ? createLearningProposalApplier(options.database, calendarRepository, { now, newId })
+    : undefined;
+  const workoutProposalApplier = options.database
+    ? createWorkoutProposalApplier(options.database, calendarRepository, { now, newId })
     : undefined;
 
   function findById(ownerId: string, proposalId: string): Proposal {
@@ -158,6 +162,10 @@ export function createProposalService(
             if (!learningProposalApplier) throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', '学习提案不可应用');
             if (input.decision === 'ACCEPT') learningProposalApplier.applyAccepted(ownerId, proposal);
             else learningProposalApplier.applyRejected(ownerId, proposal);
+          } else if (proposal.kind === 'WORKOUT') {
+            if (!workoutProposalApplier) throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', '训练提案不可应用');
+            if (input.decision === 'ACCEPT') workoutProposalApplier.applyAccepted(ownerId, proposal);
+            else workoutProposalApplier.applyRejected(ownerId, proposal);
           } else if (input.decision === 'ACCEPT') {
             applyAcceptedScheduleChanges(ownerId, proposal);
           }

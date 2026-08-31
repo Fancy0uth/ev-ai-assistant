@@ -9,6 +9,7 @@ import {
   createProposalRepository,
   type NewProposal,
 } from '../src/modules/proposals/repository';
+import { createProposalService } from '../src/modules/proposals/service';
 import { openDatabase } from '../src/storage/database';
 
 const credentials = {
@@ -222,5 +223,33 @@ describe('versioned schedule proposal API', () => {
     expect(unchanged.statusCode).toBe(200); expect(unchanged.json().data).toMatchObject({ status: 'PENDING', version: 1 });
     const day = await app.inject({ method: 'GET', url: '/v1/days/2026-09-07', cookies: { ev_session: token } });
     expect(day.json().data.events).toEqual([]);
+  });
+
+  it('keeps a Workout Proposal pending when the generic service has no injected Workout applier', async () => {
+    app = await buildApp({ databasePath, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    expect(setup.statusCode).toBe(201);
+    const database = openDatabase(databasePath);
+    try {
+      const ownerId = (database.prepare('select id from owners').get() as { id: string }).id;
+      const proposalId = '00000000-0000-4000-8000-000000000212';
+      const proposalRepository = createProposalRepository(database);
+      proposalRepository.create({
+        id: proposalId, ownerId, kind: 'WORKOUT', status: 'PENDING', source: 'FITNESS_AGENT', title: '等待训练确认',
+        changes: [{
+          operation: 'CREATE_WORKOUT_ACTION',
+          workout: { workoutId: '00000000-0000-4000-8000-000000000213', revisionId: '00000000-0000-4000-8000-000000000214', expectedWorkoutVersion: 2, contentHash: 'a'.repeat(64) },
+          action: { id: '00000000-0000-4000-8000-000000000215', title: '等待训练确认', targetDate: '2026-09-07', status: 'OPEN', kind: 'FITNESS', version: 1, createdAt: now, updatedAt: now },
+          scheduling: { timeRequestId: '00000000-0000-4000-8000-000000000216', durationMinutes: 30, priority: 'LOW', earliestStartLocalTime: null, latestEndLocalTime: null, isFixed: false },
+          citationIds: ['b'.repeat(64)],
+        }],
+        version: 1, createdAt: now, expiresAt: null,
+      });
+      const service = createProposalService(proposalRepository, createCalendarRepository(database));
+      expect(() => service.decide(ownerId, proposalId, { version: 1, decision: 'ACCEPT' })).toThrow(/训练提案不可应用/);
+      expect(proposalRepository.findById(ownerId, proposalId)).toMatchObject({ status: 'PENDING', version: 1 });
+    } finally {
+      database.close();
+    }
   });
 });

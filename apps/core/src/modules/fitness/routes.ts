@@ -2,6 +2,7 @@ import {
   checkInResponseSchema,
   checkInSchema,
   createFitnessCheckInSchema,
+  createWorkoutProposalSchema,
   createWorkoutRevisionSchema,
   createWorkoutSchema,
   exerciseListQuerySchema,
@@ -12,9 +13,12 @@ import {
   idempotencyKeySchema,
   workoutCreateResponseSchema,
   workoutDetailResponseSchema,
+  workoutFeedbackResponseSchema,
+  workoutFeedbackSchema,
   workoutListQuerySchema,
   workoutListResponseSchema,
   workoutPathParamsSchema,
+  workoutProposalResponseSchema,
   workoutRevisionResponseSchema,
 } from '@ev/contracts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -81,6 +85,23 @@ export async function registerFitnessRoutes(app: FastifyInstance, options: Fitne
     if (result.replayed) reply.header('idempotency-replayed', 'true');
     const data = { workout: result.workout, revision: result.revision };
     return reply.status(201).send(workoutRevisionResponseSchema.parse({ data }));
+  });
+  app.post('/v1/fitness/workouts/:id/proposal', { preHandler: authGuard, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request, reply) => {
+    const { id } = parseRequestInput(workoutPathParamsSchema, request.params, '训练草稿标识不符合要求');
+    const input = parseRequestInput(createWorkoutProposalSchema, request.body, '训练提案输入不符合要求');
+    const result = options.fitnessService.createWorkoutProposal(authenticatedOwnerId(request), id, input, idempotencyKey(request));
+    if (result.replayed) reply.header('idempotency-replayed', 'true');
+    return reply.status(201).send(workoutProposalResponseSchema.parse({ data: { workout: result.workout, proposal: result.proposal } }));
+  });
+  app.post('/v1/fitness/workouts/:id/feedback', { preHandler: authGuard, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request, reply) => {
+    const { id } = parseRequestInput(workoutPathParamsSchema, request.params, '训练草稿标识不符合要求');
+    const input = parseRequestInput(workoutFeedbackSchema, request.body, '训练反馈输入不符合要求');
+    const result = options.fitnessService.recordWorkoutFeedback(authenticatedOwnerId(request), id, input, idempotencyKey(request));
+    if (result.replayed) reply.header('idempotency-replayed', 'true');
+    return reply.status(201).send(workoutFeedbackResponseSchema.parse({ data: {
+      workout: result.workout, feedback: result.feedback, action: result.action,
+      activitySession: result.activitySession, safetyNotice: result.safetyNotice,
+    } }));
   });
   app.get('/v1/fitness/workouts', { preHandler: authGuard, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (request, reply) => {
     const query = parseRequestInput(workoutListQuerySchema, request.query, '训练草稿查询不符合要求');
