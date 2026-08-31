@@ -15,7 +15,7 @@
 | 1 | v0.4 | 已关闭 | 兼容排程输入、ACTIVE/CLOSED TimeRequest、Task/Calendar Unit of Work、事务外 preflight Provider、手工 Event、详情路由与 UI-origin 闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.4-action-scheduling-foundation.md) | `docs/reviews/2026-08-23-v0.4-sol-smoke-review.md` |
 | 2 | v0.5 | 已关闭于 `155b172` | DeepSeek/DPAPI 通路、幂等、Run 恢复、超时/配额、脱敏日志、版本一致；真实调用未运行证据债保留 | [计划](../docs/superpowers/plans/2026-08-23-v0.5-provider-reliability.md) | `docs/reviews/2026-08-24-v0.5-sol-final-review.md` |
 | 3 | v0.6 | 已关闭于 TARGET `7ba44fb`；最终 Sol rereview-3 PASS，P0=0/P1=0 | 私有 raw artifact、Provider 外发披露、可编辑 revision、Course/Rule/SCHEDULE Proposal、课程详情、安全公开 citation、Learning Action→TimeRequest、响应式闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md) | `docs/reviews/2026-08-31-v0.6-sol-rereview-3.md` |
-| 4 | v0.7 | 整版 Sol 规划中 | 健身/恢复与权威营养数据闭环，无医疗诊断 | [计划](../docs/superpowers/plans/2026-08-23-v0.7-fitness-nutrition-loop.md) | `docs/reviews/2026-08-23-v0.7-sol-smoke-review.md` |
+| 4 | v0.7 | 整版计划已冻结于 `60fca20`；Terra 连续执行中 | 健身/恢复与权威营养数据闭环，无医疗诊断 | [计划](../docs/superpowers/plans/2026-08-31-v0.7-fitness-nutrition-loop.md) | 待生成 `docs/reviews/2026-08-31-v0.7-sol-review.md` |
 | 5 | v0.8 | 待开始 | 只读项目分析、本地长期记忆、跨模块唯一排程 Proposal | [计划](../docs/superpowers/plans/2026-08-23-v0.8-project-memory-coordination.md) | `docs/reviews/2026-08-23-v0.8-sol-smoke-review.md` |
 | 6 | v0.9 | 待开始 | 私有 iPhone、Windows 运维、WAL 备份恢复与最终完整门禁 | [计划](../docs/superpowers/plans/2026-08-23-v0.9-private-iphone-operations.md) | `docs/reviews/2026-08-23-v0.9-sol-smoke-review.md` |
 
@@ -43,7 +43,7 @@
 ## 当前冻结里程碑：v0.7
 
 - 入口：v0.6 PASS TARGET `7ba44fb`，准入文档提交 `b3b6409`。
-- 既有计划分为 V7-01–V7-05；Sol 将按现有代码重新冻结整版顺序、数据源合同和最小测试边界。
+- 冻结计划分为 V7-01–V7-07：公共契约 → 安全/decimal/migration → 动作目录/Workout revisions → Proposal/反馈 → Meal draft/match/confirm → composition/0.7.0 → Web/E2E。
 - 动作目录必须有 source/license/version/hash；许可不清时不导入。RAG 资料不可信且不能改变工具/权限。
 - 营养数值必须来自权威、带版本的数据源；模型只解析食物/份量候选，Core 计算，Owner 确认后入账。
 - 真实 API、网络、Key、费用和个人健康数据外发均需单独审批；未配置时 fail closed，自动 fixture 不冒充真实数据源。

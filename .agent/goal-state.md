@@ -10,7 +10,7 @@ M2 / v0.7：健身、恢复与权威营养数据闭环。
 
 ## 当前任务
 
-v0.6 已由最终 Sol rereview-3 在 TARGET `7ba44fb` 上确认 P0=0/P1=0 并 PASS，准入文档提交为 `b3b6409`。当前开始 v0.7 整版 Sol 分析：核对现有健身/饮食底座、冻结动作目录和营养数据 Provider 门、形成 Terra 可连续执行的整版任务与最小测试边界。
+v0.7 整版执行设计和七任务计划已由 Sol 冻结并提交为 `60fca20`。当前由同一个 Terra 连续执行 V7-01：以 strict Zod schema 冻结 Fitness/Nutrition/health capability/Workout Proposal 公共合同，先 RED 后最小 GREEN。
 
 ## 已完成任务
 
@@ -24,12 +24,12 @@ v0.6 已由最终 Sol rereview-3 在 TARGET `7ba44fb` 上确认 P0=0/P1=0 并 PA
 
 ## 下一任务
 
-由 Sol 基于 v0.6 PASS 入口完成 v0.7 整版分析和任务边界冻结；主 Agent 审核后交由 Terra 从 V7-01 开始 TDD 实现。
+V7-01 原子提交后自动进入 V7-02：确定性安全、BigInt micros、加法 migration v20 与共享可靠性。
 
 ## 当前阻塞
 
 - v0.6 无剩余 P0/P1 阻塞。
-- v0.7 动作数据集来源/许可/版本与营养数据 Provider 契约尚待 Sol 冻结；未获授权前不得抓取、导入许可不明数据或调用真实网络/API。
+- v0.7 本地工程执行无已知阻塞；动作目录固定为 `FIRST_PARTY_INTERNAL/redistribution=false`，生产 Nutrition Provider 默认未配置。
 - 真实 Vision、Search、DeepSeek 与真实凭据/DPAPI/网络继续记录为 `NOT RUN — APPROVAL REQUIRED`，不由 Fake 替代。
 
 ## 最近测试结果
@@ -59,7 +59,7 @@ v0.6 已由最终 Sol rereview-3 在 TARGET `7ba44fb` 上确认 P0=0/P1=0 并 PA
 ## 尚未验证风险
 
 - v0.6 六个 P2 继续作为非阻断债务，不在 v0.7 无关切片中顺带扩张。
-- v0.7 尚未冻结真实动作目录和权威营养数据 Provider；自动 fixture 只能证明工程合同，不能替代真实数据源证据。
+- v0.7 真实权威营养数据 Provider 尚未获批准；自动 `TEST_FIXTURE` 只能证明工程合同，不能替代真实数据源证据。
 - v0.5 `P2-EVIDENCE-001` 以及三类真实 Provider 成功证据仍是明确证据债。
 
 ## 最后更新时间

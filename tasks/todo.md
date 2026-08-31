@@ -34,11 +34,13 @@ v0.6 的 Vision/Search 供应商、真实 Key 和真实调用均未获批准。�
 
 ## v0.7：Fitness and Nutrition Loop
 
-- [ ] V7-01：冻结健身/饮食契约并完成无损 migration v20。
-- [ ] V7-02：建立有来源、版本和许可记录的动作知识库与受限 RAG。
-- [ ] V7-03：完成 Check-in→Signal→Workout Proposal→TimeRequest→反馈。
-- [ ] V7-04：完成自然语言餐食→权威营养数据→Owner 确认链。
-- [ ] V7-05：交付健身/饮食 UI、聚焦 E2E、真实数据源证据并同步 0.7.0 元数据；不做医疗诊断。
+- [ ] V7-01：冻结 Fitness、Nutrition、health capability 与 `CREATE_WORKOUT_ACTION` 公共契约。
+- [ ] V7-02：实现确定性安全、BigInt micros、加法 migration v20 与共享可靠性。
+- [ ] V7-03：建立 8 项内部动作目录并完成 Check-in 与可审查 Workout revisions。
+- [ ] V7-04：完成 Workout Proposal→Action+TimeRequest→完成/跳过反馈。
+- [ ] V7-05：完成餐食候选→严格数据匹配→decimal-safe Owner 确认 Meal。
+- [ ] V7-06：接线 production fail-closed、三重门控测试 fixture 并同步 0.7.0。
+- [ ] V7-07：交付 Fitness/Nutrition Web 与单个 desktop+iPhone E2E；随后执行整版 Sol review。
 
 ## v0.8：Project, Memory and Coordination
 
