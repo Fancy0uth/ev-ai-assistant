@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { preserveV07HealthEvidence } from './v0.7-health-evidence.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const coreUrl = 'http://127.0.0.1:4327/v1/health/ready';
@@ -15,6 +16,8 @@ const webDirectory = join(root, 'apps', 'web');
 const webRelativeDistDir = relative(webDirectory, join(dataDirectory, 'next'));
 const nextEnvPath = join(webDirectory, 'next-env.d.ts');
 const originalNextEnv = await readFile(nextEnvPath, 'utf8');
+const v07HealthEvidenceSource = join(dataDirectory, 'v0.7-health-evidence.json');
+const v07HealthEvidenceResult = join(webDirectory, 'test-results', 'evidence', 'v0.7-health-evidence.json');
 
 function start(command, args, environment, cwd = root, stdio = 'inherit') {
   return spawn(command, args, {
@@ -113,6 +116,7 @@ try {
   await stop(core);
   await writeFile(nextEnvPath, originalNextEnv, 'utf8');
   if (process.exitCode === 0) {
+    await preserveV07HealthEvidence(v07HealthEvidenceSource, v07HealthEvidenceResult);
     await rm(dataDirectory, { recursive: true, force: true });
   }
 }

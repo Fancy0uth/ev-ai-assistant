@@ -17,6 +17,7 @@ import type {
 import { SecretStoreUnavailableError, type SecretStorePort } from '../src/modules/providers/secret-store';
 import { openDatabase } from '../src/storage/database';
 import { createV07HealthTestAdapters } from './v0.7-health-test-adapters';
+import { V07_HEALTH_EVIDENCE_FILE, writeV07HealthEvidence } from './v0.7-health-evidence';
 
 const TEST_BOOTSTRAP_FLAG = 'EV_E2E_DAILY_PLAN_TEST_BOOTSTRAP';
 const TEST_CREDENTIAL_MARKER = 'daily-plan-e2e-credential';
@@ -45,6 +46,7 @@ if (!runDirectory || resolve(config.dataDir) !== resolve(runDirectory)) {
 
 const testProviderEvidencePath = join(runDirectory, TEST_PROVIDER_EVIDENCE_FILE);
 const v06FakeEvidencePath = join(runDirectory, V06_FAKE_EVIDENCE_FILE);
+const v07HealthEvidencePath = join(runDirectory, V07_HEALTH_EVIDENCE_FILE);
 const testProviderInvocations: Array<{
   localDate: string;
   timeRequests: Array<{
@@ -250,6 +252,7 @@ const removeTestCredential = credentialDatabase.prepare(
   `delete from provider_credentials
    where provider_key = 'DEEPSEEK' and protected_value = ?`,
 );
+let v07EvidenceWrite = Promise.resolve();
 
 function isGenerationRequest(url: string | undefined): boolean {
   const requestUrl = new URL(url ?? '/', 'http://127.0.0.1');
@@ -259,6 +262,11 @@ function isGenerationRequest(url: string | undefined): boolean {
 function requiresTestCredential(url: string | undefined): boolean {
   const requestUrl = new URL(url ?? '/', 'http://127.0.0.1');
   return isGenerationRequest(url) && !requestUrl.searchParams.has(TEST_CREDENTIAL_SKIP_QUERY);
+}
+
+function isV07HealthRequest(url: string | undefined): boolean {
+  const pathname = new URL(url ?? '/', 'http://127.0.0.1').pathname;
+  return pathname.startsWith('/v1/fitness/') || pathname.startsWith('/v1/nutrition/');
 }
 
 app.addHook('onRequest', (request, _reply, done) => {
@@ -276,6 +284,13 @@ app.addHook('onResponse', (request, _reply, done) => {
     removeTestCredential.run(TEST_CREDENTIAL_MARKER);
   }
   done();
+});
+app.addHook('onResponse', async (request) => {
+  if (!isV07HealthRequest(request.raw.url)) return;
+  v07EvidenceWrite = v07EvidenceWrite.then(
+    () => writeV07HealthEvidence(credentialDatabase, v07HealthEvidencePath),
+  );
+  await v07EvidenceWrite;
 });
 app.addHook('onClose', async () => {
   if (credentialDatabase.open) credentialDatabase.close();

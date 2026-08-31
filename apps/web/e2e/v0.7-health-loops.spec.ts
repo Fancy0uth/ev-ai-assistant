@@ -1,4 +1,6 @@
 import { devices, expect, test, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   fitnessCheckInResponseSchema,
   mealConfirmResponseSchema,
@@ -27,6 +29,10 @@ const tomorrowInShanghai = new Intl.DateTimeFormat('en-CA', {
 
 type BrowserProblems = { values: string[] };
 type HealthLineage = { checkInId: string; signalId: string; workoutId: string; actionId: string; timeRequestId: string; activitySessionId: string; mealDraftId: string; mealId: string };
+type V07HealthEvidence = {
+  capabilityRuns: Array<{ capabilityKey: string; runId: string; adapterKind: string; evidenceKind: string }>;
+  nutritionHashes: Array<{ datasetHash: string; recordHash: string }>;
+};
 
 function collectBrowserProblems(page: Page): BrowserProblems {
   const problems = { values: [] as string[] };
@@ -205,4 +211,31 @@ test('v0.7 health review loops complete with synthetic evidence in desktop and i
       await context.close();
     }
   }
+
+  const runDirectory = process.env.EV_E2E_RUN_DIR;
+  if (!runDirectory) throw new Error('Managed v0.7 E2E did not expose its runner-owned evidence directory.');
+  const evidencePath = join(runDirectory, 'v0.7-health-evidence.json');
+  const evidenceText = await readFile(evidencePath, 'utf8');
+  const evidence = JSON.parse(evidenceText) as V07HealthEvidence;
+  expect(Object.keys(evidence).sort()).toEqual(['capabilityRuns', 'nutritionHashes']);
+  expect(new Set(evidence.capabilityRuns.map((run) => run.capabilityKey))).toEqual(new Set([
+    'WORKOUT_TEXT_SELECTION',
+    'MEAL_CANDIDATE_PARSE',
+    'NUTRITION_DATA_LOOKUP',
+  ]));
+  expect(evidence.capabilityRuns).toHaveLength(6);
+  for (const run of evidence.capabilityRuns) {
+    expect(Object.keys(run).sort()).toEqual(['adapterKind', 'capabilityKey', 'evidenceKind', 'runId']);
+    expect(run).toMatchObject({ adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE' });
+    expect(run.runId).toMatch(/^[0-9a-f-]{36}$/i);
+  }
+  expect(evidence.nutritionHashes).toHaveLength(1);
+  for (const lineage of evidence.nutritionHashes) {
+    expect(Object.keys(lineage).sort()).toEqual(['datasetHash', 'recordHash']);
+    expect(lineage.datasetHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(lineage.recordHash).toMatch(/^[0-9a-f]{64}$/);
+  }
+  expect(evidenceText).not.toContain('Fixture Food Alpha');
+  expect(evidenceText).not.toContain(owner.username);
+  await testInfo.attach('v0.7-health-evidence', { path: evidencePath, contentType: 'application/json' });
 });
