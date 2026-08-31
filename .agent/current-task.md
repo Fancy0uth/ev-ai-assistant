@@ -1,15 +1,15 @@
-# v0.7 third/final repair-cycle handoff
+# v0.7 Sol escalation handoff
 
 Date: 2026-08-31 Asia/Shanghai
 Repair base: `caf4b83`
 Committed HEAD: `346e744`
-Review state: Terra repairs committed; Main Agent final matrix green; third Sol review pending
+Review state: third/final Sol review FAIL at `20d2fa1`; P0=0, P1=1, P2=4
 
 ## Current state
 
 The first Sol review remains an immutable FAIL record at `docs/reviews/2026-08-31-v0.7-sol-review.md`. The first rereview remains an immutable second FAIL record at `docs/reviews/2026-08-31-v0.7-sol-rereview.md`. The Main Agent accepted only `V07-MIG-006`, `V07-FIXTURE-008`, and `V07-REPLAY-013` for this third and final repair cycle. All three now have TDD-backed local commits.
 
-The retained P2 findings were not changed: `V07-CONTRACT-010`, `V07-BROWSER-011`, and `V07-EVIDENCE-014`. Version remains `0.7.0`. No real Provider, network, credential, personal/health data, external dataset/license, installation, deployment, push, tag, release, or Sol review was used.
+The third Sol review at `docs/reviews/2026-08-31-v0.7-sol-rereview-2.md` closes all three previously open P1 findings after 114/114 fresh focused probes, but independently reproduces new P1 `V07-LINEAGE-015`. A reused nutrition source key can silently retain an older legal/source descriptor while accepting a record hash computed from a newer descriptor, and that false lineage can reach a confirmed Meal. Version remains `0.7.0`. No real Provider, network, credential, personal/health data, external dataset/license, installation, deployment, push, tag, or release was used.
 
 ## Third-cycle commits
 
@@ -35,6 +35,8 @@ The retained P2 findings were not changed: `V07-CONTRACT-010`, `V07-BROWSER-011`
 - `git diff --check 785b7b6..HEAD`: exit 0, no output.
 - Matrix-end status contains only these four handoff documents before their evidence commit.
 
-## Main Agent handoff
+## Sol escalation decision
 
-Review the three repair commits, the whitespace-only gate commit, and these four handoff documents. The complete local matrix is green. Do not treat test fixtures or preserved synthetic evidence as real-provider evidence. A fresh third Sol whole-version review is still required before v0.7 can close.
+The local engineering matrix is green, but v0.7 cannot close because the final adversarial release gate is FAIL. The three-cycle doubt-driven limit has been reached, so no fourth implementation cycle starts automatically.
+
+If the Owner authorizes one bounded exception repair, freeze it to `V07-LINEAGE-015` only: on an existing nutrition source key, compare the full immutable descriptor including redistribution, license decision, adapter and evidence fields; fail the transaction before snapshots/revisions/Meal state advance when any field differs. Add one two-valid-descriptor collision regression proving controlled failure, zero partial persistence and no confirmable Meal. Retain all P2 debt and do not change the public product scope.

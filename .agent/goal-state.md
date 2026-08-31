@@ -2,9 +2,9 @@
 
 ## Milestone
 
-M2 / v0.7 fitness, recovery, reviewed workouts, sourced nutrition, and deterministic meal totals remains implemented at version `0.7.0`. The first Sol review and first rereview both remain FAIL history. The third/final Terra repair cycle committed all three authorized P1 fixes at `346e744`; the Main Agent independently reran a green complete matrix and normalized only the historical rereview's trailing whitespace at `934ae77`. A fresh third Sol review remains pending.
+M2 / v0.7 remains open at version `0.7.0`. The Main Agent's complete local matrix is green, and the third/final Sol whole-version review is frozen at `20d2fa1` with verdict FAIL: P0=0, P1=1, P2=4. All previously open P1 findings are closed, but new `V07-LINEAGE-015` proves that a reused nutrition source key can persist false immutable legal/hash lineage into a confirmed Meal.
 
-Final engineering status is not a claimed PASS: all observed workspace test results are green, but the root-test parent PTY exit was not captured, and both mandatory range diff-checks exit 1 on trailing whitespace already committed in the immutable rereview at base `caf4b83`.
+The three-cycle doubt-driven limit is reached. Work is paused at the release quality gate pending an explicit Owner decision on one bounded `V07-LINEAGE-015` exception repair; v0.8 has not started.
 
 ## Achieved invariants
 
@@ -23,8 +23,9 @@ Final engineering status is not a claimed PASS: all observed workspace test resu
 - `V07-CONTRACT-010` remains P2: nested public response objects still include frozen `z.unknown()` placeholders.
 - `V07-BROWSER-011` remains P2: browser coverage still lacks every intermediate/error state and per-stage overflow check.
 - `V07-EVIDENCE-014` remains P2: preserved evidence is not target-bound strongly enough for promotion.
+- `V07-REPORT-016` was a stale state sentence at reviewed HEAD and is corrected by this handoff update; the immutable review retains the original P2 evidence.
 - The six inherited v0.6 P2 items remain out of scope.
 
 ## Approval-gated evidence
 
-Approved local nutrition datasets, real nutrition APIs, real health-text/DeepSeek providers, network access, credentials, personal/health data, external datasets/licenses, installation, deployment, push, tag, release, and Sol rereview are all `NOT RUN — APPROVAL REQUIRED`.
+Approved local nutrition datasets, real nutrition APIs, real health-text/DeepSeek providers, network access, credentials, personal/health data, external datasets/licenses, installation, deployment, push, tag, and release are all `NOT RUN — APPROVAL REQUIRED`.
