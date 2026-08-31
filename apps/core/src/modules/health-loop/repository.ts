@@ -25,6 +25,17 @@ export interface V07CapabilityRun {
   leaseExpiresAt: string | null;
   reservedCalls: number;
   actualCalls: number;
+  providerId: string | null;
+  providerLabel: string;
+  adapterKind: 'NONE' | 'TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'PRODUCTION_ADAPTER';
+  evidenceKind: 'NONE' | 'AUTOMATED_TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'REAL_PROVIDER';
+  inputBytes: number;
+  outputBytes: number;
+  failureCode: string | null;
+  localDate: string;
+  nutritionSourceVersion: string | null;
+  nutritionDatasetHash: string | null;
+  appVersion: string;
   version: number;
 }
 
@@ -129,6 +140,17 @@ function toRun(row: {
   lease_expires_at: string | null;
   reserved_calls: number;
   actual_calls: number;
+  provider_id: string | null;
+  provider_label: string;
+  adapter_kind: V07CapabilityRun['adapterKind'];
+  evidence_kind: V07CapabilityRun['evidenceKind'];
+  input_bytes: number;
+  output_bytes: number;
+  failure_code: string | null;
+  local_date: string;
+  nutrition_source_version: string | null;
+  nutrition_dataset_hash: string | null;
+  app_version: string;
   version: number;
 }): V07CapabilityRun {
   return {
@@ -144,13 +166,26 @@ function toRun(row: {
     leaseExpiresAt: row.lease_expires_at,
     reservedCalls: row.reserved_calls,
     actualCalls: row.actual_calls,
+    providerId: row.provider_id,
+    providerLabel: row.provider_label,
+    adapterKind: row.adapter_kind,
+    evidenceKind: row.evidence_kind,
+    inputBytes: row.input_bytes,
+    outputBytes: row.output_bytes,
+    failureCode: row.failure_code,
+    localDate: row.local_date,
+    nutritionSourceVersion: row.nutrition_source_version,
+    nutritionDatasetHash: row.nutrition_dataset_hash,
+    appVersion: row.app_version,
     version: row.version,
   };
 }
 
 export function createV07HealthLoopRepository(database: Database.Database): V07HealthLoopRepository {
   const runColumns = `id, owner_id, capability, operation, resource_id, idempotency_key,
-    request_hash, state, lease_token, lease_expires_at, reserved_calls, actual_calls, version`;
+    request_hash, state, lease_token, lease_expires_at, reserved_calls, actual_calls, provider_id,
+    provider_label, adapter_kind, evidence_kind, input_bytes, output_bytes, failure_code, local_date,
+    nutrition_source_version, nutrition_dataset_hash, app_version, version`;
   const findCapabilityRun = database.prepare(
     `select ${runColumns} from v07_capability_runs where owner_id = ? and id = ?`,
   );

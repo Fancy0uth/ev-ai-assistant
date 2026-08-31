@@ -52,5 +52,11 @@ describe('confirmed local meal records', () => {
     expect(response.json().data).toMatchObject({
       totals: { calories: 300, proteinGrams: 10, carbohydrateGrams: 50, fatGrams: 6 },
     });
+    const v2Meals = await app.inject({
+      method: 'GET',
+      url: '/v1/nutrition/meals',
+      cookies: { ev_session: tokenFrom(setup.headers['set-cookie']) },
+    });
+    expect(v2Meals.json().data.items).toEqual([]);
   });
 });
