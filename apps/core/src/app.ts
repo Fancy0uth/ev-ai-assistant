@@ -20,7 +20,10 @@ import { registerDayPlanningRoutes } from './modules/day-planning/routes';
 import { createDayPlanningService } from './modules/day-planning/service';
 import { registerHealthRoutes } from './modules/health/routes';
 import { registerFitnessRoutes } from './modules/fitness/routes';
+import { createFitnessRepository } from './modules/fitness/repository';
 import { createFitnessService } from './modules/fitness/service';
+import { createV07IdempotencyService } from './modules/health-loop/idempotency-service';
+import { createV07HealthLoopRepository } from './modules/health-loop/repository';
 import { registerLearningRoutes } from './modules/learning/routes';
 import { createLearningService } from './modules/learning/service';
 import { createDeepSeekLearningAdviceCapability } from './modules/learning/deepseek-learning-advice';
@@ -132,6 +135,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   );
   const taskRepository = createTaskRepository(database);
   const calendarRepository = createCalendarRepository(database);
+  const fitnessRepository = createFitnessRepository(database);
+  const healthLoopRepository = createV07HealthLoopRepository(database);
+  const v07IdempotencyService = createV07IdempotencyService({
+    database,
+    repository: healthLoopRepository,
+  });
   const proposalRepository = createProposalRepository(database);
   const proposalService = createProposalService(proposalRepository, calendarRepository, { database });
   const calendarService = createCalendarService(calendarRepository, proposalService);
@@ -143,7 +152,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       now: () => new Date(),
     }),
   });
-  const fitnessService = createFitnessService(calendarRepository);
+  const fitnessService = createFitnessService(
+    fitnessRepository,
+    calendarRepository,
+    healthLoopRepository,
+    v07IdempotencyService,
+  );
   const providerCredentialService = createProviderCredentialService(
     database,
     options.secretStore ?? createWindowsDpapiSecretStore(),
