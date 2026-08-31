@@ -6,6 +6,8 @@ export * from './course-import';
 export * from './courses';
 export * from './daily-plans';
 export * from './health';
+export * from './health-capabilities';
+export * from './fitness';
 export * from './memory';
 export * from './nutrition';
 export * from './proposals';

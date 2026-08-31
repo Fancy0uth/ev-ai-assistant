@@ -69,6 +69,47 @@ export const createLearningActionChangeSchema = z.object({
   }
 });
 
+const workoutCitationIdsSchema = z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(5).superRefine((citationIds, context) => {
+  if (new Set(citationIds).size !== citationIds.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: '引用不能重复' });
+  }
+});
+
+export const createWorkoutActionChangeSchema = z.object({
+  operation: z.literal('CREATE_WORKOUT_ACTION'),
+  workout: z.object({
+    workoutId: z.uuid(),
+    revisionId: z.uuid(),
+    expectedWorkoutVersion: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict(),
+  action: z.object({
+    id: z.uuid(),
+    title: z.string().trim().min(1).max(200),
+    targetDate: z.iso.date(),
+    status: z.literal('OPEN'),
+    kind: z.literal('FITNESS'),
+    version: z.literal(1),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  }).strict(),
+  scheduling: z.object({
+    timeRequestId: z.uuid(),
+    durationMinutes: z.number().int().min(5).max(120),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+    earliestStartLocalTime: localTimeSchema.nullable(),
+    latestEndLocalTime: localTimeSchema.nullable(),
+    isFixed: z.literal(false),
+  }).strict(),
+  citationIds: workoutCitationIdsSchema,
+}).strict().superRefine((change, context) => {
+  if (change.scheduling.earliestStartLocalTime !== null
+    && change.scheduling.latestEndLocalTime !== null
+    && change.scheduling.latestEndLocalTime <= change.scheduling.earliestStartLocalTime) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['scheduling', 'latestEndLocalTime'], message: '最晚结束时间必须晚于最早开始时间' });
+  }
+});
+
 export const scheduleProposalChangeSchema = z.discriminatedUnion('operation', [
   createCalendarRuleChangeSchema,
   createEventChangeSchema,
@@ -80,6 +121,7 @@ export const proposalChangeSchema = z.discriminatedUnion('operation', [
   createEventChangeSchema,
   expandCalendarRuleChangeSchema,
   createLearningActionChangeSchema,
+  createWorkoutActionChangeSchema,
 ]);
 
 const proposalTitleSchema = z
@@ -93,6 +135,7 @@ function validateProposalChanges(
   context: z.RefinementCtx,
 ): void {
   const containsLearningAction = proposal.changes.some((change) => change.operation === 'CREATE_LEARNING_ACTION');
+  const containsWorkoutAction = proposal.changes.some((change) => change.operation === 'CREATE_WORKOUT_ACTION');
   if (proposal.kind === 'LEARNING') {
     if (proposal.source !== 'LEARNING_AGENT') {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['source'], message: '学习提案必须由学习 Agent 创建' });
@@ -102,6 +145,17 @@ function validateProposalChanges(
     }
   } else if (containsLearningAction) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['changes'], message: '非学习提案不能创建学习 Action' });
+  }
+
+  if (proposal.kind === 'WORKOUT') {
+    if (proposal.source !== 'FITNESS_AGENT') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['source'], message: '训练提案必须由健身 Agent 创建' });
+    }
+    if (proposal.changes.length !== 1 || !containsWorkoutAction) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['changes'], message: '训练提案必须且只能创建一个 Fitness Action' });
+    }
+  } else if (containsWorkoutAction) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['changes'], message: '非训练提案不能创建 Fitness Action' });
   }
 }
 
@@ -163,6 +217,7 @@ export type ProposalStatus = z.infer<typeof proposalStatusSchema>;
 export type ProposalSource = z.infer<typeof proposalSourceSchema>;
 export type ScheduleProposalChange = z.infer<typeof scheduleProposalChangeSchema>;
 export type CreateLearningActionChange = z.infer<typeof createLearningActionChangeSchema>;
+export type CreateWorkoutActionChange = z.infer<typeof createWorkoutActionChangeSchema>;
 export type ProposalChange = z.infer<typeof proposalChangeSchema>;
 export type Proposal = z.infer<typeof proposalSchema>;
 export type CreateProposalInput = z.input<typeof createProposalSchema>;

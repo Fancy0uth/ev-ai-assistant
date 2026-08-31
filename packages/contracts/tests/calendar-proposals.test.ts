@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   calendarRuleSchema,
+  createWorkoutActionChangeSchema,
   createProposalSchema,
   eventSchema,
   proposalDecisionSchema,
@@ -110,6 +111,43 @@ describe('calendar and proposal contracts', () => {
     if (!learningChange) throw new Error('learning proposal fixture requires one change');
     expect(createProposalSchema.safeParse({ ...proposal, changes: [{ ...learningChange, action: { ...learningChange.action, kind: 'WORK' } }] }).success).toBe(false);
     expect(createProposalSchema.safeParse({ ...proposal, changes: [{ ...proposal.changes[0], citationIds: [] }] }).success).toBe(false);
+  });
+
+  it('permits a Workout Proposal to carry exactly one Fitness Action change', () => {
+    const workoutChange = {
+      operation: 'CREATE_WORKOUT_ACTION',
+      workout: {
+        workoutId: '00000000-0000-4000-8000-000000000901',
+        revisionId: '00000000-0000-4000-8000-000000000902',
+        expectedWorkoutVersion: 2,
+        contentHash: 'a'.repeat(64),
+      },
+      action: {
+        id: '00000000-0000-4000-8000-000000000903',
+        title: 'Reviewable fitness action',
+        targetDate: '2026-09-08',
+        status: 'OPEN',
+        kind: 'FITNESS',
+        version: 1,
+        createdAt: '2026-08-31T00:00:00.000Z',
+        updatedAt: '2026-08-31T00:00:00.000Z',
+      },
+      scheduling: {
+        timeRequestId: '00000000-0000-4000-8000-000000000904',
+        durationMinutes: 30,
+        priority: 'MEDIUM',
+        earliestStartLocalTime: '18:00',
+        latestEndLocalTime: '19:00',
+        isFixed: false,
+      },
+      citationIds: ['a'.repeat(64)],
+    };
+    expect(createWorkoutActionChangeSchema.parse(workoutChange)).toEqual(workoutChange);
+    const proposal = { kind: 'WORKOUT', source: 'FITNESS_AGENT', title: '确认后安排训练', changes: [workoutChange] };
+    expect(createProposalSchema.parse(proposal)).toEqual(proposal);
+    expect(createProposalSchema.safeParse({ ...proposal, source: 'DAILY_SCHEDULER' }).success).toBe(false);
+    expect(createProposalSchema.safeParse({ ...proposal, kind: 'NUTRITION' }).success).toBe(false);
+    expect(createProposalSchema.safeParse({ ...proposal, changes: [workoutChange, workoutChange] }).success).toBe(false);
   });
 
   it('keeps Event, Signal and TimeRequest distinct for the daily coordination loop', () => {
