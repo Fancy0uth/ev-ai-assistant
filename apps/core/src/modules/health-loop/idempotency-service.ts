@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { ApiError } from '../../http/api-error';
+import { ApiError, V07_DAILY_QUOTA_RETRY_AFTER_SECONDS } from '../../http/api-error';
 import { canonicalJson, type V07HealthLoopRepository } from './repository';
 
 const DEFAULT_LEASE_MS = 20_000;
@@ -48,6 +48,7 @@ export class V07IdempotencyInProgressError extends ApiError {
 
 export class V07IdempotencyReplayError extends ApiError {
   readonly idempotencyReplayed = true;
+  readonly retryAfterSeconds?: number;
 
   constructor(status: number, body: unknown) {
     const error = (body as { error?: { code?: unknown; message?: unknown; details?: unknown } }).error;
@@ -56,6 +57,9 @@ export class V07IdempotencyReplayError extends ApiError {
     }
     super(status, error.code, error.message, error.details);
     this.name = 'V07IdempotencyReplayError';
+    if (status === 429 && error.code === 'RATE_LIMITED') {
+      this.retryAfterSeconds = V07_DAILY_QUOTA_RETRY_AFTER_SECONDS;
+    }
   }
 }
 

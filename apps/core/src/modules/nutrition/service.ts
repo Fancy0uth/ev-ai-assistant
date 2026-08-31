@@ -12,7 +12,7 @@ import {
   type NutritionSourceDescriptor,
 } from '@ev/contracts';
 import type Database from 'better-sqlite3';
-import { ApiError } from '../../http/api-error';
+import { ApiError, V07DailyQuotaError } from '../../http/api-error';
 import { createV07IdempotencyService, type V07ExternalClaim, type V07IdempotencyService } from '../health-loop/idempotency-service';
 import { V07_PROVIDER_MAX_INPUT_BYTES, V07_PROVIDER_MAX_OUTPUT_BYTES } from '../health-loop/provider-boundary';
 import { createV07HealthLoopRepository, type V07HealthLoopRepository } from '../health-loop/repository';
@@ -172,7 +172,7 @@ export function createNutritionService(database: Database.Database, options: Nut
         throw error;
       }
       if (healthLoopRepository.countReservedCalls(ownerId, input.localDate, 'MEAL_CANDIDATE_PARSE') >= 5) {
-        const error = new ApiError(429, 'RATE_LIMITED', '今日能力调用次数已达上限');
+        const error = new V07DailyQuotaError('今日能力调用次数已达上限');
         v07IdempotencyService.failExternal(started.claim, error);
         throw error;
       }
@@ -269,7 +269,7 @@ export function createNutritionService(database: Database.Database, options: Nut
       }
       const provider = options.nutritionDataProvider;
       if (healthLoopRepository.countReservedCalls(ownerId, current.draft.localDate, 'NUTRITION_DATA_LOOKUP') >= 5) {
-        const error = new ApiError(429, 'RATE_LIMITED', '今日能力调用次数已达上限');
+        const error = new V07DailyQuotaError('今日能力调用次数已达上限');
         v07IdempotencyService.failExternal(started.claim, error);
         throw error;
       }

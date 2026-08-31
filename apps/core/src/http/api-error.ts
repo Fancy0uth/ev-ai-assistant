@@ -15,6 +15,17 @@ export class ApiError extends Error {
   }
 }
 
+export const V07_DAILY_QUOTA_RETRY_AFTER_SECONDS = 86_400;
+
+export class V07DailyQuotaError extends ApiError {
+  readonly retryAfterSeconds = V07_DAILY_QUOTA_RETRY_AFTER_SECONDS;
+
+  constructor(message: string) {
+    super(429, 'RATE_LIMITED', message);
+    this.name = 'V07DailyQuotaError';
+  }
+}
+
 export function registerErrorHandling(app: FastifyInstance): void {
   app.setNotFoundHandler((_request, reply) => {
     return reply.status(404).send(

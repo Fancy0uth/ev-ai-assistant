@@ -23,7 +23,7 @@ import {
   deriveWorkoutSafetyV1,
   rankExerciseCatalogV1,
 } from '@ev/domain';
-import { ApiError } from '../../http/api-error';
+import { ApiError, V07DailyQuotaError } from '../../http/api-error';
 import type { CalendarRepository } from '../calendar/repository';
 import {
   executeV07ProviderBoundary,
@@ -260,7 +260,7 @@ export function createFitnessService(
           throw error;
         }
         if (healthLoopRepository.countReservedCalls(ownerId, checkIn.localDate, 'WORKOUT_TEXT_SELECTION') >= 5) {
-          const error = new ApiError(429, 'RATE_LIMITED', '今日训练文本能力调用次数已达上限');
+          const error = new V07DailyQuotaError('今日训练文本能力调用次数已达上限');
           v07IdempotencyService.failExternal(started.claim, error);
           throw error;
         }
