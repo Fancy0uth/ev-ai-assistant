@@ -58,6 +58,27 @@ export interface V07HealthLoopRepository {
     nutritionSourceVersion?: string | null;
     nutritionDatasetHash?: string | null;
   }): void;
+  createClaimedCapabilityRun(input: {
+    id: string;
+    ownerId: string;
+    capability: V07Capability;
+    operation: string;
+    resourceId: string;
+    providerId: string;
+    providerLabel: string;
+    adapterKind: 'TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'PRODUCTION_ADAPTER';
+    disclosure: unknown;
+    localDate: string;
+    appVersion: string;
+    idempotencyKey: string;
+    requestHash: string;
+    leaseToken: string;
+    leaseExpiresAt: string;
+    deadlineAt: string;
+    createdAt: string;
+    nutritionSourceVersion?: string | null;
+    nutritionDatasetHash?: string | null;
+  }): void;
   findCapabilityRun(ownerId: string, id: string): V07CapabilityRun | undefined;
   findCapabilityRunByIdempotencyKey(ownerId: string, key: string): V07CapabilityRun | undefined;
   claimCapabilityRun(input: {
@@ -91,6 +112,8 @@ export interface V07HealthLoopRepository {
     failureCode: string;
     now: string;
   }): boolean;
+  failExpiredCapabilityRunByIdempotencyKey(ownerId: string, key: string, now: string): boolean;
+  sweepExpiredCapabilityRuns(now: string): number;
   countReservedCalls(ownerId: string, localDate: string, capability: V07Capability): number;
   appendAudit(input: {
     id: string;
@@ -200,6 +223,14 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
     nutrition_dataset_hash, app_version, created_at, updated_at, version
   ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'HEALTH_DISCLOSURE_V1', null, null, ?, null, null,
     null, 'HEALTH_CAPABILITY_POLICY_V1', ?, 0, 0, 0, 0, null, ?, ?, ?, ?, ?, 1)`);
+  const createClaimedCapabilityRun = database.prepare(`insert into v07_capability_runs (
+    id, owner_id, capability, operation, resource_id, provider_id, provider_label, adapter_kind,
+    evidence_kind, disclosure_json, disclosure_version, idempotency_key, request_hash, state,
+    lease_token, lease_expires_at, deadline_at, policy_version, local_date, reserved_calls,
+    actual_calls, input_bytes, output_bytes, failure_code, nutrition_source_version,
+    nutrition_dataset_hash, app_version, created_at, updated_at, version
+  ) values (?, ?, ?, ?, ?, ?, ?, ?, 'NONE', ?, 'HEALTH_DISCLOSURE_V1', ?, ?, 'RUNNING', ?, ?, ?,
+    'HEALTH_CAPABILITY_POLICY_V1', ?, 1, 0, 0, 0, null, ?, ?, ?, ?, ?, 1)`);
   const claimCapabilityRun = database.prepare(`update v07_capability_runs
     set idempotency_key = ?, request_hash = ?, state = 'RUNNING', lease_token = ?,
         lease_expires_at = ?, deadline_at = ?, reserved_calls = ?, actual_calls = 0,
@@ -215,6 +246,16 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
         actual_calls = ?, reserved_calls = ?, input_bytes = ?, output_bytes = ?, evidence_kind = 'NONE',
         failure_code = ?, updated_at = ?, version = version + 1
     where owner_id = ? and id = ? and state = 'RUNNING' and lease_token = ?`);
+  const failExpiredCapabilityRunByIdempotencyKey = database.prepare(`update v07_capability_runs
+    set state = 'FAILED', lease_token = null, lease_expires_at = null, deadline_at = null,
+        actual_calls = max(actual_calls, reserved_calls), evidence_kind = 'NONE',
+        failure_code = 'V07_COMMAND_INTERRUPTED', updated_at = ?, version = version + 1
+    where owner_id = ? and idempotency_key = ? and state = 'RUNNING' and lease_expires_at <= ?`);
+  const sweepExpiredCapabilityRuns = database.prepare(`update v07_capability_runs
+    set state = 'FAILED', lease_token = null, lease_expires_at = null, deadline_at = null,
+        actual_calls = max(actual_calls, reserved_calls), evidence_kind = 'NONE',
+        failure_code = 'V07_COMMAND_INTERRUPTED', updated_at = ?, version = version + 1
+    where state = 'RUNNING' and lease_expires_at <= ?`);
   const countReservedCalls = database.prepare(`select coalesce(sum(
     case when state = 'RUNNING' then reserved_calls else actual_calls end
   ), 0) as calls from v07_capability_runs where owner_id = ? and local_date = ? and capability = ?`);
@@ -236,6 +277,30 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
         input.evidenceKind,
         canonicalJson(input.disclosure),
         input.status,
+        input.localDate,
+        input.nutritionSourceVersion ?? null,
+        input.nutritionDatasetHash ?? null,
+        input.appVersion,
+        input.createdAt,
+        input.createdAt,
+      );
+    },
+    createClaimedCapabilityRun(input) {
+      createClaimedCapabilityRun.run(
+        input.id,
+        input.ownerId,
+        input.capability,
+        input.operation,
+        input.resourceId,
+        input.providerId,
+        input.providerLabel,
+        input.adapterKind,
+        canonicalJson(input.disclosure),
+        input.idempotencyKey,
+        input.requestHash,
+        input.leaseToken,
+        input.leaseExpiresAt,
+        input.deadlineAt,
         input.localDate,
         input.nutritionSourceVersion ?? null,
         input.nutritionDatasetHash ?? null,
@@ -292,6 +357,12 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
         input.id,
         input.leaseToken,
       ).changes === 1;
+    },
+    failExpiredCapabilityRunByIdempotencyKey(ownerId, key, now) {
+      return failExpiredCapabilityRunByIdempotencyKey.run(now, ownerId, key, now).changes === 1;
+    },
+    sweepExpiredCapabilityRuns(now) {
+      return sweepExpiredCapabilityRuns.run(now, now).changes;
     },
     countReservedCalls(ownerId, localDate, capability) {
       return (countReservedCalls.get(ownerId, localDate, capability) as { calls: number }).calls;

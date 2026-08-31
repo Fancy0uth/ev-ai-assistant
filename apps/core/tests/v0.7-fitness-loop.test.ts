@@ -1,10 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { HealthTextProvider } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadInternalExerciseCatalog } from '../src/modules/fitness/catalog';
 import { buildApp } from '../src/app';
+import { openDatabase } from '../src/storage/database';
 
 function tokenFrom(header: string | string[] | undefined): string {
   const value = Array.isArray(header) ? header.join('; ') : header;
@@ -120,5 +122,91 @@ describe('v0.7 Fitness review loop', () => {
     });
     expect(result.statusCode).toBe(503);
     expect(result.json()).toMatchObject({ error: { code: 'HEALTH_TEXT_PROVIDER_NOT_CONFIGURED' } });
+  });
+
+  it('calls the assisted workout Provider once and exactly replays its successful response', async () => {
+    let providerCalls = 0;
+    const provider: HealthTextProvider = {
+      descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic workout idempotency fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE' },
+      async selectWorkout(input) {
+        providerCalls += 1;
+        return { schemaVersion: 'WORKOUT_TEXT_SELECTION_V1', title: 'Stable assisted workout', rationale: 'Synthetic idempotency fixture.', orderedCitationIds: input.catalog.slice(0, 2).map((item) => item.citationId) };
+      },
+      async parseMealCandidates() { throw new Error('not used'); },
+    };
+    await app!.close();
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'),
+      artifactRoot: join(directory, 'artifacts'),
+      logger: false,
+      healthTextProvider: provider,
+      v07TestAdapterGate: { nodeEnv: 'test', enabled: true, runnerDataRoot: directory },
+    });
+    const checkIn = await app.inject({
+      method: 'POST', url: '/v1/fitness/check-ins', cookies: { ev_session: session },
+      headers: { 'idempotency-key': 'v07-assisted-idem-checkin01' },
+      payload: { localDate: '2026-09-12', sleepMinutes: 480, energyLevel: 5, discomfortLevel: 0, hasPain: false, acuteRisk: false },
+    });
+    const payload = {
+      mode: 'ASSISTED', checkInId: checkIn.json().data.checkIn.id, expectedCheckInVersion: 1, goal: 'STRENGTH', availableEquipment: [], disclosureVersion: 'HEALTH_DISCLOSURE_V1',
+      scheduling: { targetDate: '2026-09-12', durationMinutes: 30, priority: 'MEDIUM', earliestStartLocalTime: null, latestEndLocalTime: null },
+    };
+    const first = await app.inject({ method: 'POST', url: '/v1/fitness/workouts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-assisted-idem-success01' }, payload });
+    const replay = await app.inject({ method: 'POST', url: '/v1/fitness/workouts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-assisted-idem-success01' }, payload });
+    expect(first.statusCode).toBe(201);
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json()).toEqual(first.json());
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(providerCalls).toBe(1);
+    const database = openDatabase(join(directory, 'app.sqlite'));
+    try {
+      expect(database.prepare('select count(*) as count from workouts_v2').get()).toEqual({ count: 1 });
+      expect(database.prepare(`select count(*) as count from v07_capability_runs where capability = 'WORKOUT_TEXT_SELECTION'`).get()).toEqual({ count: 1 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('calls the assisted workout Provider once and exactly replays its failed response', async () => {
+    let providerCalls = 0;
+    const provider: HealthTextProvider = {
+      descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic failing workout fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE' },
+      async selectWorkout() {
+        providerCalls += 1;
+        throw new Error('SYNTHETIC_PROVIDER_FAILURE');
+      },
+      async parseMealCandidates() { throw new Error('not used'); },
+    };
+    await app!.close();
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'),
+      artifactRoot: join(directory, 'artifacts'),
+      logger: false,
+      healthTextProvider: provider,
+      v07TestAdapterGate: { nodeEnv: 'test', enabled: true, runnerDataRoot: directory },
+    });
+    const checkIn = await app.inject({
+      method: 'POST', url: '/v1/fitness/check-ins', cookies: { ev_session: session },
+      headers: { 'idempotency-key': 'v07-assisted-fail-checkin01' },
+      payload: { localDate: '2026-09-13', sleepMinutes: 480, energyLevel: 5, discomfortLevel: 0, hasPain: false, acuteRisk: false },
+    });
+    const payload = {
+      mode: 'ASSISTED', checkInId: checkIn.json().data.checkIn.id, expectedCheckInVersion: 1, goal: 'STRENGTH', availableEquipment: [], disclosureVersion: 'HEALTH_DISCLOSURE_V1',
+      scheduling: { targetDate: '2026-09-13', durationMinutes: 30, priority: 'MEDIUM', earliestStartLocalTime: null, latestEndLocalTime: null },
+    };
+    const first = await app.inject({ method: 'POST', url: '/v1/fitness/workouts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-assisted-idem-failed001' }, payload });
+    const replay = await app.inject({ method: 'POST', url: '/v1/fitness/workouts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-assisted-idem-failed001' }, payload });
+    expect(first.statusCode).toBe(503);
+    expect(replay.statusCode).toBe(503);
+    expect(replay.json()).toEqual(first.json());
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(providerCalls).toBe(1);
+    const database = openDatabase(join(directory, 'app.sqlite'));
+    try {
+      expect(database.prepare('select count(*) as count from workouts_v2').get()).toEqual({ count: 0 });
+      expect(database.prepare(`select state, count(*) as count from v07_capability_runs where capability = 'WORKOUT_TEXT_SELECTION' group by state`).get()).toEqual({ state: 'FAILED', count: 1 });
+    } finally {
+      database.close();
+    }
   });
 });

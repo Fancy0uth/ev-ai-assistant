@@ -70,10 +70,6 @@ function contentHash(value: unknown): string {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
 
-function isInProgress<T>(value: { kind: 'IN_PROGRESS'; retryAfterSeconds: 1 } | T): value is { kind: 'IN_PROGRESS'; retryAfterSeconds: 1 } {
-  return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'IN_PROGRESS';
-}
-
 function safetyOrThrow(checkIn: CheckIn): void {
   if (checkIn.safety.eligibility === 'BLOCKED') {
     throw new ApiError(422, 'WORKOUT_BLOCKED_BY_SAFETY', '已报告疼痛或急性风险，无法创建训练计划');
@@ -170,7 +166,6 @@ export function createFitnessService(
         healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'FITNESS_CHECK_IN_CREATED', entityType: 'FITNESS_CHECK_IN', entityId: checkIn.id, entityVersion: 1, metadata: { policyVersion: checkIn.policyVersion, reasonCodes: checkIn.safety.reasonCodes }, createdAt: timestamp });
         return { status: 201, body: { checkIn, signal } };
       }));
-      if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
       return { ...(result.body as { checkIn: CheckIn; signal: Signal }), replayed: result.replayed };
     },
     listCheckIns(ownerId, query) {
@@ -222,54 +217,94 @@ export function createFitnessService(
           healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_DRAFT_CREATED', entityType: 'WORKOUT', entityId: workout.id, entityVersion: workout.version, metadata: { generationMode: workout.generationMode, revisionId: revision.id }, createdAt: timestamp });
           return { status: 201, body: { ...stored, disclosure } };
         });
-        if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
         return { ...(result.body as { workout: Workout; revision: WorkoutRevision; disclosure: unknown | null }), replayed: result.replayed };
       } else {
+        const command = {
+          ownerId,
+          key: idempotencyKey,
+          operation: 'fitness.workout.create' as const,
+          resourceId: input.checkInId,
+          body: input,
+        };
+        const started = v07IdempotencyService.beginExternal<{
+          workout: Workout;
+          revision: WorkoutRevision;
+          disclosure: unknown;
+        }>(command);
+        if (started.kind === 'REPLAY') {
+          return { ...started.response.body, replayed: started.response.replayed };
+        }
+
         const capabilityRunId = newId();
         if (!options.healthTextProvider) {
-          healthLoopRepository.createCapabilityRun({ id: capabilityRunId, ownerId, capability: 'WORKOUT_TEXT_SELECTION', operation: 'fitness.workout.create', resourceId: input.checkInId, providerId: null, providerLabel: 'Not configured', adapterKind: 'NONE', evidenceKind: 'NONE', disclosure: { disclosureVersion: input.disclosureVersion }, status: 'BLOCKED_PROVIDER', localDate: checkIn.localDate, appVersion: APP_VERSION, createdAt: timestamp });
-          healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'HEALTH_CAPABILITY_BLOCKED', entityType: 'CAPABILITY_RUN', entityId: capabilityRunId, entityVersion: 1, metadata: { capability: 'WORKOUT_TEXT_SELECTION', code: 'HEALTH_TEXT_PROVIDER_NOT_CONFIGURED' }, createdAt: timestamp });
-          throw new ApiError(503, 'HEALTH_TEXT_PROVIDER_NOT_CONFIGURED', '训练文本能力尚未配置');
+          const error = new ApiError(503, 'HEALTH_TEXT_PROVIDER_NOT_CONFIGURED', '训练文本能力尚未配置');
+          v07IdempotencyService.failExternal(started.claim, error, () => {
+            healthLoopRepository.createCapabilityRun({ id: capabilityRunId, ownerId, capability: 'WORKOUT_TEXT_SELECTION', operation: command.operation, resourceId: command.resourceId, providerId: null, providerLabel: 'Not configured', adapterKind: 'NONE', evidenceKind: 'NONE', disclosure: { disclosureVersion: input.disclosureVersion }, status: 'BLOCKED_PROVIDER', localDate: checkIn.localDate, appVersion: APP_VERSION, createdAt: timestamp });
+            healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'HEALTH_CAPABILITY_BLOCKED', entityType: 'CAPABILITY_RUN', entityId: capabilityRunId, entityVersion: 1, metadata: { capability: 'WORKOUT_TEXT_SELECTION', code: error.code }, createdAt: timestamp });
+          });
+          throw error;
         }
-        if (healthLoopRepository.countReservedCalls(ownerId, checkIn.localDate, 'WORKOUT_TEXT_SELECTION') >= 5) throw new ApiError(429, 'RATE_LIMITED', '今日训练文本能力调用次数已达上限');
+        if (healthLoopRepository.countReservedCalls(ownerId, checkIn.localDate, 'WORKOUT_TEXT_SELECTION') >= 5) {
+          const error = new ApiError(429, 'RATE_LIMITED', '今日训练文本能力调用次数已达上限');
+          v07IdempotencyService.failExternal(started.claim, error);
+          throw error;
+        }
+        const provider = options.healthTextProvider;
         const candidates = this.listExercises(ownerId, { checkInId: input.checkInId, goal: input.goal, equipment: input.availableEquipment, page: 1, pageSize: 5 }).items;
-        if (candidates.length === 0) throw new ApiError(422, 'CITATION_INVALID', '没有满足当前约束的训练动作');
-        healthLoopRepository.createCapabilityRun({ id: capabilityRunId, ownerId, capability: 'WORKOUT_TEXT_SELECTION', operation: 'fitness.workout.create', resourceId: input.checkInId, providerId: options.healthTextProvider.descriptor.providerId, providerLabel: options.healthTextProvider.descriptor.providerLabel, adapterKind: options.healthTextProvider.descriptor.adapterKind, evidenceKind: options.healthTextProvider.descriptor.evidenceKind, disclosure: { disclosureVersion: input.disclosureVersion }, status: 'AWAITING_DISCLOSURE', localDate: checkIn.localDate, appVersion: APP_VERSION, createdAt: timestamp });
-        const leaseToken = newId();
-        const claimed = healthLoopRepository.claimCapabilityRun({ ownerId, id: capabilityRunId, key: idempotencyKey, requestHash: contentHash({ goal: input.goal, citations: candidates.map((item) => item.citation.citationId) }), leaseToken, deadlineAt: new Date(Date.parse(timestamp) + 8_000).toISOString(), leaseExpiresAt: new Date(Date.parse(timestamp) + 10_000).toISOString(), reservedCalls: 1, now: timestamp });
-        if (!claimed) throw new ApiError(409, 'IN_PROGRESS', '训练文本能力仍在处理中');
+        if (candidates.length === 0) {
+          const error = new ApiError(422, 'CITATION_INVALID', '没有满足当前约束的训练动作');
+          v07IdempotencyService.failExternal(started.claim, error);
+          throw error;
+        }
+        healthLoopRepository.createClaimedCapabilityRun({
+          id: capabilityRunId, ownerId, capability: 'WORKOUT_TEXT_SELECTION', operation: command.operation,
+          resourceId: command.resourceId, providerId: provider.descriptor.providerId,
+          providerLabel: provider.descriptor.providerLabel, adapterKind: provider.descriptor.adapterKind,
+          disclosure: { disclosureVersion: input.disclosureVersion }, localDate: checkIn.localDate,
+          appVersion: APP_VERSION, idempotencyKey, requestHash: started.claim.requestHash,
+          leaseToken: started.claim.leaseToken, leaseExpiresAt: started.claim.leaseExpiresAt,
+          deadlineAt: new Date(Date.parse(timestamp) + 8_000).toISOString(), createdAt: timestamp,
+        });
         let selection: Awaited<ReturnType<typeof executeWorkoutTextSelection>>;
         try {
-          selection = await executeWorkoutTextSelection({ goal: input.goal, maxDurationMinutes: safety.maxDurationMinutes, intensityCap: safety.intensityCap, catalog: candidates }, options.healthTextProvider);
+          selection = await executeWorkoutTextSelection({ goal: input.goal, maxDurationMinutes: safety.maxDurationMinutes, intensityCap: safety.intensityCap, catalog: candidates }, provider);
         } catch {
-          healthLoopRepository.failCapabilityRun({ ownerId, id: capabilityRunId, leaseToken, actualCalls: 1, inputBytes: 0, outputBytes: 0, failureCode: 'HEALTH_TEXT_PROVIDER_INVALID_RESPONSE', now: now().toISOString() });
-          throw new ApiError(503, 'HEALTH_TEXT_PROVIDER_UNAVAILABLE', '训练文本能力当前不可用');
+          const error = new ApiError(503, 'HEALTH_TEXT_PROVIDER_UNAVAILABLE', '训练文本能力当前不可用');
+          v07IdempotencyService.failExternal(started.claim, error, () => {
+            if (!healthLoopRepository.failCapabilityRun({ ownerId, id: capabilityRunId, leaseToken: started.claim.leaseToken, actualCalls: 1, inputBytes: 0, outputBytes: 0, failureCode: 'HEALTH_TEXT_PROVIDER_INVALID_RESPONSE', now: now().toISOString() })) throw new Error('WORKOUT_RUN_FINALIZE_FAILED');
+          });
+          throw error;
         }
-        const current = fitnessRepository.findCheckIn(ownerId, input.checkInId);
-        if (!current) throw new ApiError(404, 'FITNESS_CHECK_IN_NOT_FOUND', '训练状态记录不存在');
-        validateScheduling(current, input.scheduling);
-        const currentSafety = eligibleSafety(current);
-        intensityCap = currentSafety.intensityCap;
-        const citationsById = new Map(candidates.map((item) => [item.citation.citationId, item.citation]));
-        selectedCitations = selection.orderedCitationIds.map((citationId) => {
-          const citation = citationsById.get(citationId);
-          if (!citation) throw new ApiError(503, 'HEALTH_TEXT_PROVIDER_UNAVAILABLE', '训练文本能力返回了无效引用');
-          return citation;
+        const result = v07IdempotencyService.completeExternal(started.claim, () => {
+          const current = fitnessRepository.findCheckIn(ownerId, input.checkInId);
+          if (!current) throw new ApiError(404, 'FITNESS_CHECK_IN_NOT_FOUND', '训练状态记录不存在');
+          validateScheduling(current, input.scheduling);
+          const currentSafety = eligibleSafety(current);
+          intensityCap = currentSafety.intensityCap;
+          const citationsById = new Map(candidates.map((item) => [item.citation.citationId, item.citation]));
+          selectedCitations = selection.orderedCitationIds.map((citationId) => {
+            const citation = citationsById.get(citationId);
+            if (!citation) throw new ApiError(503, 'HEALTH_TEXT_PROVIDER_UNAVAILABLE', '训练文本能力返回了无效引用');
+            return citation;
+          });
+          title = selection.title;
+          rationale = selection.rationale;
+          provenance = [{ kind: 'MODEL_SELECTION', capabilityRunId, editedFields: ['title', 'rationale', 'orderedCitationIds'], capturedAt: timestamp }];
+          disclosure = { capabilityRunId, disclosureVersion: input.disclosureVersion };
+          const selectedItems = validateCitations(selectedCitations, catalog);
+          const items = createWorkoutDefaultsV1({ citations: selectedItems.map((item) => item.citation), catalogItems: catalog.items, durationMinutes: input.scheduling.durationMinutes, intensityCap });
+          const workoutId = newId();
+          const revision = createRevision({ workoutId, parentRevisionId: null, revisionNo: 1, title, rationale, items, scheduling: input.scheduling, provenance, createdAt: timestamp });
+          const workout: Workout = { id: workoutId, checkInId: current.id, signalId: current.signalId, generationMode: input.mode, state: 'DRAFT', currentRevisionId: revision.id, proposalId: null, actionId: null, timeRequestId: null, feedbackId: null, version: 1, createdAt: timestamp, updatedAt: timestamp };
+          const stored = fitnessRepository.createWorkoutWithRevision({ ownerId, workout, revision, catalog: catalogRef });
+          if (!healthLoopRepository.completeCapabilityRun({ ownerId, id: capabilityRunId, leaseToken: started.claim.leaseToken, actualCalls: 1, inputBytes: 0, outputBytes: 0, evidenceKind: provider.descriptor.evidenceKind, now: now().toISOString() })) throw new Error('WORKOUT_RUN_FINALIZE_FAILED');
+          healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_DRAFT_CREATED', entityType: 'WORKOUT', entityId: workout.id, entityVersion: workout.version, metadata: { generationMode: workout.generationMode, revisionId: revision.id, capabilityRunId }, createdAt: timestamp });
+          return { status: 201, body: { ...stored, disclosure } };
+        }, () => {
+          if (!healthLoopRepository.failCapabilityRun({ ownerId, id: capabilityRunId, leaseToken: started.claim.leaseToken, actualCalls: 1, inputBytes: 0, outputBytes: 0, failureCode: 'WORKOUT_FINALIZATION_REJECTED', now: now().toISOString() })) throw new Error('WORKOUT_RUN_FINALIZE_FAILED');
         });
-        healthLoopRepository.completeCapabilityRun({ ownerId, id: capabilityRunId, leaseToken, actualCalls: 1, inputBytes: 0, outputBytes: 0, evidenceKind: options.healthTextProvider.descriptor.evidenceKind, now: now().toISOString() });
-        title = selection.title;
-        rationale = selection.rationale;
-        provenance = [{ kind: 'MODEL_SELECTION', capabilityRunId, editedFields: ['title', 'rationale', 'orderedCitationIds'], capturedAt: timestamp }];
-        disclosure = { capabilityRunId, disclosureVersion: input.disclosureVersion };
+        return { ...result.body, replayed: result.replayed };
       }
-      const selectedItems = validateCitations(selectedCitations, catalog);
-      const items = createWorkoutDefaultsV1({ citations: selectedItems.map((item) => item.citation), catalogItems: catalog.items, durationMinutes: input.scheduling.durationMinutes, intensityCap });
-      const workoutId = newId();
-      const revision = createRevision({ workoutId, parentRevisionId: null, revisionNo: 1, title, rationale, items, scheduling: input.scheduling, provenance, createdAt: timestamp });
-      const workout: Workout = { id: workoutId, checkInId: checkIn.id, signalId: checkIn.signalId, generationMode: input.mode, state: 'DRAFT', currentRevisionId: revision.id, proposalId: null, actionId: null, timeRequestId: null, feedbackId: null, version: 1, createdAt: timestamp, updatedAt: timestamp };
-      const stored = fitnessRepository.createWorkoutWithRevision({ ownerId, workout, revision, catalog: catalogRef });
-      healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_DRAFT_CREATED', entityType: 'WORKOUT', entityId: workout.id, entityVersion: workout.version, metadata: { generationMode: workout.generationMode, revisionId: revision.id }, createdAt: timestamp });
-      return { ...stored, disclosure, replayed: false };
     },
     reviseWorkout(ownerId, workoutId, input, idempotencyKey) {
       const result = v07IdempotencyService.executeLocal({ ownerId, key: idempotencyKey, operation: 'fitness.workout.revise', resourceId: workoutId, body: input }, () => {
@@ -288,7 +323,6 @@ export function createFitnessService(
         healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_REVISION_CREATED', entityType: 'WORKOUT', entityId: workoutId, entityVersion: stored.workout.version, metadata: { revisionId: revision.id }, createdAt: timestamp });
         return { status: 201, body: stored };
       });
-      if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
       return { ...(result.body as { workout: Workout; revision: WorkoutRevision }), replayed: result.replayed };
     },
     createWorkoutProposal(ownerId, workoutId, input, idempotencyKey) {
@@ -328,7 +362,6 @@ export function createFitnessService(
         healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_PROPOSAL_CREATED', entityType: 'WORKOUT', entityId: workoutId, entityVersion: marked.version, metadata: { proposalId: proposal.id, revisionId: revision.id }, createdAt: timestamp });
         return { status: 201, body: { workout: marked, proposal } };
       });
-      if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
       return { ...(result.body as { workout: Workout; proposal: Proposal }), replayed: result.replayed };
     },
     recordWorkoutFeedback(ownerId, workoutId, input, idempotencyKey) {
@@ -347,7 +380,6 @@ export function createFitnessService(
         healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'WORKOUT_FEEDBACK_RECORDED', entityType: 'WORKOUT', entityId: workoutId, entityVersion: stored.workout.version, metadata: { hadPain: input.hadPain, outcome: input.outcome }, createdAt: timestamp });
         return { status: 201, body: { ...stored, safetyNotice: input.hadPain ? 'STOP_EXERCISE_AND_SEEK_PROFESSIONAL_HELP' as const : null } };
       });
-      if (isInProgress(result)) throw new ApiError(409, 'IN_PROGRESS', '请求仍在处理中');
       return { ...(result.body as Omit<ReturnType<FitnessService['recordWorkoutFeedback']>, 'replayed'>), replayed: result.replayed };
     },
     listWorkouts(ownerId, query) {

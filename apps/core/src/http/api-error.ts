@@ -40,6 +40,11 @@ export function registerErrorHandling(app: FastifyInstance): void {
       }));
     }
     if (error instanceof ApiError) {
+      const retryAfterSeconds = (error as ApiError & { retryAfterSeconds?: number }).retryAfterSeconds;
+      if (retryAfterSeconds !== undefined) reply.header('retry-after', String(retryAfterSeconds));
+      if ((error as ApiError & { idempotencyReplayed?: boolean }).idempotencyReplayed === true) {
+        reply.header('idempotency-replayed', 'true');
+      }
       const details = error.details === undefined ? {} : { details: error.details };
       return reply.status(error.statusCode).send(
         apiErrorSchema.parse({

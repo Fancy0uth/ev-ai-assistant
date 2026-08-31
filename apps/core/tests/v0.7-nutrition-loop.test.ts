@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { HealthTextProvider } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
@@ -62,9 +63,11 @@ describe('v0.7 nutrition candidate and confirmation loop', () => {
       const ownerId = (database.prepare('select id from owners').get() as { id: string }).id;
       const source = { sourceKind: 'TEST_FIXTURE', sourceId: 'ev-v07-test', sourceVersion: '1', datasetHash: 'a'.repeat(64), redistribution: false, licenseDecisionId: null } as const;
       const withoutHash = { schemaVersion: 'NUTRITION_RECORD_V1' as const, source, recordId: 'fixture-alpha', displayName: 'Fixture Food Alpha', serving: { quantityDecimal: '100', unit: 'GRAM' as const }, nutrientsPerServing: { energyKcalDecimal: '100', proteinGramsDecimal: '10', carbohydrateGramsDecimal: '20', fatGramsDecimal: '5' } };
+      let providerCalls = 0;
       const provider: NutritionDataProvider = {
         descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic nutrition fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
         async searchBatch(input) {
+          providerCalls += 1;
           expect(Object.keys(input.queries[0] ?? {}).sort()).toEqual(['candidateId', 'limit', 'query', 'unit']);
           return { groups: input.queries.map((query) => ({ candidateId: query.candidateId, records: [{ ...withoutHash, recordHash: createHash('sha256').update(canonicalJson(withoutHash)).digest('hex') }] })) };
         },
@@ -74,6 +77,7 @@ describe('v0.7 nutrition candidate and confirmation loop', () => {
       const matched = await service.matchMealDraft(ownerId, created.draft.id, { expectedVersion: created.draft.version, revisionId: created.revision.id }, 'v07-nutrition-direct-match001');
       expect(matched).toMatchObject({ draft: { state: 'MATCHES_READY' }, matches: [{ status: 'MATCHED', snapshots: [{ source: { sourceKind: 'TEST_FIXTURE' } }] }] });
       await expect(service.matchMealDraft(ownerId, created.draft.id, { expectedVersion: created.draft.version, revisionId: created.revision.id }, 'v07-nutrition-direct-match001')).resolves.toEqual({ ...matched, replayed: true });
+      expect(providerCalls).toBe(1);
       const selected = service.reviseMealDraft(ownerId, created.draft.id, {
         expectedVersion: matched.draft.version, parentRevisionId: matched.revision.id, operation: 'SELECT_MATCHES',
         candidates: [{ candidateId: matched.revision.candidates[0]!.candidateId, included: true, selectedFoodSnapshotId: matched.matches[0]!.snapshots[0]!.id }],
@@ -117,5 +121,101 @@ describe('v0.7 nutrition candidate and confirmation loop', () => {
         async parseMealCandidates() { return { schemaVersion: 'MEAL_CANDIDATE_PARSE_V1', candidates: [{ displayName: 'fixture', quantityDecimal: '100', unit: 'GRAM', energyKcalDecimal: '100' }] }; },
       },
     )).rejects.toBeInstanceOf(NutritionProviderError);
+  });
+
+  it('calls the meal parser once and exactly replays success and failure responses', async () => {
+    let successCalls = 0;
+    const successProvider: HealthTextProvider = {
+      descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic parser idempotency fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE' },
+      async selectWorkout() { throw new Error('not used'); },
+      async parseMealCandidates() {
+        successCalls += 1;
+        return { schemaVersion: 'MEAL_CANDIDATE_PARSE_V1', candidates: [{ displayName: 'Fixture Food Alpha', quantityDecimal: '150', unit: 'GRAM' }] };
+      },
+    };
+    await app!.close();
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'), artifactRoot: join(directory, 'artifacts'), logger: false,
+      healthTextProvider: successProvider,
+      v07TestAdapterGate: { nodeEnv: 'test', enabled: true, runnerDataRoot: directory },
+    });
+    const successPayload = { mode: 'PARSE_TEXT', localDate: '2026-09-14', mealText: 'Fixture Food Alpha 150 g', disclosureVersion: 'HEALTH_DISCLOSURE_V1' };
+    const firstSuccess = await app.inject({ method: 'POST', url: '/v1/nutrition/meal-drafts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-parser-success-replay01' }, payload: successPayload });
+    const replaySuccess = await app.inject({ method: 'POST', url: '/v1/nutrition/meal-drafts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-parser-success-replay01' }, payload: successPayload });
+    expect(firstSuccess.statusCode).toBe(201);
+    expect(replaySuccess.statusCode).toBe(201);
+    expect(replaySuccess.json()).toEqual(firstSuccess.json());
+    expect(replaySuccess.headers['idempotency-replayed']).toBe('true');
+    expect(successCalls).toBe(1);
+
+    await app.close();
+    let failedCalls = 0;
+    const failedProvider: HealthTextProvider = {
+      ...successProvider,
+      descriptor: { ...successProvider.descriptor, providerLabel: 'Synthetic failing parser fixture' },
+      async parseMealCandidates() {
+        failedCalls += 1;
+        throw new Error('SYNTHETIC_PARSER_FAILURE');
+      },
+    };
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'), artifactRoot: join(directory, 'artifacts'), logger: false,
+      healthTextProvider: failedProvider,
+      v07TestAdapterGate: { nodeEnv: 'test', enabled: true, runnerDataRoot: directory },
+    });
+    const failedPayload = { ...successPayload, localDate: '2026-09-15' };
+    const firstFailure = await app.inject({ method: 'POST', url: '/v1/nutrition/meal-drafts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-parser-failed-replay01' }, payload: failedPayload });
+    const replayFailure = await app.inject({ method: 'POST', url: '/v1/nutrition/meal-drafts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-parser-failed-replay01' }, payload: failedPayload });
+    expect(firstFailure.statusCode).toBe(503);
+    expect(replayFailure.statusCode).toBe(503);
+    expect(replayFailure.json()).toEqual(firstFailure.json());
+    expect(replayFailure.headers['idempotency-replayed']).toBe('true');
+    expect(failedCalls).toBe(1);
+
+    const database = openDatabase(join(directory, 'app.sqlite'));
+    try {
+      expect(database.prepare(`select count(*) as count from meal_drafts_v2 where local_date = '2026-09-15'`).get()).toEqual({ count: 0 });
+      expect(database.prepare(`select state, count(*) as count from v07_capability_runs where capability = 'MEAL_CANDIDATE_PARSE' and local_date = '2026-09-15' group by state`).get()).toEqual({ state: 'FAILED', count: 1 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('calls nutrition matching once and exactly replays a failed response without domain facts', async () => {
+    const source = { sourceKind: 'TEST_FIXTURE', sourceId: 'ev-v07-idem-match', sourceVersion: '1', datasetHash: 'b'.repeat(64), redistribution: false, licenseDecisionId: null } as const;
+    let providerCalls = 0;
+    const provider: NutritionDataProvider = {
+      descriptor: { providerId: 'v07-idem-match-fail', providerLabel: 'Synthetic failing nutrition fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
+      async searchBatch() {
+        providerCalls += 1;
+        throw new Error('SYNTHETIC_NUTRITION_FAILURE');
+      },
+    };
+    await app!.close();
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'), artifactRoot: join(directory, 'artifacts'), logger: false,
+      nutritionDataProvider: provider,
+      v07TestAdapterGate: { nodeEnv: 'test', enabled: true, runnerDataRoot: directory },
+    });
+    const draft = await app.inject({
+      method: 'POST', url: '/v1/nutrition/meal-drafts', cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-match-fail-draft-key01' },
+      payload: { mode: 'MANUAL', localDate: '2026-09-16', candidates: [{ displayName: 'Fixture Food Alpha', quantityDecimal: '150', unit: 'GRAM' }] },
+    });
+    const payload = { expectedVersion: 1, revisionId: draft.json().data.revision.id };
+    const url = `/v1/nutrition/meal-drafts/${draft.json().data.draft.id}/matches`;
+    const first = await app.inject({ method: 'POST', url, cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-match-failed-replay01' }, payload });
+    const replay = await app.inject({ method: 'POST', url, cookies: { ev_session: session }, headers: { 'idempotency-key': 'v07-match-failed-replay01' }, payload });
+    expect(first.statusCode).toBe(503);
+    expect(replay.statusCode).toBe(503);
+    expect(replay.json()).toEqual(first.json());
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(providerCalls).toBe(1);
+    const database = openDatabase(join(directory, 'app.sqlite'));
+    try {
+      expect(database.prepare('select count(*) as count from nutrition_food_snapshots_v2').get()).toEqual({ count: 0 });
+      expect(database.prepare(`select state, count(*) as count from v07_capability_runs where capability = 'NUTRITION_DATA_LOOKUP' group by state`).get()).toEqual({ state: 'FAILED', count: 1 });
+    } finally {
+      database.close();
+    }
   });
 });
