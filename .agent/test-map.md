@@ -1,4 +1,29 @@
-# V7 Terra 最终验证状态（2026-08-31 Asia/Shanghai）
+# v0.7 Sol P1 remediation final matrix (2026-08-31 Asia/Shanghai)
+
+| Layer | Exact command | Exit / count |
+| --- | --- | --- |
+| Root tests | `npm test` | 0; Legacy 7/7, Core 350/350, Web 246/246, Contracts 85/85, Domain 11/11 |
+| Type safety | `npm run typecheck` | 0; Core/Web/Contracts/Domain passed |
+| Lint | `npm run lint` | 0; 0 errors, 4 unchanged warnings in `v0.5-recovery-sweeper.test.ts` |
+| Build | `npm run build` | 0; Next production build passed, generated `next-env.d.ts` restored |
+| Browser | `npm run test:e2e -- e2e/v0.7-health-loops.spec.ts` | 0; 1/1 passed, test 12.3 s / total 15.6 s |
+| Execution-range whitespace | `git diff --check 37982d8..HEAD` | 0; no output |
+| Lineage-range whitespace | `git diff --check 785b7b6..HEAD` | 0; no output |
+| Matrix-end status | `git status --short` | 0; empty before handoff document updates |
+
+First final-root attempt: `npm test` exit 1. Legacy 7/7 passed; Core was 12 failed / 338 passed; Web 246/246, Contracts 85/85, Domain 11/11 passed. The first Core assertion was `database.test.ts` expecting migration count 20 while v21 was current; the product failures were the v21 trigger detecting initial parent rows that carried a not-yet-inserted current revision. Focused repair over `database.test.ts`, `v0.7-fitness-loop.test.ts`, `v0.7-nutrition-loop.test.ts`, and `v0.7-workout-proposal.test.ts` then passed 4 files / 23 tests.
+
+Focused remediation evidence:
+
+- AUTH/FIXTURE: RED 4 failed / 4 passed; GREEN 8/8.
+- IDEM: RED 6 failed / 10 passed; GREEN 17/17.
+- PROVIDER: RED 4/4 failed; GREEN 3 files / 15 tests.
+- DECIMAL: RED Contracts 1 failed / 6 passed, Domain 1 failed / 3 passed, Core 2 failed / 5 passed; GREEN 7/7, 4/4, 7/7.
+- MIGRATION: RED 8/8 failed and all 30 cross-Owner probes were accepted by v20; GREEN corrective+legacy migration tests 16/16.
+- LINEAGE/EVIDENCE: RED Core 2/2 failed and runner 1/3 failed; GREEN Core composition/evidence 11/11 and runner 4/4.
+- REPORT: both baseline diff-checks RED on exactly two trailing-space lines; final range commands GREEN.
+
+# V7 Terra 最终验证状态（pre-Sol-remediation historical section）
 
 | 层级 | 命令/范围 | 真实结果 |
 | --- | --- | --- |
