@@ -176,6 +176,9 @@ export function createFitnessRepository(database: Database.Database): FitnessRep
     id, owner_id, revision_id, citation_id, position, catalog_id, catalog_version, catalog_hash,
     exercise_id, item_hash, source_kind, redistribution, created_at
   ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const setInitialWorkoutRevision = database.prepare(`update workouts_v2
+    set current_revision_id = ?
+    where id = ? and owner_id = ? and state = 'DRAFT' and current_revision_id is null and version = ?`);
   const updateWorkoutRevision = database.prepare(`update workouts_v2
     set current_revision_id = ?, version = version + 1, updated_at = ?
     where id = ? and owner_id = ? and state = 'DRAFT' and version = ?`);
@@ -303,21 +306,26 @@ export function createFitnessRepository(database: Database.Database): FitnessRep
       return database.transaction(() => {
         insertWorkout.run(
           input.workout.id, input.ownerId, input.workout.checkInId, input.workout.signalId,
-          input.workout.generationMode, input.workout.state, input.workout.currentRevisionId,
+          input.workout.generationMode, input.workout.state, null,
           input.workout.proposalId, input.workout.actionId, input.workout.timeRequestId,
           input.workout.feedbackId, input.workout.version, input.workout.createdAt, input.workout.updatedAt,
         );
         storeRevision(input.ownerId, input.revision, input.catalog);
+        if (setInitialWorkoutRevision.run(
+          input.revision.id, input.workout.id, input.ownerId, input.workout.version,
+        ).changes !== 1) throw new Error('WORKOUT_INITIAL_REVISION_LINK_FAILED');
         return { workout: input.workout, revision: input.revision };
       })();
     },
     appendWorkoutRevision(input) {
       return database.transaction(() => {
+        const current = findWorkout.get(input.ownerId, input.workoutId) as WorkoutRow | undefined;
+        if (!current || current.state !== 'DRAFT' || current.version !== input.expectedVersion) return undefined;
+        storeRevision(input.ownerId, input.revision, input.catalog);
         const changed = updateWorkoutRevision.run(
           input.revision.id, input.updatedAt, input.workoutId, input.ownerId, input.expectedVersion,
         ).changes;
-        if (changed !== 1) return undefined;
-        storeRevision(input.ownerId, input.revision, input.catalog);
+        if (changed !== 1) throw new Error('WORKOUT_REVISION_LINK_FAILED');
         const workout = findWorkout.get(input.ownerId, input.workoutId) as WorkoutRow;
         return { workout: toWorkout(workout), revision: input.revision };
       })();

@@ -101,7 +101,7 @@ describe('SQLite lifecycle', () => {
     const migrations = second.prepare('select count(*) as count from schema_migrations').get();
 
     expect(owner).toEqual({ username: 'codex' });
-    expect(migrations).toEqual({ count: 20 });
+    expect(migrations).toEqual({ count: 21 });
     second.close();
   });
 
@@ -601,6 +601,7 @@ describe('SQLite lifecycle', () => {
         { version: 18, name: 'add_provider_reliability' },
         { version: 19, name: 'add_v06_learning_schedule_loop' },
         { version: 20, name: 'add_v07_fitness_nutrition_loop' },
+        { version: 21, name: 'enforce_v07_owner_lineage' },
       ]);
       expect(
         upgraded.prepare('select count(*) as count from schema_migrations where version = 2').get(),
@@ -874,6 +875,7 @@ describe('SQLite lifecycle', () => {
         { version: 18, name: 'add_provider_reliability' },
         { version: 19, name: 'add_v06_learning_schedule_loop' },
         { version: 20, name: 'add_v07_fitness_nutrition_loop' },
+        { version: 21, name: 'enforce_v07_owner_lineage' },
       ]);
       expect(
         upgraded

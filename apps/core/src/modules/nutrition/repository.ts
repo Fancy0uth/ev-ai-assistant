@@ -187,6 +187,9 @@ export function createNutritionRepository(database: Database.Database): Nutritio
   const insertRevision = database.prepare(`insert into meal_revisions_v2 (
     id, owner_id, draft_id, parent_revision_id, revision_no, candidates_json, content_hash, created_by, capability_run_id, created_at
   ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const setInitialDraftRevision = database.prepare(`update meal_drafts_v2
+    set current_revision_id = ?
+    where owner_id = ? and id = ? and current_revision_id is null and version = ?`);
   const updateDraft = database.prepare(`update meal_drafts_v2 set state = ?, current_revision_id = ?, updated_at = ?, version = version + 1
     where owner_id = ? and id = ? and state = ? and version = ?`);
   const insertSourceSnapshot = database.prepare(`insert or ignore into nutrition_source_snapshots_v2 (
@@ -306,9 +309,12 @@ export function createNutritionRepository(database: Database.Database): Nutritio
     createDraftWithRevision(input) {
       return database.transaction(() => {
         insertDraft.run(input.draft.id, input.ownerId, input.draft.localDate, input.draft.mode, input.draft.originalText,
-          input.draft.state, input.draft.currentRevisionId, input.draft.confirmedMealId, input.draft.version,
+          input.draft.state, null, input.draft.confirmedMealId, input.draft.version,
           input.draft.createdAt, input.draft.updatedAt);
         insertRevisionRow(input.ownerId, input.revision);
+        if (setInitialDraftRevision.run(
+          input.revision.id, input.ownerId, input.draft.id, input.draft.version,
+        ).changes !== 1) throw new Error('MEAL_INITIAL_REVISION_LINK_FAILED');
         return findDetail(input.ownerId, input.draft.id) as MealDraftDetail;
       })();
     },
