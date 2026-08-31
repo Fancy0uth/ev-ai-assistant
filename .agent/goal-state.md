@@ -10,7 +10,7 @@ M1 / v0.6：课程、课表截图与学习排程闭环。
 
 ## 当前任务
 
-v0.6 主 Agent 全矩阵集成修复已通过独立验证：根测试、全仓 typecheck、生产 build、完整 E2E 8/8 与静态完整性门槛均通过。等待原子提交与 Sol 整版复审。
+v0.6 Sol rereview 的 WebP integrity、crash-safe artifact deletion recovery 与 browser semantic idempotency 三个 P1 已完成 Terra 定点修复。主 Agent 已独立完成代码复核、全套单元/集成测试、typecheck、lint、build、完整 E2E 8/8 与静态完整性检查；当前等待原子提交与 Sol 整版复审。
 
 ## 已完成任务
 
@@ -23,11 +23,11 @@ v0.6 主 Agent 全矩阵集成修复已通过独立验证：根测试、全仓 t
 
 ## 下一任务
 
-原子提交当前修复，随后发起 Sol 里程碑复审。只有复审确认 P0/P1 为零并 PASS，才可进入 v0.7。
+原子提交当前修复并发起 Sol 里程碑复审。只有复审确认 P0/P1 为零并 PASS，才可进入 v0.7。
 
 ## 当前阻塞
 
-- Core/Web/root 单测、build 与全套 E2E 当前无已知确定性阻塞；等待 Sol 复审。
+- 本轮确定性门无已知阻塞；只剩 Sol 尚未对修复后整版差异给出 PASS。
 - 真实 Vision、Search、DeepSeek 与真实凭据/DPAPI/网络未获授权，继续记录为 `NOT RUN — APPROVAL REQUIRED`，不由 Fake 替代。
 
 ## 最近测试结果

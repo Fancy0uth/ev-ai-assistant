@@ -13,9 +13,14 @@ import type { CalendarRepository } from './repository';
 
 const MAX_IMAGE_BYTES = 5_000_000;
 export interface CourseImportResult { import: CourseImport; disclosure: ExternalDisclosure; revision?: CourseImportRevision | null; }
+export interface ArtifactDeleteRecoveryResult {
+  recovered: number;
+  failures: Array<{ artifactId: string; ownerId: string; error: unknown }>;
+}
 export interface CourseImportService {
   uploadArtifact(ownerId: string, mediaType: LocalArtifact['mediaType'], bytes: Uint8Array): Promise<{ artifact: LocalArtifact; deduplicated: boolean }>;
   deleteArtifact(ownerId: string, artifactId: string): Promise<void>;
+  recoverPendingArtifactDeletes(): Promise<ArtifactDeleteRecoveryResult>;
   create(ownerId: string, input: CreateCourseImportInput): CourseImportResult;
   findById(ownerId: string, importId: string): CourseImportResult;
   extract(ownerId: string, importId: string, input: { expectedVersion: number; disclosureVersion: 'CAPABILITY_DISCLOSURE_V1' }, idempotencyKey: string): Promise<CourseImportResult>;
@@ -59,6 +64,9 @@ export function createCourseImportService(
       : error.code === 'IMAGE_PIXEL_LIMIT_EXCEEDED' ? '图片像素超过限制' : '图片尺寸无效';
     throw new ApiError(422, error.code, message);
   }
+  function markDeleted(ownerId: string, artifactId: string, timestamp: string): LocalArtifact | undefined {
+    return database.transaction(() => repository.markArtifactDeleted(ownerId, artifactId, timestamp)).immediate();
+  }
 
   return {
     async uploadArtifact(ownerId, mediaType, bytes) {
@@ -92,7 +100,27 @@ export function createCourseImportService(
       if (!pending || !storageKey) throw new ApiError(404, 'ARTIFACT_NOT_FOUND', '课表图片不存在');
       try { await store.remove(storageKey); }
       catch { throw new ApiError(503, 'ARTIFACT_DELETE_FAILED', '本地图片删除暂未完成'); }
-      repository.markArtifactDeleted(ownerId, artifactId, now().toISOString());
+      const deleted = markDeleted(ownerId, artifactId, now().toISOString());
+      if (!deleted && repository.findArtifact(ownerId, artifactId)?.state !== 'DELETED') {
+        throw new ApiError(503, 'ARTIFACT_DELETE_FAILED', '本地图片删除暂未完成');
+      }
+    },
+    async recoverPendingArtifactDeletes() {
+      const failures: ArtifactDeleteRecoveryResult['failures'] = [];
+      let recovered = 0;
+      for (const pending of repository.listPendingArtifactDeletes()) {
+        try {
+          if (!pending.storageKey.startsWith(`${pending.ownerId}/`)) throw new Error('artifact storage key owner mismatch');
+          options.onExternalOperation?.(database.inTransaction);
+          await store.remove(pending.storageKey);
+          const deleted = markDeleted(pending.ownerId, pending.artifactId, now().toISOString());
+          if (!deleted) throw new Error('pending artifact could not be terminalized');
+          recovered += 1;
+        } catch (error) {
+          failures.push({ artifactId: pending.artifactId, ownerId: pending.ownerId, error });
+        }
+      }
+      return { recovered, failures };
     },
     create(ownerId, input) {
       if (!calendarRepository.findTerm(ownerId, input.termId)) throw new ApiError(404, 'TERM_NOT_FOUND', '学期不存在');

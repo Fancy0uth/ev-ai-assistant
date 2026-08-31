@@ -1,11 +1,64 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { courseImportResponseSchema } from '@ev/contracts';
 import { ScheduleWorkspace } from '@/components/schedule/schedule-workspace';
 import { CourseImportReview } from '@/components/schedule/course-import-review';
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function importFlowFixtures() {
+  const disclosure = {
+    version: 'CAPABILITY_DISCLOSURE_V1' as const, purpose: '提取课表候选', selectedData: ['课表图片'],
+    providerId: 'test-vision', providerLabel: '自动测试 Fake Vision', adapterKind: 'TEST_FAKE' as const,
+    evidenceKind: 'AUTOMATED_FAKE' as const,
+  };
+  const baseImport = {
+    id: '00000000-0000-4000-8000-000000000451', termId: '00000000-0000-4000-8000-000000000452',
+    artifactId: '00000000-0000-4000-8000-000000000453', capabilityRunId: '00000000-0000-4000-8000-000000000454',
+    currentRevisionId: null, scheduleProposalId: null, failureCode: null,
+    createdAt: '2026-08-31T03:00:00.000Z', updatedAt: '2026-08-31T03:00:00.000Z',
+  };
+  const candidate = {
+    candidateId: '00000000-0000-4000-8000-000000000456', included: true, title: '编译原理', location: 'A202',
+    weekday: 3 as const, startLocalTime: '10:00', endLocalTime: '11:40', weekStart: 1, weekEnd: 16,
+    weekPattern: 'EVERY_WEEK' as const,
+    confidence: { overall: 1, fields: { title: 1, location: 1, weekday: 1, startLocalTime: 1, endLocalTime: 1, weekStart: 1, weekEnd: 1, weekPattern: 1 } },
+    provenance: [{
+      kind: 'VISION_OUTPUT' as const, providerId: 'test-vision', capabilityRunId: baseImport.capabilityRunId,
+      editedFields: [], capturedAt: '2026-08-31T03:01:00.000Z',
+    }],
+  };
+  const extractedRevision = {
+    id: '00000000-0000-4000-8000-000000000455', importId: baseImport.id, parentRevisionId: null,
+    revisionNo: 1, candidates: [candidate], contentHash: 'b'.repeat(64), createdBy: 'VISION' as const,
+    createdAt: '2026-08-31T03:01:00.000Z',
+  };
+  const savedRevision = {
+    ...extractedRevision, id: '00000000-0000-4000-8000-000000000457', parentRevisionId: extractedRevision.id,
+    revisionNo: 2, contentHash: 'c'.repeat(64), createdBy: 'OWNER' as const, createdAt: '2026-08-31T03:02:00.000Z',
+  };
+  const initial = courseImportResponseSchema.parse({ data: {
+    import: { ...baseImport, status: 'AWAITING_DISCLOSURE', version: 1 }, disclosure, revision: null,
+  } }).data;
+  const extracted = courseImportResponseSchema.parse({ data: {
+    import: { ...baseImport, status: 'REVIEW_REQUIRED', currentRevisionId: extractedRevision.id, version: 3 },
+    disclosure, revision: extractedRevision,
+  } }).data;
+  const saved = courseImportResponseSchema.parse({ data: {
+    import: { ...baseImport, status: 'REVIEW_REQUIRED', currentRevisionId: savedRevision.id, version: 4 },
+    disclosure, revision: savedRevision,
+  } }).data;
+  const confirmed = courseImportResponseSchema.parse({ data: {
+    import: {
+      ...baseImport, status: 'SCHEDULE_PROPOSAL_PENDING', currentRevisionId: savedRevision.id,
+      scheduleProposalId: '00000000-0000-4000-8000-000000000458', version: 5,
+    },
+    disclosure, revision: savedRevision,
+  } }).data;
+  return { initial, extracted, saved, confirmed };
 }
 
 describe('ScheduleWorkspace', () => {
@@ -80,5 +133,90 @@ describe('ScheduleWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '确认导入课程' })).toBeEnabled());
     expect(fetchMock).toHaveBeenCalledWith('/api/core/course-imports/00000000-0000-4000-8000-000000000431/revisions', expect.objectContaining({ method: 'POST', body: expect.stringContaining('"included":false') }));
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).body).toContain('数据库导论');
+  });
+
+  it('reuses separate extract and confirm keys with identical bodies across uncertain committed writes', async () => {
+    const fixtures = importFlowFixtures();
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('transport response lost'))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'CORE_UPSTREAM_UNAVAILABLE', message: 'BFF 未读取到 Core 响应' } }, 502))
+      .mockResolvedValueOnce(jsonResponse({ data: { unreadable: true } }, 202))
+      .mockResolvedValueOnce(jsonResponse({ data: fixtures.extracted }, 202))
+      .mockResolvedValueOnce(jsonResponse({ data: fixtures.saved }, 201))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'CORE_UPSTREAM_UNAVAILABLE', message: 'BFF 未读取到确认响应' } }, 502))
+      .mockResolvedValueOnce(jsonResponse({ data: fixtures.confirmed }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<CourseImportReview initial={fixtures.initial} onUpdated={vi.fn()} />);
+
+    const extractButton = screen.getByRole('button', { name: '确认披露并提取候选' });
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      await user.click(extractButton);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(attempt));
+      if (attempt < 4) await screen.findByRole('alert');
+    }
+    expect(await screen.findByRole('heading', { name: '审阅课表候选' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存审阅版本' }));
+    expect(await screen.findByRole('button', { name: '确认导入课程' })).toBeEnabled();
+    const confirmButton = screen.getByRole('button', { name: '确认导入课程' });
+    await user.click(confirmButton);
+    await screen.findByRole('alert');
+    await user.click(confirmButton);
+    expect(await screen.findByRole('heading', { name: '课程排程待确认' })).toBeInTheDocument();
+
+    const extractCalls = fetchMock.mock.calls.slice(0, 4).map((call) => call[1] as RequestInit);
+    const confirmCalls = fetchMock.mock.calls.slice(5, 7).map((call) => call[1] as RequestInit);
+    expect(extractCalls.map((init) => new Headers(init.headers).get('idempotency-key')))
+      .toEqual(Array(4).fill(new Headers(extractCalls[0]!.headers).get('idempotency-key')));
+    expect(extractCalls.map((init) => init.body)).toEqual(Array(4).fill(extractCalls[0]!.body));
+    expect(confirmCalls.map((init) => new Headers(init.headers).get('idempotency-key')))
+      .toEqual(Array(2).fill(new Headers(confirmCalls[0]!.headers).get('idempotency-key')));
+    expect(confirmCalls.map((init) => init.body)).toEqual(Array(2).fill(confirmCalls[0]!.body));
+    expect(new Headers(extractCalls[0]!.headers).get('idempotency-key'))
+      .not.toBe(new Headers(confirmCalls[0]!.headers).get('idempotency-key'));
+  });
+
+  it('starts a new extract key after a definite Core error', async () => {
+    const fixtures = importFlowFixtures();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'VERSION_CONFLICT', message: '课表导入状态已变化' } }, 409))
+      .mockResolvedValueOnce(jsonResponse({ data: fixtures.extracted }, 202));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<CourseImportReview initial={fixtures.initial} onUpdated={vi.fn()} />);
+    const button = screen.getByRole('button', { name: '确认披露并提取候选' });
+
+    await user.click(button);
+    await screen.findByRole('alert');
+    await user.click(button);
+    expect(await screen.findByRole('heading', { name: '审阅课表候选' })).toBeInTheDocument();
+
+    const calls = fetchMock.mock.calls.map((call) => call[1] as RequestInit);
+    expect(new Headers(calls[0]!.headers).get('idempotency-key'))
+      .not.toBe(new Headers(calls[1]!.headers).get('idempotency-key'));
+    expect(calls[1]!.body).toBe(calls[0]!.body);
+  });
+
+  it('starts a new confirm key after a definite Core error', async () => {
+    const fixtures = importFlowFixtures();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: fixtures.saved }, 201))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'VERSION_CONFLICT', message: '课表确认状态已变化' } }, 409))
+      .mockResolvedValueOnce(jsonResponse({ data: fixtures.confirmed }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<CourseImportReview initial={fixtures.extracted} onUpdated={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: '保存审阅版本' }));
+    const button = await screen.findByRole('button', { name: '确认导入课程' });
+
+    await user.click(button);
+    await screen.findByRole('alert');
+    await user.click(button);
+    expect(await screen.findByRole('heading', { name: '课程排程待确认' })).toBeInTheDocument();
+
+    const calls = fetchMock.mock.calls.slice(1).map((call) => call[1] as RequestInit);
+    expect(new Headers(calls[0]!.headers).get('idempotency-key'))
+      .not.toBe(new Headers(calls[1]!.headers).get('idempotency-key'));
+    expect(calls[1]!.body).toBe(calls[0]!.body);
   });
 });

@@ -67,7 +67,12 @@ function webpDimensions(bytes: Uint8Array): { width: number; height: number } | 
   if (bytes.length < 20) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
   if (u32le(bytes, 4) !== bytes.length - 8) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
   let offset = 12;
-  let dimensions: { width: number; height: number } | undefined;
+  let canvasDimensions: { width: number; height: number } | undefined;
+  let imageDimensions: { width: number; height: number } | undefined;
+  let imageKind: 'VP8' | 'VP8L' | undefined;
+  let vp8lUsesAlpha = false;
+  let extendedFlags: number | undefined;
+  const featureChunks = new Set<'ICCP' | 'ALPH' | 'EXIF' | 'XMP'>();
   while (offset < bytes.length) {
     if (offset + 8 > bytes.length) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
     const chunkSize = u32le(bytes, offset + 4);
@@ -78,27 +83,56 @@ function webpDimensions(bytes: Uint8Array): { width: number; height: number } | 
     if (chunkSize % 2 === 1 && bytes[payloadEnd] !== 0) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
     if (offset === 12 && equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x58])) {
       if (chunkSize !== 10) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
-      dimensions = { width: u24le(bytes, payloadOffset + 4) + 1, height: u24le(bytes, payloadOffset + 7) + 1 };
-    } else if (offset === 12 && equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x20])) {
+      extendedFlags = bytes[payloadOffset]!;
+      if ((extendedFlags & 0xc1) !== 0 || (extendedFlags & 0x02) !== 0) {
+        throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      }
+      canvasDimensions = { width: u24le(bytes, payloadOffset + 4) + 1, height: u24le(bytes, payloadOffset + 7) + 1 };
+    } else if (equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x20])) {
+      if (imageDimensions) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
       if (chunkSize < 10 || !equalAt(bytes, payloadOffset + 3, [0x9d, 0x01, 0x2a])) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
-      dimensions = { width: u16le(bytes, payloadOffset + 6) & 0x3fff, height: u16le(bytes, payloadOffset + 8) & 0x3fff };
-    } else if (offset === 12 && equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x4c])) {
+      imageKind = 'VP8';
+      imageDimensions = { width: u16le(bytes, payloadOffset + 6) & 0x3fff, height: u16le(bytes, payloadOffset + 8) & 0x3fff };
+    } else if (equalAt(bytes, offset, [0x56, 0x50, 0x38, 0x4c])) {
+      if (imageDimensions) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
       if (chunkSize < 5 || bytes[payloadOffset] !== 0x2f) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
-      const first = bytes[payloadOffset + 1]!;
-      const second = bytes[payloadOffset + 2]!;
-      const third = bytes[payloadOffset + 3]!;
-      const fourth = bytes[payloadOffset + 4]!;
-      dimensions = {
-        width: 1 + first + ((second & 0x3f) << 8),
-        height: 1 + (second >> 6) + (third << 2) + ((fourth & 0x0f) << 10),
+      const headerBits = u32le(bytes, payloadOffset + 1);
+      if ((headerBits >>> 29) !== 0) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      imageKind = 'VP8L';
+      vp8lUsesAlpha = ((headerBits >>> 28) & 1) === 1;
+      imageDimensions = {
+        width: (headerBits & 0x3fff) + 1,
+        height: ((headerBits >>> 14) & 0x3fff) + 1,
       };
-    } else if (offset === 12) {
+    } else if (equalAt(bytes, offset, [0x49, 0x43, 0x43, 0x50])) {
+      if (extendedFlags === undefined || imageDimensions || chunkSize === 0 || featureChunks.has('ICCP')) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      featureChunks.add('ICCP');
+    } else if (equalAt(bytes, offset, [0x41, 0x4c, 0x50, 0x48])) {
+      if (extendedFlags === undefined || imageDimensions || chunkSize === 0 || featureChunks.has('ALPH')) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      featureChunks.add('ALPH');
+    } else if (equalAt(bytes, offset, [0x45, 0x58, 0x49, 0x46])) {
+      if (extendedFlags === undefined || !imageDimensions || chunkSize === 0 || featureChunks.has('EXIF')) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      featureChunks.add('EXIF');
+    } else if (equalAt(bytes, offset, [0x58, 0x4d, 0x50, 0x20])) {
+      if (extendedFlags === undefined || !imageDimensions || chunkSize === 0 || featureChunks.has('XMP')) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+      featureChunks.add('XMP');
+    } else if (equalAt(bytes, offset, [0x41, 0x4e, 0x49, 0x4d]) || equalAt(bytes, offset, [0x41, 0x4e, 0x4d, 0x46]) || offset === 12) {
       throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
     }
     offset = paddedEnd;
   }
-  if (offset !== bytes.length || !dimensions) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
-  return dimensions;
+  if (offset !== bytes.length || !imageDimensions || !imageKind) throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+  if (extendedFlags === undefined) return imageDimensions;
+  if (!canvasDimensions || canvasDimensions.width !== imageDimensions.width || canvasDimensions.height !== imageDimensions.height) {
+    throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+  }
+  const hasAlpha = imageKind === 'VP8' ? featureChunks.has('ALPH') : vp8lUsesAlpha;
+  const declaredFeatures: Array<[number, 'ICCP' | 'EXIF' | 'XMP']> = [[0x20, 'ICCP'], [0x08, 'EXIF'], [0x04, 'XMP']];
+  if (((extendedFlags & 0x10) !== 0) !== hasAlpha
+    || declaredFeatures.some(([flag, chunk]) => ((extendedFlags! & flag) !== 0) !== featureChunks.has(chunk))) {
+    throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+  }
+  return canvasDimensions;
 }
 
 export function readImageMetadata(

@@ -17,6 +17,12 @@ interface RevisionRow {
   candidates_json: string; content_hash: string; created_by: 'VISION' | 'OWNER'; created_at: string;
 }
 
+export interface PendingArtifactDelete {
+  artifactId: string;
+  ownerId: string;
+  storageKey: string;
+}
+
 function toArtifact(row: ArtifactRow): LocalArtifact {
   return {
     id: row.id, kind: 'COURSE_SCHEDULE_IMAGE', mediaType: row.media_type, byteSize: row.byte_size,
@@ -45,6 +51,7 @@ export interface CourseImportRepository {
   findArtifactStorageKey(ownerId: string, id: string): string | undefined;
   insertArtifact(input: LocalArtifact & { ownerId: string; storageKey: string }): LocalArtifact;
   requestArtifactDelete(ownerId: string, id: string, timestamp: string): LocalArtifact | undefined;
+  listPendingArtifactDeletes(): PendingArtifactDelete[];
   markArtifactDeleted(ownerId: string, id: string, timestamp: string): LocalArtifact | undefined;
   insertImport(input: CourseImport & { ownerId: string }): CourseImport;
   findImport(ownerId: string, id: string): CourseImport | undefined;
@@ -96,8 +103,13 @@ export function createCourseImportRepository(database: Database.Database): Cours
       database.prepare(`update local_artifacts set state = 'DELETE_PENDING', delete_requested_at = ?, version = version + 1 where id = ? and owner_id = ? and state = 'ACTIVE'`).run(timestamp, id, ownerId);
       return this.findArtifact(ownerId, id);
     },
+    listPendingArtifactDeletes() {
+      const rows = database.prepare(`select id, owner_id, storage_key from local_artifacts where state = 'DELETE_PENDING' order by owner_id asc, id asc`).all() as Array<{ id: string; owner_id: string; storage_key: string }>;
+      return rows.map((row) => ({ artifactId: row.id, ownerId: row.owner_id, storageKey: row.storage_key }));
+    },
     markArtifactDeleted(ownerId, id, timestamp) {
-      database.prepare(`update local_artifacts set state = 'DELETED', deleted_at = ?, version = version + 1 where id = ? and owner_id = ? and state = 'DELETE_PENDING'`).run(timestamp, id, ownerId);
+      const result = database.prepare(`update local_artifacts set state = 'DELETED', deleted_at = ?, version = version + 1 where id = ? and owner_id = ? and state = 'DELETE_PENDING'`).run(timestamp, id, ownerId);
+      if (result.changes !== 1) return undefined;
       return this.findArtifact(ownerId, id);
     },
     insertImport(input) {

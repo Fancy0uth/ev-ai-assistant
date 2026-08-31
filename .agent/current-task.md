@@ -1,8 +1,15 @@
-# TASK-V0.6-FULL-MATRIX-REPAIR：主 Agent 全矩阵 PASS，等待 Sol 复审
+# TASK-V0.6-SOL-REREVIEW-P1-REPAIR：主 Agent 全矩阵 PASS，等待 Sol 复审
 
 ## 当前目标
 
-Core/Web/root 单测矩阵已 GREEN。v0.6 使用互斥固定学习窗口消除了共享 Event 冲突；pending proposal card 以其唯一 exact `采用安排` 按钮作为业务锚点，严格 card 内 summary/button 断言消除了历史 proposal 摘要歧义。主 Agent 已独立完成根测试、类型检查、lint、生产 build 与完整 E2E 8/8；迁移、不可变 FAIL review、版本、凭据字面量和生成文件检查均通过。当前只等待提交修复并由 Sol 执行整版复审。
+Sol rereview 指定的三个 P1 已在未提交工作树中按 TDD 定点实现：WebP 必须含真实 image-bearing payload；`DELETE_PENDING` artifact 可在启动时 Owner-safe 恢复；browser extract/confirm 在不确定写入结果下分别复用语义幂等键和完全相同 body。主 Agent 已独立完成代码复核、根测试、全仓 typecheck/lint/build、完整 E2E 8/8 与静态完整性检查，全部达到准入门槛。当前只等待原子提交和全新 Sol 整版复审。
+
+## 本轮边界
+
+- 未实现 rereview 的六个 P2，未扩大 API/contracts/schema。
+- migrations 与两份不可变 FAIL review 零差异。
+- 未运行真实 Vision/Search/DeepSeek/network：`NOT RUN — APPROVAL REQUIRED`。
+- 主 Agent 已运行 full E2E/build；真实 Provider 成功链路仍保留为明确证据债，不用 Fake 代替。
 
 ## 本轮根因与最小修复
 
@@ -56,6 +63,6 @@ npx eslint apps/web/tests/tasks-workspace.test.tsx
 # PASS
 ```
 
-## 根单测矩阵状态
+## 主 Agent 最终独立矩阵
 
-主 Agent 最终独立验证：`npm test` 中 legacy 5/5、Core 297/297、Web 239/239、Contracts 77/77、Domain 7/7 全部通过；`npm run typecheck`、`npm run build`、完整 `npm run test:e2e` 8/8 均真实 exit 0。`npm run lint` 为 0 error、4 个未改动 v0.5 测试的既有 warning。`git diff --check`、两份新报告行尾检查、migration/immutable review zero-diff、5 个 tracked package version=0.6.0、生产源码常见凭据字面量扫描和 `next-env.d.ts` 基线检查全部通过。Git 未暂存、未提交；真实 Provider/network 未运行。
+`npm test` 中 legacy 5/5、Core 301/301、Web 242/242、Contracts 77/77、Domain 7/7 全部通过；`npm run typecheck`、`npm run build`、完整 `npm run test:e2e` 8/8 均真实 exit 0。`npm run lint` 为 0 error、4 个未改动 v0.5 测试的既有 warning。`git diff --check`、新报告行尾检查、migration/immutable review zero-diff、5 个 tracked package version=0.6.0、生产源码常见凭据字面量扫描和 `next-env.d.ts` 基线检查全部通过。Git 未暂存、未提交；真实 Provider/network 未运行。

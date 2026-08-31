@@ -176,6 +176,10 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     capabilityRegistry,
     options.courseImportExternalOperationObserver ? { onExternalOperation: options.courseImportExternalOperationObserver } : {},
   );
+  const artifactDeleteRecovery = await courseImportService.recoverPendingArtifactDeletes();
+  for (const failure of artifactDeleteRecovery.failures) {
+    app.log.warn({ artifactId: failure.artifactId, ownerId: failure.ownerId, err: failure.error }, 'course artifact deletion recovery failed');
+  }
   const providerService = createProviderService(database, {
     providers: {
       ...(options.domainAgentProvider ? { [options.domainAgentProvider.key]: options.domainAgentProvider } : {}),

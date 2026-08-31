@@ -44,7 +44,12 @@ export function createArtifactStore(root: string): ArtifactStore {
       }
     },
     async remove(storageKey) {
-      await unlink(ensureContained(resolvedRoot, storageKey));
+      try {
+        await unlink(ensureContained(resolvedRoot, storageKey));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
+      }
     },
     resolveVerified(storageKey) {
       return ensureContained(resolvedRoot, storageKey);

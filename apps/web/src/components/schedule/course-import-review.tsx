@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { courseImportResponseSchema } from '@ev/contracts';
-import { requestCore } from '@/lib/core-client';
+import { isUncertainCoreWriteFailure, requestCore } from '@/lib/core-client';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 
 type ImportData = ReturnType<typeof courseImportResponseSchema.parse>['data'];
+type SemanticWriteAttempt = { idempotencyKey: string; body: string };
 
 export function CourseImportReview({ initial, onUpdated }: { initial: ImportData; onUpdated: (value: ImportData) => void }) {
   const [value, setValue] = useState(initial);
@@ -12,23 +14,34 @@ export function CourseImportReview({ initial, onUpdated }: { initial: ImportData
   const [savedReview, setSavedReview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const extractAttempt = useRef<SemanticWriteAttempt | null>(null);
+  const confirmAttempt = useRef<SemanticWriteAttempt | null>(null);
   const revision = value.revision;
 
   async function extract(): Promise<void> {
+    const attempt = extractAttempt.current ?? {
+      idempotencyKey: createIdempotencyKey(),
+      body: JSON.stringify({ expectedVersion: value.import.version, disclosureVersion: value.disclosure.version }),
+    };
+    extractAttempt.current = attempt;
     setBusy(true); setFailure(null);
     try {
       const payload = await requestCore(`course-imports/${value.import.id}/extract`, {
-        method: 'POST', headers: { 'idempotency-key': crypto.randomUUID() },
-        body: JSON.stringify({ expectedVersion: value.import.version, disclosureVersion: value.disclosure.version }),
+        method: 'POST', headers: { 'idempotency-key': attempt.idempotencyKey }, body: attempt.body,
       });
       const next = courseImportResponseSchema.parse(payload).data;
+      extractAttempt.current = null;
       setValue(next); setDraftCandidates(next.revision?.candidates ?? []); setSavedReview(false); onUpdated(next);
-    } catch (error) { setFailure(error instanceof Error ? error.message : '课表提取未完成'); }
+    } catch (error) {
+      if (!isUncertainCoreWriteFailure(error)) extractAttempt.current = null;
+      setFailure(error instanceof Error ? error.message : '课表提取未完成');
+    }
     finally { setBusy(false); }
   }
 
   async function saveReview(): Promise<void> {
     if (!revision) return;
+    confirmAttempt.current = null;
     setBusy(true); setFailure(null);
     try {
       const payload = await requestCore(`course-imports/${value.import.id}/revisions`, {
@@ -45,15 +58,23 @@ export function CourseImportReview({ initial, onUpdated }: { initial: ImportData
 
   async function confirm(): Promise<void> {
     if (!revision) return;
+    const attempt = confirmAttempt.current ?? {
+      idempotencyKey: createIdempotencyKey(),
+      body: JSON.stringify({ expectedVersion: value.import.version, revisionId: revision.id }),
+    };
+    confirmAttempt.current = attempt;
     setBusy(true); setFailure(null);
     try {
       const payload = await requestCore(`course-imports/${value.import.id}/confirm`, {
-        method: 'POST', headers: { 'idempotency-key': crypto.randomUUID() },
-        body: JSON.stringify({ expectedVersion: value.import.version, revisionId: revision.id }),
+        method: 'POST', headers: { 'idempotency-key': attempt.idempotencyKey }, body: attempt.body,
       });
       const next = courseImportResponseSchema.parse(payload).data;
+      confirmAttempt.current = null;
       setValue(next); onUpdated(next);
-    } catch (error) { setFailure(error instanceof Error ? error.message : '确认导入未完成'); }
+    } catch (error) {
+      if (!isUncertainCoreWriteFailure(error)) confirmAttempt.current = null;
+      setFailure(error instanceof Error ? error.message : '确认导入未完成');
+    }
     finally { setBusy(false); }
   }
 

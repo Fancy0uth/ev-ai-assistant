@@ -133,6 +133,21 @@ git diff --exit-code -- docs/reviews/2026-08-23-v0.6-sol-smoke-review.md
 
 ## check_full
 
+## v0.6 Sol rereview 三个 P1 Terra 修复证据
+
+```powershell
+npm test --workspace @ev/core -- tests/course-import.test.ts
+npm test --workspace @ev/web -- tests/schedule-workspace.test.tsx
+npm run typecheck --workspace @ev/core
+npm run typecheck --workspace @ev/web
+npx eslint apps/core/src/app.ts apps/core/src/modules/calendar/image-metadata.ts apps/core/src/modules/calendar/artifact-store.ts apps/core/src/modules/calendar/import-repository.ts apps/core/src/modules/calendar/import-service.ts apps/core/tests/course-import.test.ts apps/web/src/components/schedule/course-import-review.tsx apps/web/tests/schedule-workspace.test.tsx
+git diff --check
+npm test
+npm run test:e2e -- e2e/v0.6-learning-loop.spec.ts
+```
+
+结果：Core course-import/recovery 12/12、Web schedule workspace 6/6；Core/Web typecheck、focused ESLint、diff check 全部 exit 0。Root `npm test` 为 legacy 5/5、Core 301/301、Web 242/242、Contracts 77/77、Domain 7/7，真实 exit 0。Focused v0.6 E2E 1/1 PASS。migration 与两份不可变 FAIL review 零差异。Full E2E/build 按本轮契约未运行；真实 Provider/network 为 `NOT RUN — APPROVAL REQUIRED`。
+
 ### v0.6 主 Agent 最终独立验证（2026-08-31）
 
 ```powershell
@@ -146,7 +161,7 @@ git diff --exit-code -- apps/core/src/storage/migrations.ts
 git diff --exit-code -- docs/reviews/2026-08-23-v0.6-sol-smoke-review.md
 ```
 
-结果：根测试 Legacy 5/5、Core 297/297、Web 239/239、Contracts 77/77、Domain 7/7；typecheck 与 build exit 0；完整 E2E 8/8、exit 0。lint 为 0 error、4 个未改动 v0.5 recovery 测试的既有 warning。两份新报告行尾、5 个 tracked package version=0.6.0、生产源码常见凭据字面量和 `next-env.d.ts` 基线均另行检查通过。真实 Provider/network 保持 `NOT RUN — APPROVAL REQUIRED`。
+结果：根测试 Legacy 5/5、Core 301/301、Web 242/242、Contracts 77/77、Domain 7/7；typecheck 与 build exit 0；完整 E2E 8/8、exit 0。lint 为 0 error、4 个未改动 v0.5 recovery 测试的既有 warning。新报告行尾、5 个 tracked package version=0.6.0、生产源码常见凭据字面量和 `next-env.d.ts` 基线均另行检查通过；migration 与两份不可变 FAIL review 均为 zero-diff。真实 Provider/network 保持 `NOT RUN — APPROVAL REQUIRED`。
 
 命令：
 

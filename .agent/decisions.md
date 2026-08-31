@@ -253,3 +253,17 @@ Vision、Public Search、Learning 的共享 capability-run claim 与 quota-exhau
 ### 理由与边界
 
 trace 已证明原 12:00–13:00 APPLY 被 Core 正确按冲突拒绝。修复只调整 E2E 输入，不改产品、Fake、validator、runner/config、60 分钟约束、Today 日期、lineage 或严格浏览器断言。后续共享页面同时保留 completed 与 pending proposal 时，以唯一 exact `采用安排` 按钮过滤当前 pending `article.daily-plan-review-card`，并在该 card 内保持 exact summary/button 断言；不使用位置选择器或放宽计数。focused v0.6 1/1、完整 E2E 8/8 均 PASS。
+
+## ADR-LT-010：artifact 删除用可恢复两阶段终结
+
+### 问题
+
+SQLite 的 `DELETE_PENDING` 与私有文件 unlink 不能跨资源原子提交；进程可在标记后或 unlink 后崩溃。
+
+### 采用方案
+
+启动时 Owner-safe 枚举精确 pending artifact，在 SQLite write transaction 外做根路径 containment 验证与 unlink；`ENOENT` 视为文件已缺席，随后用短 immediate transaction 按 owner/id/still-pending 精确终结。其他文件系统错误或不安全 storage key 保留 `DELETE_PENDING` 并记录可观察失败。
+
+### 边界
+
+不引入迁移、广泛目录删除或文件系统事务；重复删除保持幂等。

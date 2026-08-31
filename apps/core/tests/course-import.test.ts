@@ -1,12 +1,16 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
+import { createArtifactStore, type ArtifactStore } from '../src/modules/calendar/artifact-store';
+import { createCourseImportRepository } from '../src/modules/calendar/import-repository';
+import { createCourseImportService } from '../src/modules/calendar/import-service';
+import { createCalendarRepository } from '../src/modules/calendar/repository';
 import { createCapabilityRunRepository } from '../src/modules/providers/capability-run-repository';
-import type { VisionCapability } from '../src/modules/providers/capabilities';
+import { createCapabilityRegistry, type VisionCapability } from '../src/modules/providers/capabilities';
 import { openDatabase } from '../src/storage/database';
 
 const credentials = {
@@ -47,6 +51,11 @@ describe('v0.6 local course artifacts', () => {
     0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
   ]);
+
+  const validWebp = Buffer.from(
+    'UklGRgYCAABXRUJQVlA4WAoAAAAgAAAAAAAAAAAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDggGAAAADABAJ0BKgEAAQABQCYlpAADcAD+/PQAAA==',
+    'base64',
+  );
 
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'ev-v06-course-artifact-'));
@@ -121,7 +130,6 @@ describe('v0.6 local course artifacts', () => {
     app = await buildApp({ databasePath, artifactRoot: join(directory, 'artifacts'), logger: false });
     const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
     const token = readSessionToken(setup.headers['set-cookie']);
-    const validVp8x = webpChunk('VP8X', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     const malformed = [
       webpChunk('VP8X', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], { declaredRiffSize: 0 }),
       webpChunk('VP8X', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], { declaredChunkSize: 1 }),
@@ -131,7 +139,7 @@ describe('v0.6 local course artifacts', () => {
 
     const valid = await app.inject({
       method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
-      headers: { 'content-type': 'image/webp' }, payload: validVp8x,
+      headers: { 'content-type': 'image/webp' }, payload: validWebp,
     });
     const rejected = await Promise.all(malformed.map((payload) => app!.inject({
       method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
@@ -147,6 +155,206 @@ describe('v0.6 local course artifacts', () => {
     const database = openDatabase(databasePath);
     try {
       expect(database.prepare('select count(*) as count from local_artifacts').get()).toEqual({ count: 1 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rejects a VP8X-only WebP before persistence or any Vision call', async () => {
+    let providerCalls = 0;
+    const vision: VisionCapability = {
+      descriptor: { providerId: 'controlled-vision', providerLabel: '受控 Vision', adapterKind: 'PRODUCTION_ADAPTER' },
+      async extractCourseSchedule() {
+        providerCalls += 1;
+        return { candidates: [] };
+      },
+    };
+    const artifactRoot = join(directory, 'artifacts');
+    app = await buildApp({ databasePath, artifactRoot, visionCapability: vision, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const vp8xOnly = webpChunk('VP8X', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+    const uploaded = await app.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/webp' }, payload: vp8xOnly,
+    });
+
+    expect(uploaded.statusCode).toBe(422);
+    expect(uploaded.json().error).toMatchObject({ code: 'IMAGE_DIMENSIONS_INVALID' });
+    const database = openDatabase(databasePath);
+    try {
+      expect(database.prepare('select count(*) as count from local_artifacts').get()).toEqual({ count: 0 });
+    } finally {
+      database.close();
+    }
+    const artifactFiles = existsSync(artifactRoot)
+      ? readdirSync(artifactRoot, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile())
+      : [];
+    expect(artifactFiles).toHaveLength(0);
+    expect(providerCalls).toBe(0);
+  });
+
+  it('recovers DELETE_PENDING artifacts after crashes before and after unlink during startup', async () => {
+    const artifactRoot = join(directory, 'artifacts');
+    app = await buildApp({ databasePath, artifactRoot, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const beforeUnlink = await app.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/png' }, payload: validPng,
+    });
+    const afterUnlink = await app.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/png' }, payload: Buffer.concat([validPng, Buffer.from([1])]),
+    });
+    const pendingIds = [beforeUnlink.json().data.artifact.id, afterUnlink.json().data.artifact.id] as string[];
+    const database = openDatabase(databasePath);
+    let afterUnlinkPath = '';
+    try {
+      const owner = database.prepare('select id from owners').get() as { id: string };
+      const repository = createCourseImportRepository(database);
+      for (const artifactId of pendingIds) {
+        expect(repository.requestArtifactDelete(owner.id, artifactId, '2026-08-31T08:00:00.000Z')?.state).toBe('DELETE_PENDING');
+      }
+      const storageKey = repository.findArtifactStorageKey(owner.id, pendingIds[1]!);
+      if (!storageKey) throw new Error('second artifact storage key disappeared');
+      afterUnlinkPath = createArtifactStore(artifactRoot).resolveVerified(storageKey);
+      rmSync(afterUnlinkPath);
+    } finally {
+      database.close();
+    }
+    await app.close();
+    app = undefined;
+
+    app = await buildApp({ databasePath, artifactRoot, logger: false });
+    const recoveredDatabase = openDatabase(databasePath);
+    try {
+      expect(recoveredDatabase.prepare('select id, state, version from local_artifacts where id in (?, ?) order by id').all(...pendingIds))
+        .toEqual([...pendingIds].sort().map((id) => ({ id, state: 'DELETED', version: 3 })));
+      const storageRows = recoveredDatabase.prepare('select storage_key from local_artifacts where id in (?, ?)').all(...pendingIds) as Array<{ storage_key: string }>;
+      expect(storageRows.every((row) => !existsSync(createArtifactStore(artifactRoot).resolveVerified(row.storage_key)))).toBe(true);
+    } finally {
+      recoveredDatabase.close();
+    }
+    expect(existsSync(afterUnlinkPath)).toBe(false);
+    for (const artifactId of pendingIds) {
+      const firstRetry = await app.inject({ method: 'DELETE', url: `/v1/course-artifacts/${artifactId}`, cookies: { ev_session: token } });
+      const secondRetry = await app.inject({ method: 'DELETE', url: `/v1/course-artifacts/${artifactId}`, cookies: { ev_session: token } });
+      expect([firstRetry.statusCode, secondRetry.statusCode]).toEqual([204, 204]);
+    }
+  });
+
+  it('keeps unsafe and failed artifact removals pending and observable outside write transactions', async () => {
+    const artifactRoot = join(directory, 'artifacts');
+    app = await buildApp({ databasePath, artifactRoot, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const uploaded = await app.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/png' }, payload: validPng,
+    });
+    await app.close();
+    app = undefined;
+
+    const outsidePath = join(directory, 'outside-artifact.bin');
+    writeFileSync(outsidePath, 'must remain');
+    const database = openDatabase(databasePath);
+    try {
+      const owner = database.prepare('select id from owners').get() as { id: string };
+      const repository = createCourseImportRepository(database);
+      const uploadedId = uploaded.json().data.artifact.id as string;
+      expect(repository.requestArtifactDelete(owner.id, uploadedId, '2026-08-31T08:10:00.000Z')?.state).toBe('DELETE_PENDING');
+      repository.insertArtifact({
+        id: '00000000-0000-4000-8000-000000000991', ownerId: owner.id, kind: 'COURSE_SCHEDULE_IMAGE',
+        storageKey: `${owner.id}/unsafe\\outside-artifact.bin`, mediaType: 'image/png', byteSize: 24, width: 1, height: 1,
+        pixelCount: 1, sha256: 'a'.repeat(64), state: 'DELETE_PENDING', version: 2,
+        createdAt: '2026-08-31T08:00:00.000Z', deleteRequestedAt: '2026-08-31T08:10:00.000Z', deletedAt: null,
+      });
+      const realStore = createArtifactStore(artifactRoot);
+      const transactionStates: boolean[] = [];
+      const failingStore: ArtifactStore = {
+        ...realStore,
+        async remove(storageKey) {
+          transactionStates.push(database.inTransaction);
+          if (storageKey === repository.findArtifactStorageKey(owner.id, uploadedId)) {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          }
+          await realStore.remove(storageKey);
+        },
+      };
+      const service = createCourseImportService(
+        database,
+        createCalendarRepository(database),
+        artifactRoot,
+        createCapabilityRegistry({ dataRoot: directory }),
+        { repository, store: failingStore, now: () => new Date('2026-08-31T08:20:00.000Z') },
+      );
+
+      const recovery = await service.recoverPendingArtifactDeletes();
+
+      expect(recovery.recovered).toBe(0);
+      expect(recovery.failures.map((failure) => failure.artifactId).sort()).toEqual([
+        '00000000-0000-4000-8000-000000000991', uploadedId,
+      ].sort());
+      expect(transactionStates).toEqual([false, false]);
+      expect(database.prepare(`select id, state from local_artifacts where id in (?, ?) order by id`).all(uploadedId, '00000000-0000-4000-8000-000000000991'))
+        .toEqual([
+          { id: '00000000-0000-4000-8000-000000000991', state: 'DELETE_PENDING' },
+          { id: uploadedId, state: 'DELETE_PENDING' },
+        ].sort((left, right) => left.id.localeCompare(right.id)));
+      expect(existsSync(outsidePath)).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('terminalizes artifact deletion only for the exact Owner and still-pending row', async () => {
+    const artifactRoot = join(directory, 'artifacts');
+    app = await buildApp({ databasePath, artifactRoot, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const uploaded = await app.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/png' }, payload: validPng,
+    });
+    await app.close();
+    app = undefined;
+
+    const database = openDatabase(databasePath);
+    try {
+      const owner = database.prepare('select id from owners').get() as { id: string };
+      const foreignOwnerId = '00000000-0000-4000-8000-000000000992';
+      database.pragma('ignore_check_constraints = ON');
+      database.prepare('insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)')
+        .run(foreignOwnerId, 'artifact-recovery-foreign-owner', 'unused', '2026-08-31T08:00:00.000Z');
+      const repository = createCourseImportRepository(database);
+      const artifactId = uploaded.json().data.artifact.id as string;
+      expect(repository.requestArtifactDelete(owner.id, artifactId, '2026-08-31T08:10:00.000Z')?.state).toBe('DELETE_PENDING');
+      expect(repository.markArtifactDeleted(foreignOwnerId, artifactId, '2026-08-31T08:11:00.000Z')).toBeUndefined();
+      expect(repository.findArtifact(owner.id, artifactId)?.state).toBe('DELETE_PENDING');
+      const transactionStates: boolean[] = [];
+      const realStore = createArtifactStore(artifactRoot);
+      const observingStore: ArtifactStore = {
+        ...realStore,
+        async remove(storageKey) {
+          transactionStates.push(database.inTransaction);
+          await realStore.remove(storageKey);
+        },
+      };
+      const service = createCourseImportService(
+        database,
+        createCalendarRepository(database),
+        artifactRoot,
+        createCapabilityRegistry({ dataRoot: directory }),
+        { repository, store: observingStore, now: () => new Date('2026-08-31T08:20:00.000Z') },
+      );
+
+      expect(await service.recoverPendingArtifactDeletes()).toMatchObject({ recovered: 1, failures: [] });
+      expect(transactionStates).toEqual([false]);
+      expect(repository.findArtifact(owner.id, artifactId)).toMatchObject({ state: 'DELETED', version: 3 });
+      expect(repository.markArtifactDeleted(owner.id, artifactId, '2026-08-31T08:21:00.000Z')).toBeUndefined();
+      expect(repository.findArtifact(owner.id, artifactId)).toMatchObject({ state: 'DELETED', version: 3 });
     } finally {
       database.close();
     }
