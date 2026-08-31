@@ -12,6 +12,7 @@ import {
   nutritionFoodRecordSchema,
   nutritionSourceDescriptorSchema,
   canonicalDecimalSchema,
+  positiveCanonicalDecimalSchema,
   workoutFeedbackSchema,
   workoutRevisionSchema,
   workoutSafetyDecisionSchema,
@@ -182,9 +183,11 @@ describe('v0.7 health contracts', () => {
   });
 
   it('uses strict canonical decimals and source lineage for v2 nutrition', () => {
-    for (const invalid of ['+1', '-1', '1e3', '01', '1,5', '1.1234567']) {
+    for (const invalid of ['+1', '-1', '1e3', '01', '1,5', '1.1234567', '0.0', '0.000000', '1.0', '1.2300']) {
       expect(canonicalDecimalSchema.safeParse(invalid).success).toBe(false);
     }
+    for (const zero of ['0', '0.0', '0.000000']) expect(positiveCanonicalDecimalSchema.safeParse(zero).success).toBe(false);
+    expect(canonicalDecimalSchema.parse('999999.999999')).toBe('999999.999999');
     expect(canonicalDecimalSchema.parse('100.25')).toBe('100.25');
     const fixtureSource = {
       sourceKind: 'TEST_FIXTURE', sourceId: 'ev-v07-synthetic-foods', sourceVersion: '1', datasetHash: hash('f'), redistribution: false, licenseDecisionId: null,

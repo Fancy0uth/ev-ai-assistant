@@ -114,6 +114,92 @@ describe('v0.7 nutrition candidate and confirmation loop', () => {
     }
   });
 
+  it('rejects every non-canonical zero spelling at the route boundary', async () => {
+    for (const [index, quantityDecimal] of ['0', '0.0', '0.000000'].entries()) {
+      const response = await app!.inject({
+        method: 'POST', url: '/v1/nutrition/meal-drafts', cookies: { ev_session: session },
+        headers: { 'idempotency-key': `v07-zero-spelling-route-${index}` },
+        payload: { mode: 'MANUAL', localDate: `2026-09-${20 + index}`, candidates: [{ displayName: 'Synthetic zero', quantityDecimal, unit: 'GRAM' }] },
+      });
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    }
+  });
+
+  it('maps maximum product and total overflow to terminal 422 without creating a Meal', async () => {
+    const source = { sourceKind: 'TEST_FIXTURE', sourceId: 'ev-v07-decimal-range', sourceVersion: '1', datasetHash: 'd'.repeat(64), redistribution: false, licenseDecisionId: null } as const;
+    const provider: NutritionDataProvider = {
+      descriptor: { providerId: 'v07-decimal-range', providerLabel: 'Synthetic decimal range fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
+      async searchBatch(input) {
+        return {
+          groups: input.queries.map((query) => {
+            const maximumProduct = query.query === 'Maximum Product';
+            const withoutHash = {
+              schemaVersion: 'NUTRITION_RECORD_V1' as const,
+              source,
+              recordId: `decimal-${query.candidateId}`,
+              displayName: query.query,
+              serving: { quantityDecimal: maximumProduct ? '0.000001' : '1', unit: query.unit },
+              nutrientsPerServing: { energyKcalDecimal: '999999.999999', proteinGramsDecimal: '0', carbohydrateGramsDecimal: '0', fatGramsDecimal: '0' },
+            };
+            return { candidateId: query.candidateId, records: [{ ...withoutHash, recordHash: createHash('sha256').update(canonicalJson(withoutHash)).digest('hex') }] };
+          }),
+        };
+      },
+    };
+    await app!.close();
+    app = await buildApp({
+      databasePath: join(directory, 'app.sqlite'), artifactRoot: join(directory, 'artifacts'), logger: false,
+      nutritionDataProvider: provider,
+      v07TestAdapterGate: { nodeEnv: 'test', enabled: true, runnerDataRoot: directory },
+    });
+
+    const confirmOverflow = async (suffix: string, localDate: string, candidates: Array<{ displayName: string; quantityDecimal: string; unit: 'GRAM' }>) => {
+      const draftResponse = await app!.inject({
+        method: 'POST', url: '/v1/nutrition/meal-drafts', cookies: { ev_session: session },
+        headers: { 'idempotency-key': `v07-decimal-draft-${suffix}` }, payload: { mode: 'MANUAL', localDate, candidates },
+      });
+      expect(draftResponse.statusCode).toBe(201);
+      const draft = draftResponse.json().data;
+      const matchResponse = await app!.inject({
+        method: 'POST', url: `/v1/nutrition/meal-drafts/${draft.draft.id}/matches`, cookies: { ev_session: session },
+        headers: { 'idempotency-key': `v07-decimal-match-${suffix}` }, payload: { expectedVersion: draft.draft.version, revisionId: draft.revision.id },
+      });
+      expect(matchResponse.statusCode).toBe(202);
+      const matched = matchResponse.json().data;
+      const selectionResponse = await app!.inject({
+        method: 'POST', url: `/v1/nutrition/meal-drafts/${draft.draft.id}/revisions`, cookies: { ev_session: session },
+        headers: { 'idempotency-key': `v07-decimal-select-${suffix}` },
+        payload: {
+          expectedVersion: matched.draft.version, parentRevisionId: matched.revision.id, operation: 'SELECT_MATCHES',
+          candidates: matched.revision.candidates.map((candidate: { candidateId: string }, index: number) => ({ candidateId: candidate.candidateId, included: true, selectedFoodSnapshotId: matched.matches[index].snapshots[0].id })),
+        },
+      });
+      expect(selectionResponse.statusCode).toBe(201);
+      const selected = selectionResponse.json().data;
+      return app!.inject({
+        method: 'POST', url: `/v1/nutrition/meal-drafts/${draft.draft.id}/confirm`, cookies: { ev_session: session },
+        headers: { 'idempotency-key': `v07-decimal-confirm-${suffix}` }, payload: { expectedVersion: selected.draft.version, revisionId: selected.revision.id },
+      });
+    };
+
+    const product = await confirmOverflow('product-01', '2026-09-23', [{ displayName: 'Maximum Product', quantityDecimal: '999999.999999', unit: 'GRAM' }]);
+    expect(product.statusCode).toBe(422);
+    expect(product.json()).toMatchObject({ error: { code: 'DECIMAL_OUT_OF_RANGE' } });
+    const total = await confirmOverflow('total-0001', '2026-09-24', [
+      { displayName: 'Maximum Total A', quantityDecimal: '1', unit: 'GRAM' },
+      { displayName: 'Maximum Total B', quantityDecimal: '1', unit: 'GRAM' },
+    ]);
+    expect(total.statusCode).toBe(422);
+    expect(total.json()).toMatchObject({ error: { code: 'DECIMAL_OUT_OF_RANGE' } });
+    const database = openDatabase(join(directory, 'app.sqlite'));
+    try {
+      expect(database.prepare('select count(*) as count from meals_v2').get()).toEqual({ count: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
   it('rejects parser output that attempts to attach nutrient values', async () => {
     await expect(executeMealCandidateParse(
       { schemaVersion: 'MEAL_CANDIDATE_PARSE_V1', mealText: 'fixture', allowedUnits: ['GRAM', 'MILLILITER', 'ITEM'], maxCandidates: 30 },

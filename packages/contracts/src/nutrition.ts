@@ -2,8 +2,15 @@ import * as z from 'zod';
 import { localDateSchema } from './tasks';
 
 export const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
-export const canonicalDecimalSchema = z.string().regex(/^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/);
-export const positiveCanonicalDecimalSchema = canonicalDecimalSchema.refine((value) => value !== '0', '必须大于零');
+export const canonicalDecimalPattern = /^(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{0,5}[1-9])?$/;
+export const canonicalDecimalSchema = z.string().regex(canonicalDecimalPattern);
+
+function canonicalDecimalMicros(value: string): bigint {
+  const [integerPart, fractionalPart = ''] = value.split('.');
+  return BigInt(integerPart!) * 1_000_000n + BigInt(fractionalPart.padEnd(6, '0') || '0');
+}
+
+export const positiveCanonicalDecimalSchema = canonicalDecimalSchema.refine((value) => canonicalDecimalMicros(value) > 0n, '必须大于零');
 export const servingUnitSchema = z.enum(['GRAM', 'MILLILITER', 'ITEM']);
 
 const paginationSchema = z.object({

@@ -76,5 +76,12 @@ describe('v0.7 deterministic health domain policy', () => {
       { energyKcalDecimal: '0.333333', proteinGramsDecimal: '0.333333', carbohydrateGramsDecimal: '0.333333', fatGramsDecimal: '0.333333' },
       { energyKcalDecimal: '0.666667', proteinGramsDecimal: '0.666667', carbohydrateGramsDecimal: '0.666667', fatGramsDecimal: '0.666667' },
     ])).toEqual({ energyKcalDecimal: '1', proteinGramsDecimal: '1', carbohydrateGramsDecimal: '1', fatGramsDecimal: '1' });
+    for (const invalid of ['0.0', '0.000000', '1.0', '1.2300']) expect(() => parseCanonicalDecimalToMicros(invalid)).toThrow('DECIMAL_NON_CANONICAL');
+    expect(() => formatCanonicalDecimalFromMicros(1_000_000_000_000n)).toThrow('DECIMAL_OUT_OF_RANGE');
+    expect(() => scaleNutrientV1('999999.999999', '999999.999999', '0.000001')).toThrow('DECIMAL_OUT_OF_RANGE');
+    expect(() => calculateMealTotalsV1([
+      { energyKcalDecimal: '999999.999999', proteinGramsDecimal: '0', carbohydrateGramsDecimal: '0', fatGramsDecimal: '0' },
+      { energyKcalDecimal: '0.000001', proteinGramsDecimal: '0', carbohydrateGramsDecimal: '0', fatGramsDecimal: '0' },
+    ])).toThrow('DECIMAL_OUT_OF_RANGE');
   });
 });

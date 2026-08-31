@@ -319,6 +319,7 @@ export function createNutritionService(database: Database.Database, options: Nut
         } catch (error) {
           if (error instanceof MealDraftStateConflictError) throw new ApiError(409, 'VERSION_CONFLICT', '餐食草稿版本已变化');
           if (error instanceof MealConfirmationError) throw new ApiError(422, error.code, error.code === 'UNIT_MISMATCH' ? '候选份量单位与来源记录不一致' : '餐食匹配尚不完整');
+          if (error instanceof RangeError) throw new ApiError(422, 'DECIMAL_OUT_OF_RANGE', '营养数值超出支持范围');
           throw error;
         }
       }));

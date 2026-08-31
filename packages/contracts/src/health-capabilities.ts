@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { servingUnitSchema } from './nutrition';
+import { positiveCanonicalDecimalSchema, servingUnitSchema } from './nutrition';
 
 export const healthCapabilityKindSchema = z.enum(['WORKOUT_TEXT_SELECTION', 'MEAL_CANDIDATE_PARSE', 'NUTRITION_DATA_LOOKUP']);
 export const healthAdapterKindSchema = z.enum(['NONE', 'TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'PRODUCTION_ADAPTER']);
@@ -79,7 +79,7 @@ export const mealCandidateParseOutputSchema = z.object({
   schemaVersion: z.literal('MEAL_CANDIDATE_PARSE_V1'),
   candidates: z.array(z.object({
     displayName: z.string().trim().min(1).max(120),
-    quantityDecimal: z.string().regex(/^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/).refine((value) => value !== '0'),
+    quantityDecimal: positiveCanonicalDecimalSchema,
     unit: servingUnitSchema,
   }).strict()).min(1).max(30).superRefine((candidates, context) => {
     const keys = candidates.map((candidate) => `${candidate.displayName.toLocaleLowerCase('en-US')}\n${candidate.quantityDecimal}\n${candidate.unit}`);
