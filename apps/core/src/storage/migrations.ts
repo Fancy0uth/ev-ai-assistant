@@ -1185,6 +1185,328 @@ const migrations: readonly Migration[] = [
       create trigger audit_events_immutable_delete before delete on audit_events begin select raise(abort, 'audit events are immutable'); end;
     `,
   },
+  {
+    version: 20,
+    name: 'add_v07_fitness_nutrition_loop',
+    sql: `
+      create table fitness_check_ins_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        local_date text not null,
+        sleep_minutes integer not null check (sleep_minutes between 0 and 1440),
+        energy_level integer not null check (energy_level between 1 and 5),
+        discomfort_level integer not null check (discomfort_level between 0 and 5),
+        has_pain integer not null check (has_pain in (0, 1)),
+        acute_risk integer not null check (acute_risk in (0, 1)),
+        signal_id text not null references signals(id),
+        recovery_json text not null check (json_valid(recovery_json)),
+        safety_json text not null check (json_valid(safety_json)),
+        policy_version text not null check (policy_version = 'WORKOUT_SAFETY_V1'),
+        version integer not null check (version = 1),
+        created_at text not null,
+        unique (owner_id, signal_id)
+      );
+      create index fitness_check_ins_v2_owner_date_idx on fitness_check_ins_v2(owner_id, local_date desc, created_at desc, id);
+      create index fitness_check_ins_v2_owner_safety_idx on fitness_check_ins_v2(owner_id, has_pain, acute_risk, id);
+
+      create table workouts_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        check_in_id text not null references fitness_check_ins_v2(id),
+        signal_id text not null references signals(id),
+        generation_mode text not null check (generation_mode in ('MANUAL', 'ASSISTED')),
+        state text not null check (state in ('DRAFT', 'PROPOSAL_PENDING', 'ACCEPTED', 'REJECTED', 'COMPLETED', 'SKIPPED')),
+        current_revision_id text,
+        proposal_id text references proposals(id),
+        action_id text references actions(id),
+        time_request_id text references time_requests(id),
+        feedback_id text,
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        check (
+          (state = 'DRAFT' and proposal_id is null and action_id is null and time_request_id is null and feedback_id is null)
+          or (state = 'PROPOSAL_PENDING' and proposal_id is not null and action_id is null and time_request_id is null and feedback_id is null)
+          or (state = 'ACCEPTED' and proposal_id is not null and action_id is not null and time_request_id is not null and feedback_id is null)
+          or (state = 'REJECTED' and proposal_id is not null and action_id is null and time_request_id is null and feedback_id is null)
+          or (state in ('COMPLETED', 'SKIPPED') and proposal_id is not null and action_id is not null and time_request_id is not null and feedback_id is not null)
+        )
+      );
+      create index workouts_v2_owner_updated_idx on workouts_v2(owner_id, updated_at desc, id);
+      create index workouts_v2_owner_state_idx on workouts_v2(owner_id, state, updated_at desc, id);
+      create index workouts_v2_owner_check_in_idx on workouts_v2(owner_id, check_in_id, id);
+
+      create table workout_revisions_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        workout_id text not null references workouts_v2(id) on delete cascade,
+        parent_revision_id text references workout_revisions_v2(id) on delete restrict,
+        revision_no integer not null check (revision_no >= 1),
+        title text not null check (length(trim(title)) between 1 and 200),
+        rationale text not null check (length(trim(rationale)) between 1 and 1000),
+        plan_json text not null check (json_valid(plan_json)),
+        catalog_id text not null check (length(catalog_id) between 1 and 120),
+        catalog_version text not null check (length(catalog_version) between 1 and 120),
+        catalog_hash text not null check (length(catalog_hash) = 64),
+        content_hash text not null check (length(content_hash) = 64),
+        created_by text not null check (created_by in ('RULES', 'OWNER', 'MODEL')),
+        capability_run_id text,
+        created_at text not null,
+        unique (workout_id, revision_no)
+      );
+      create index workout_revisions_v2_owner_workout_idx on workout_revisions_v2(owner_id, workout_id, revision_no desc, id);
+
+      create table workout_revision_citations_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        revision_id text not null references workout_revisions_v2(id) on delete cascade,
+        citation_id text not null check (length(citation_id) = 64),
+        position integer not null check (position >= 0),
+        catalog_id text not null check (length(catalog_id) between 1 and 120),
+        catalog_version text not null check (length(catalog_version) between 1 and 120),
+        catalog_hash text not null check (length(catalog_hash) = 64),
+        exercise_id text not null check (length(exercise_id) between 1 and 120),
+        item_hash text not null check (length(item_hash) = 64),
+        source_kind text not null check (source_kind = 'FIRST_PARTY_INTERNAL'),
+        redistribution integer not null check (redistribution = 0),
+        created_at text not null,
+        unique (revision_id, citation_id),
+        unique (revision_id, position)
+      );
+      create index workout_revision_citations_v2_owner_revision_idx on workout_revision_citations_v2(owner_id, revision_id, position);
+
+      create table workout_actions_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        workout_id text not null references workouts_v2(id) on delete cascade,
+        revision_id text not null references workout_revisions_v2(id) on delete restrict,
+        action_id text not null references actions(id) on delete restrict,
+        created_at text not null,
+        unique (workout_id),
+        unique (action_id)
+      );
+      create index workout_actions_v2_owner_workout_idx on workout_actions_v2(owner_id, workout_id);
+
+      create table workout_feedback_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        workout_id text not null references workouts_v2(id) on delete cascade,
+        action_id text not null references actions(id) on delete restrict,
+        outcome text not null check (outcome in ('COMPLETED', 'SKIPPED')),
+        perceived_effort integer check (perceived_effort is null or perceived_effort between 1 and 10),
+        had_pain integer not null check (had_pain in (0, 1)),
+        note text check (note is null or length(note) <= 500),
+        started_at text,
+        ended_at text,
+        activity_session_id text references activity_sessions(id) on delete restrict,
+        created_at text not null,
+        check (
+          (outcome = 'COMPLETED' and started_at is not null and ended_at is not null and ended_at > started_at and activity_session_id is not null)
+          or (outcome = 'SKIPPED' and started_at is null and ended_at is null and perceived_effort is null and activity_session_id is null)
+        ),
+        unique (workout_id)
+      );
+      create index workout_feedback_v2_owner_created_idx on workout_feedback_v2(owner_id, created_at desc, id);
+
+      create table meal_drafts_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        local_date text not null,
+        mode text not null check (mode in ('MANUAL', 'PARSE_TEXT')),
+        original_text text check (original_text is null or length(original_text) between 1 and 1000),
+        state text not null check (state in ('CANDIDATES_READY', 'MATCHES_READY', 'CONFIRMED')),
+        current_revision_id text,
+        confirmed_meal_id text,
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        check ((state = 'CONFIRMED' and confirmed_meal_id is not null) or (state != 'CONFIRMED' and confirmed_meal_id is null))
+      );
+      create index meal_drafts_v2_owner_updated_idx on meal_drafts_v2(owner_id, updated_at desc, id);
+      create index meal_drafts_v2_owner_state_idx on meal_drafts_v2(owner_id, state, updated_at desc, id);
+      create index meal_drafts_v2_owner_date_idx on meal_drafts_v2(owner_id, local_date desc, id);
+
+      create table meal_revisions_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        draft_id text not null references meal_drafts_v2(id) on delete cascade,
+        parent_revision_id text references meal_revisions_v2(id) on delete restrict,
+        revision_no integer not null check (revision_no >= 1),
+        candidates_json text not null check (json_valid(candidates_json)),
+        content_hash text not null check (length(content_hash) = 64),
+        created_by text not null check (created_by in ('PARSER', 'OWNER', 'DATA_PROVIDER')),
+        capability_run_id text,
+        created_at text not null,
+        unique (draft_id, revision_no)
+      );
+      create index meal_revisions_v2_owner_draft_idx on meal_revisions_v2(owner_id, draft_id, revision_no desc, id);
+
+      create table nutrition_source_snapshots_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        source_kind text not null check (source_kind in ('TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'REMOTE_API')),
+        source_id text not null check (length(source_id) between 1 and 120),
+        source_version text not null check (length(source_version) between 1 and 120),
+        dataset_hash text not null check (length(dataset_hash) = 64),
+        redistribution integer not null check (redistribution in (0, 1)),
+        license_decision_id text,
+        adapter_kind text not null check (adapter_kind in ('TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'PRODUCTION_ADAPTER')),
+        evidence_kind text not null check (evidence_kind in ('AUTOMATED_TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'REAL_PROVIDER')),
+        created_at text not null,
+        check ((source_kind = 'TEST_FIXTURE' and redistribution = 0 and license_decision_id is null) or (source_kind != 'TEST_FIXTURE' and license_decision_id is not null)),
+        unique (owner_id, source_kind, source_id, source_version, dataset_hash)
+      );
+      create index nutrition_source_snapshots_v2_owner_created_idx on nutrition_source_snapshots_v2(owner_id, created_at desc, id);
+
+      create table nutrition_food_snapshots_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        draft_id text not null references meal_drafts_v2(id) on delete cascade,
+        candidate_id text not null,
+        source_snapshot_id text not null references nutrition_source_snapshots_v2(id) on delete restrict,
+        record_id text not null check (length(record_id) between 1 and 200),
+        record_hash text not null check (length(record_hash) = 64),
+        display_name text not null check (length(trim(display_name)) between 1 and 120),
+        serving_quantity_decimal text not null check (typeof(serving_quantity_decimal) = 'text' and length(serving_quantity_decimal) between 1 and 13 and serving_quantity_decimal not glob '*[^0-9.]*' and serving_quantity_decimal not like '%..%'),
+        serving_unit text not null check (serving_unit in ('GRAM', 'MILLILITER', 'ITEM')),
+        energy_kcal_decimal text not null check (typeof(energy_kcal_decimal) = 'text' and length(energy_kcal_decimal) between 1 and 13 and energy_kcal_decimal not glob '*[^0-9.]*'),
+        protein_grams_decimal text not null check (typeof(protein_grams_decimal) = 'text' and length(protein_grams_decimal) between 1 and 13 and protein_grams_decimal not glob '*[^0-9.]*'),
+        carbohydrate_grams_decimal text not null check (typeof(carbohydrate_grams_decimal) = 'text' and length(carbohydrate_grams_decimal) between 1 and 13 and carbohydrate_grams_decimal not glob '*[^0-9.]*'),
+        fat_grams_decimal text not null check (typeof(fat_grams_decimal) = 'text' and length(fat_grams_decimal) between 1 and 13 and fat_grams_decimal not glob '*[^0-9.]*'),
+        capability_run_id text,
+        created_at text not null,
+        unique (owner_id, draft_id, candidate_id, source_snapshot_id, record_id, record_hash)
+      );
+      create index nutrition_food_snapshots_v2_owner_draft_candidate_idx on nutrition_food_snapshots_v2(owner_id, draft_id, candidate_id, id);
+
+      create table meals_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        draft_id text not null references meal_drafts_v2(id) on delete restrict,
+        local_date text not null,
+        energy_kcal_decimal text not null check (typeof(energy_kcal_decimal) = 'text' and length(energy_kcal_decimal) between 1 and 13 and energy_kcal_decimal not glob '*[^0-9.]*'),
+        protein_grams_decimal text not null check (typeof(protein_grams_decimal) = 'text' and length(protein_grams_decimal) between 1 and 13 and protein_grams_decimal not glob '*[^0-9.]*'),
+        carbohydrate_grams_decimal text not null check (typeof(carbohydrate_grams_decimal) = 'text' and length(carbohydrate_grams_decimal) between 1 and 13 and carbohydrate_grams_decimal not glob '*[^0-9.]*'),
+        fat_grams_decimal text not null check (typeof(fat_grams_decimal) = 'text' and length(fat_grams_decimal) between 1 and 13 and fat_grams_decimal not glob '*[^0-9.]*'),
+        calculation_version text not null check (calculation_version = 'DECIMAL_MICRO_V1'),
+        version integer not null check (version = 1),
+        created_at text not null,
+        unique (draft_id)
+      );
+      create index meals_v2_owner_date_idx on meals_v2(owner_id, local_date desc, created_at desc, id);
+
+      create table meal_entries_v2 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        meal_id text not null references meals_v2(id) on delete cascade,
+        meal_revision_id text not null references meal_revisions_v2(id) on delete restrict,
+        candidate_id text not null,
+        food_snapshot_id text not null references nutrition_food_snapshots_v2(id) on delete restrict,
+        display_name text not null check (length(trim(display_name)) between 1 and 120),
+        quantity_decimal text not null check (typeof(quantity_decimal) = 'text' and length(quantity_decimal) between 1 and 13 and quantity_decimal not glob '*[^0-9.]*'),
+        unit text not null check (unit in ('GRAM', 'MILLILITER', 'ITEM')),
+        energy_kcal_decimal text not null check (typeof(energy_kcal_decimal) = 'text' and length(energy_kcal_decimal) between 1 and 13 and energy_kcal_decimal not glob '*[^0-9.]*'),
+        protein_grams_decimal text not null check (typeof(protein_grams_decimal) = 'text' and length(protein_grams_decimal) between 1 and 13 and protein_grams_decimal not glob '*[^0-9.]*'),
+        carbohydrate_grams_decimal text not null check (typeof(carbohydrate_grams_decimal) = 'text' and length(carbohydrate_grams_decimal) between 1 and 13 and carbohydrate_grams_decimal not glob '*[^0-9.]*'),
+        fat_grams_decimal text not null check (typeof(fat_grams_decimal) = 'text' and length(fat_grams_decimal) between 1 and 13 and fat_grams_decimal not glob '*[^0-9.]*'),
+        created_at text not null,
+        unique (meal_id, candidate_id)
+      );
+      create index meal_entries_v2_owner_meal_idx on meal_entries_v2(owner_id, meal_id, id);
+
+      create table v07_idempotency_records (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        idempotency_key text not null,
+        operation text not null check (operation in (
+          'fitness.check_in.create', 'fitness.workout.create', 'fitness.workout.revise',
+          'fitness.workout.propose', 'fitness.workout.feedback', 'nutrition.meal_draft.create',
+          'nutrition.meal_draft.revise', 'nutrition.meal_draft.match', 'nutrition.meal.confirm'
+        )),
+        resource_id text not null,
+        request_hash text not null check (length(request_hash) = 64),
+        state text not null check (state in ('CLAIMED', 'SUCCEEDED', 'FAILED')),
+        lease_token text,
+        lease_expires_at text,
+        response_status integer check (response_status is null or response_status between 200 and 599),
+        response_json text check (response_json is null or json_valid(response_json)),
+        created_at text not null,
+        updated_at text not null,
+        unique (owner_id, idempotency_key)
+      );
+      create index v07_idempotency_records_owner_state_idx on v07_idempotency_records(owner_id, state, updated_at desc, id);
+
+      create table v07_capability_runs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        capability text not null check (capability in ('WORKOUT_TEXT_SELECTION', 'MEAL_CANDIDATE_PARSE', 'NUTRITION_DATA_LOOKUP')),
+        operation text not null check (length(operation) between 1 and 120),
+        resource_id text not null,
+        provider_id text,
+        provider_label text not null check (length(provider_label) between 1 and 120),
+        adapter_kind text not null check (adapter_kind in ('NONE', 'TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'PRODUCTION_ADAPTER')),
+        evidence_kind text not null check (evidence_kind in ('NONE', 'AUTOMATED_TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'REAL_PROVIDER')),
+        disclosure_json text not null check (json_valid(disclosure_json)),
+        disclosure_version text not null check (disclosure_version = 'HEALTH_DISCLOSURE_V1'),
+        idempotency_key text,
+        request_hash text check (request_hash is null or length(request_hash) = 64),
+        state text not null check (state in ('BLOCKED_PROVIDER', 'AWAITING_DISCLOSURE', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+        lease_token text,
+        lease_expires_at text,
+        deadline_at text,
+        policy_version text not null check (policy_version = 'HEALTH_CAPABILITY_POLICY_V1'),
+        local_date text not null,
+        reserved_calls integer not null default 0 check (reserved_calls between 0 and 5),
+        actual_calls integer not null default 0 check (actual_calls between 0 and 5),
+        input_bytes integer not null default 0 check (input_bytes between 0 and 24000),
+        output_bytes integer not null default 0 check (output_bytes between 0 and 12000),
+        failure_code text,
+        nutrition_source_version text,
+        nutrition_dataset_hash text check (nutrition_dataset_hash is null or length(nutrition_dataset_hash) = 64),
+        app_version text not null check (length(app_version) between 5 and 64),
+        created_at text not null,
+        updated_at text not null,
+        version integer not null check (version >= 1)
+      );
+      create unique index v07_capability_runs_owner_idempotency_idx on v07_capability_runs(owner_id, idempotency_key) where idempotency_key is not null;
+      create index v07_capability_runs_owner_date_capability_idx on v07_capability_runs(owner_id, local_date, capability, state, created_at);
+
+      create table v07_audit_events (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        event_type text not null check (length(event_type) between 1 and 120),
+        entity_type text not null check (length(entity_type) between 1 and 120),
+        entity_id text not null,
+        entity_version integer not null check (entity_version >= 1),
+        metadata_json text not null check (json_valid(metadata_json)),
+        created_at text not null
+      );
+      create index v07_audit_events_owner_entity_idx on v07_audit_events(owner_id, entity_type, entity_id, created_at desc, id);
+
+      create trigger fitness_check_ins_v2_immutable_update before update on fitness_check_ins_v2 begin select raise(abort, 'fitness check-ins are immutable'); end;
+      create trigger fitness_check_ins_v2_immutable_delete before delete on fitness_check_ins_v2 begin select raise(abort, 'fitness check-ins are immutable'); end;
+      create trigger workout_revisions_v2_immutable_update before update on workout_revisions_v2 begin select raise(abort, 'workout revisions are immutable'); end;
+      create trigger workout_revisions_v2_immutable_delete before delete on workout_revisions_v2 begin select raise(abort, 'workout revisions are immutable'); end;
+      create trigger workout_revision_citations_v2_immutable_update before update on workout_revision_citations_v2 begin select raise(abort, 'workout citations are immutable'); end;
+      create trigger workout_revision_citations_v2_immutable_delete before delete on workout_revision_citations_v2 begin select raise(abort, 'workout citations are immutable'); end;
+      create trigger workout_actions_v2_immutable_update before update on workout_actions_v2 begin select raise(abort, 'workout action links are immutable'); end;
+      create trigger workout_actions_v2_immutable_delete before delete on workout_actions_v2 begin select raise(abort, 'workout action links are immutable'); end;
+      create trigger workout_feedback_v2_immutable_update before update on workout_feedback_v2 begin select raise(abort, 'workout feedback is immutable'); end;
+      create trigger workout_feedback_v2_immutable_delete before delete on workout_feedback_v2 begin select raise(abort, 'workout feedback is immutable'); end;
+      create trigger meal_revisions_v2_immutable_update before update on meal_revisions_v2 begin select raise(abort, 'meal revisions are immutable'); end;
+      create trigger meal_revisions_v2_immutable_delete before delete on meal_revisions_v2 begin select raise(abort, 'meal revisions are immutable'); end;
+      create trigger nutrition_source_snapshots_v2_immutable_update before update on nutrition_source_snapshots_v2 begin select raise(abort, 'nutrition sources are immutable'); end;
+      create trigger nutrition_source_snapshots_v2_immutable_delete before delete on nutrition_source_snapshots_v2 begin select raise(abort, 'nutrition sources are immutable'); end;
+      create trigger nutrition_food_snapshots_v2_immutable_update before update on nutrition_food_snapshots_v2 begin select raise(abort, 'nutrition food snapshots are immutable'); end;
+      create trigger nutrition_food_snapshots_v2_immutable_delete before delete on nutrition_food_snapshots_v2 begin select raise(abort, 'nutrition food snapshots are immutable'); end;
+      create trigger meals_v2_immutable_update before update on meals_v2 begin select raise(abort, 'meals are immutable'); end;
+      create trigger meals_v2_immutable_delete before delete on meals_v2 begin select raise(abort, 'meals are immutable'); end;
+      create trigger meal_entries_v2_immutable_update before update on meal_entries_v2 begin select raise(abort, 'meal entries are immutable'); end;
+      create trigger meal_entries_v2_immutable_delete before delete on meal_entries_v2 begin select raise(abort, 'meal entries are immutable'); end;
+      create trigger v07_audit_events_immutable_update before update on v07_audit_events begin select raise(abort, 'v07 audit events are immutable'); end;
+      create trigger v07_audit_events_immutable_delete before delete on v07_audit_events begin select raise(abort, 'v07 audit events are immutable'); end;
+    `,
+  },
 ];
 
 export function runMigrations(
