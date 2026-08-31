@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { LocalArtifact } from '@ev/contracts';
+import sharp from 'sharp';
 
 const MAX_DIMENSION = 12_000;
 const MAX_PIXELS = 40_000_000;
@@ -135,10 +136,18 @@ function webpDimensions(bytes: Uint8Array): { width: number; height: number } | 
   return canvasDimensions;
 }
 
-export function readImageMetadata(
+async function verifyWebpPixels(image: Uint8Array): Promise<void> {
+  try {
+    await sharp(image, { failOn: 'error', limitInputPixels: MAX_PIXELS }).stats();
+  } catch {
+    throw new ImageMetadataError('IMAGE_DIMENSIONS_INVALID');
+  }
+}
+
+export async function readImageMetadata(
   image: Uint8Array,
   declaredMediaType: LocalArtifact['mediaType'],
-): Pick<LocalArtifact, 'mediaType' | 'byteSize' | 'width' | 'height' | 'pixelCount' | 'sha256'> {
+): Promise<Pick<LocalArtifact, 'mediaType' | 'byteSize' | 'width' | 'height' | 'pixelCount' | 'sha256'>> {
   const actual: LocalArtifact['mediaType'] | undefined = equalAt(image, 0, [0x89, 0x50, 0x4e, 0x47])
     ? 'image/png'
     : equalAt(image, 0, [0xff, 0xd8])
@@ -158,6 +167,7 @@ export function readImageMetadata(
   }
   const pixelCount = dimensions.width * dimensions.height;
   if (!Number.isSafeInteger(pixelCount) || pixelCount > MAX_PIXELS) throw new ImageMetadataError('IMAGE_PIXEL_LIMIT_EXCEEDED');
+  if (actual === 'image/webp') await verifyWebpPixels(image);
   return {
     mediaType: actual,
     byteSize: image.byteLength,

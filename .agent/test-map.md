@@ -133,6 +133,23 @@ git diff --exit-code -- docs/reviews/2026-08-23-v0.6-sol-smoke-review.md
 
 ## check_full
 
+## v0.6 Sol rereview-2 WebP VP8/VP8L decodability P1 repair
+
+```powershell
+npm test --workspace @ev/core -- tests/course-import.test.ts -t "rejects exact-size VP8 and VP8L frame headers before persistence or any Vision call"
+npm test --workspace @ev/core -- tests/course-import.test.ts
+npm test --workspace @ev/core
+npm run typecheck --workspace @ev/core
+npx eslint apps/core/src/modules/calendar/image-metadata.ts apps/core/src/modules/calendar/import-service.ts apps/core/tests/course-import.test.ts
+npm test
+git diff --check
+git diff --exit-code -- apps/core/src/storage/migrations.ts docs/reviews/2026-08-23-v0.6-sol-smoke-review.md docs/reviews/2026-08-31-v0.6-sol-rereview.md docs/reviews/2026-08-31-v0.6-sol-rereview-2.md
+npm install --package-lock-only --offline --ignore-scripts --workspace @ev/core --dry-run
+npm ls sharp --workspace @ev/core --depth=0
+```
+
+结果：RED 确认 exact-size header-only VP8 与 VP8L 均错误返回 201；GREEN 后 focused course-import 14/14、Core 45 files/303、Core typecheck、focused ESLint 和 root `npm test` 均 exit 0。负例断言 422、零 artifact rows/files 和零 Vision calls；离线固定 VP8/VP8L 正例先经 `sharp(...).stats()` 完整解码，再验证 201 和 2×3 metadata。主 Agent 另用 Chromium `createImageBitmap()` 独立解码两个正例为 2×3；根测试最终为 legacy 5/5、Core 303/303、Web 242/242、Contracts 77/77、Domain 7/7，全仓 typecheck/build 通过，lint 0 error/4 个既有 warning，完整 E2E 8/8。`git diff --check`、migrations 与三份 immutable FAIL review zero-diff；offline manifest/lockfile/installed tree 一致为 direct exact `sharp@0.35.3`。真实 Provider/network 保持 `NOT RUN — APPROVAL REQUIRED`。
+
 ## v0.6 Sol rereview 三个 P1 Terra 修复证据
 
 ```powershell

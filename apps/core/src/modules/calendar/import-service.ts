@@ -72,7 +72,7 @@ export function createCourseImportService(
     async uploadArtifact(ownerId, mediaType, bytes) {
       if (bytes.byteLength > MAX_IMAGE_BYTES) throw new ApiError(413, 'IMAGE_TOO_LARGE', '课表截图不能超过 5 MB');
       let metadata: Pick<LocalArtifact, 'mediaType' | 'byteSize' | 'width' | 'height' | 'pixelCount' | 'sha256'>;
-      try { metadata = readImageMetadata(bytes, mediaType); } catch (error) { return metadataError(error); }
+      try { metadata = await readImageMetadata(bytes, mediaType); } catch (error) { return metadataError(error); }
       const replay = repository.findActiveArtifactByHash(ownerId, metadata.sha256);
       if (replay) return { artifact: replay, deduplicated: true };
       let written: { storageKey: string };

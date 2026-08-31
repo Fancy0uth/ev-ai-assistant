@@ -10,7 +10,7 @@ M1 / v0.6：课程、课表截图与学习排程闭环。
 
 ## 当前任务
 
-v0.6 Sol rereview 的 WebP integrity、crash-safe artifact deletion recovery 与 browser semantic idempotency 三个 P1 已完成 Terra 定点修复。主 Agent 已独立完成代码复核、全套单元/集成测试、typecheck、lint、build、完整 E2E 8/8 与静态完整性检查；当前等待原子提交与 Sol 整版复审。
+v0.6 Sol rereview-2 的唯一 P1 `P1-ARTIFACT-001` 已完成 Terra 定点修复：WebP upload 仅在完整本地 VP8/VP8L 像素解码成功后可进入 artifact persistence。主 Agent 已独立完成代码复核、Chromium 正例解码、全套单元/集成测试、typecheck、lint、build 与完整 E2E 8/8；当前等待原子提交和新的 Sol 整版复审。不得在复审归零前声称 v0.6 PASS。
 
 ## 已完成任务
 
@@ -23,15 +23,19 @@ v0.6 Sol rereview 的 WebP integrity、crash-safe artifact deletion recovery 与
 
 ## 下一任务
 
-原子提交当前修复并发起 Sol 里程碑复审。只有复审确认 P0/P1 为零并 PASS，才可进入 v0.7。
+原子提交当前 P1 修复并发起 Sol 里程碑复审。只有复审确认 P0/P1 为零并 PASS，才可进入 v0.7。
 
 ## 当前阻塞
 
-- 本轮确定性门无已知阻塞；只剩 Sol 尚未对修复后整版差异给出 PASS。
+- 本轮确定性门无已知阻塞；只剩新的 Sol 整版复审尚未给出 P0/P1 归零结论。
 - 真实 Vision、Search、DeepSeek 与真实凭据/DPAPI/网络未获授权，继续记录为 `NOT RUN — APPROVAL REQUIRED`，不由 Fake 替代。
 
 ## 最近测试结果
 
+- Sol rereview-2 `P1-ARTIFACT-001` RED：exact-size header-only VP8/VP8L upload 分别错误返回 201；GREEN 后相同两个请求均为 `422 IMAGE_DIMENSIONS_INVALID`，且测试断言 artifact rows/files=0、Vision calls=0。固定离线 VP8 与 VP8L 正例先由同一 sharp `stats()` 完整解码，再各返回 201 和正确的 2×3 尺寸。
+- 本轮 `tests/course-import.test.ts` 14/14、Core 45 files/303、Core typecheck、focused ESLint 与 root `npm test` 均 exit 0。`git diff --check`、migrations 和三份 immutable FAIL review zero-diff；offline manifest/lock/installed tree 均为 exact direct `sharp@0.35.3`。
+- Terra 交接时未运行 full build/E2E；主 Agent 已在同一未提交差异上补齐。真实 Provider/network 未运行，保持 `NOT RUN — APPROVAL REQUIRED`。
+- 主 Agent 独立复跑：两个固定 VP8/VP8L 正例由 Chromium `createImageBitmap()` 解码为 2×3；focused course-import 14/14；根测试 legacy 5/5、Core 303/303、Web 242/242、Contracts 77/77、Domain 7/7；全仓 typecheck/build exit 0；lint 0 error、4 个既有 warning；完整 E2E 8/8、exit 0。生产 build 的 `next-env.d.ts` 临时差异已恢复。
 - 主 Agent 独立复核：`tests/course-import.test.ts` 1 file / 7 tests PASS，包含 Vision 第 21 次路由拒绝与 WebP padding guard。
 - Terra 最终修复轮：capability gate 8/8、course import 7/7、learning 11/11 PASS。
 - `npm run typecheck --workspace @ev/core`、focused ESLint、`git diff --check` PASS。

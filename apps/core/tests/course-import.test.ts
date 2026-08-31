@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
 import { createArtifactStore, type ArtifactStore } from '../src/modules/calendar/artifact-store';
@@ -56,6 +57,8 @@ describe('v0.6 local course artifacts', () => {
     'UklGRgYCAABXRUJQVlA4WAoAAAAgAAAAAAAAAAAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDggGAAAADABAJ0BKgEAAQABQCYlpAADcAD+/PQAAA==',
     'base64',
   );
+  const validVp8Webp = Buffer.from('UklGRjAAAABXRUJQVlA4ICQAAABQAQCdASoCAAMAAUAmJQBOgC6gAP77LkvF3YjjJ4dVU9ffoAA=', 'base64');
+  const validVp8lWebp = Buffer.from('UklGRh4AAABXRUJQVlA4TBEAAAAvAYAAEAdQkTIUp4CBiOh/AAA=', 'base64');
 
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'ev-v06-course-artifact-'));
@@ -193,6 +196,68 @@ describe('v0.6 local course artifacts', () => {
       : [];
     expect(artifactFiles).toHaveLength(0);
     expect(providerCalls).toBe(0);
+  });
+
+  it('rejects exact-size VP8 and VP8L frame headers before persistence or any Vision call', async () => {
+    let providerCalls = 0;
+    const vision: VisionCapability = {
+      descriptor: { providerId: 'controlled-vision', providerLabel: '受控 Vision', adapterKind: 'PRODUCTION_ADAPTER' },
+      async extractCourseSchedule() {
+        providerCalls += 1;
+        return { candidates: [] };
+      },
+    };
+    const artifactRoot = join(directory, 'artifacts');
+    app = await buildApp({ databasePath, artifactRoot, visionCapability: vision, logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const headerOnly = [
+      webpChunk('VP8 ', [0, 0, 0, 0x9d, 0x01, 0x2a, 1, 0, 1, 0]),
+      webpChunk('VP8L', [0x2f, 0, 0, 0, 0]),
+    ];
+
+    expect(headerOnly.map((payload) => payload.byteLength)).toEqual([30, 26]);
+    const rejected = await Promise.all(headerOnly.map((payload) => app!.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/webp' }, payload,
+    })));
+
+    expect(rejected.map((response) => response.statusCode)).toEqual([422, 422]);
+    expect(rejected.map((response) => response.json().error.code)).toEqual([
+      'IMAGE_DIMENSIONS_INVALID', 'IMAGE_DIMENSIONS_INVALID',
+    ]);
+    const database = openDatabase(databasePath);
+    try {
+      expect(database.prepare('select count(*) as count from local_artifacts').get()).toEqual({ count: 0 });
+    } finally {
+      database.close();
+    }
+    const artifactFiles = existsSync(artifactRoot)
+      ? readdirSync(artifactRoot, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile())
+      : [];
+    expect(artifactFiles).toHaveLength(0);
+    expect(providerCalls).toBe(0);
+  });
+
+  it('accepts fixed, locally decodable VP8 and VP8L WebP payloads with their validated dimensions', async () => {
+    const decoded = await Promise.all([validVp8Webp, validVp8lWebp].map((payload) => sharp(payload, {
+      failOn: 'error', limitInputPixels: 40_000_000,
+    }).stats()));
+    expect(decoded.map((stats) => stats.channels.length)).toEqual([3, 4]);
+
+    app = await buildApp({ databasePath, artifactRoot: join(directory, 'artifacts'), logger: false });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const uploaded = await Promise.all([validVp8Webp, validVp8lWebp].map((payload) => app!.inject({
+      method: 'POST', url: '/v1/course-artifacts', cookies: { ev_session: token },
+      headers: { 'content-type': 'image/webp' }, payload,
+    })));
+
+    expect(uploaded.map((response) => response.statusCode)).toEqual([201, 201]);
+    expect(uploaded.map((response) => response.json().data.artifact)).toEqual([
+      expect.objectContaining({ mediaType: 'image/webp', width: 2, height: 3 }),
+      expect.objectContaining({ mediaType: 'image/webp', width: 2, height: 3 }),
+    ]);
   });
 
   it('recovers DELETE_PENDING artifacts after crashes before and after unlink during startup', async () => {
