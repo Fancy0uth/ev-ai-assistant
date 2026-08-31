@@ -1507,6 +1507,252 @@ const migrations: readonly Migration[] = [
       create trigger v07_audit_events_immutable_delete before delete on v07_audit_events begin select raise(abort, 'v07 audit events are immutable'); end;
     `,
   },
+  {
+    version: 21,
+    name: 'enforce_v07_owner_lineage',
+    sql: `
+      -- SQLite cannot add composite foreign keys to existing v20 tables without
+      -- rebuilding them. Keep v20 byte-for-byte compatible and enforce the same
+      -- owner-correlated parent relation for all new writes with additive indexes
+      -- and triggers.
+      create unique index signals_v21_id_owner_uidx on signals(id, owner_id);
+      create unique index fitness_check_ins_v2_v21_id_owner_uidx on fitness_check_ins_v2(id, owner_id);
+      create unique index workouts_v2_v21_id_owner_uidx on workouts_v2(id, owner_id);
+      create unique index workout_revisions_v2_v21_id_owner_uidx on workout_revisions_v2(id, owner_id);
+      create unique index proposals_v21_id_owner_uidx on proposals(id, owner_id);
+      create unique index actions_v21_id_owner_uidx on actions(id, owner_id);
+      create unique index time_requests_v21_id_owner_uidx on time_requests(id, owner_id);
+      create unique index activity_sessions_v21_id_owner_uidx on activity_sessions(id, owner_id);
+      create unique index workout_feedback_v2_v21_id_owner_uidx on workout_feedback_v2(id, owner_id);
+      create unique index meal_drafts_v2_v21_id_owner_uidx on meal_drafts_v2(id, owner_id);
+      create unique index meal_revisions_v2_v21_id_owner_uidx on meal_revisions_v2(id, owner_id);
+      create unique index nutrition_source_snapshots_v2_v21_id_owner_uidx on nutrition_source_snapshots_v2(id, owner_id);
+      create unique index nutrition_food_snapshots_v2_v21_id_owner_uidx on nutrition_food_snapshots_v2(id, owner_id);
+      create unique index meals_v2_v21_id_owner_uidx on meals_v2(id, owner_id);
+      create unique index v07_capability_runs_v21_id_owner_uidx on v07_capability_runs(id, owner_id);
+
+      create trigger fitness_check_ins_v2_v21_owner_insert
+      before insert on fitness_check_ins_v2
+      begin
+        select case when not exists (
+          select 1 from signals where id = new.signal_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger workouts_v2_v21_owner_insert
+      before insert on workouts_v2
+      begin
+        select case when not exists (
+          select 1 from fitness_check_ins_v2 where id = new.check_in_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from signals where id = new.signal_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.current_revision_id is not null and not exists (
+          select 1 from workout_revisions_v2
+          where id = new.current_revision_id and owner_id = new.owner_id and workout_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.proposal_id is not null and not exists (
+          select 1 from proposals where id = new.proposal_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.action_id is not null and not exists (
+          select 1 from actions where id = new.action_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.time_request_id is not null and not exists (
+          select 1 from time_requests where id = new.time_request_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.feedback_id is not null and not exists (
+          select 1 from workout_feedback_v2
+          where id = new.feedback_id and owner_id = new.owner_id and workout_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger workouts_v2_v21_owner_update
+      before update of owner_id, check_in_id, signal_id, current_revision_id, proposal_id, action_id, time_request_id, feedback_id on workouts_v2
+      begin
+        select case when new.owner_id <> old.owner_id
+          then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from fitness_check_ins_v2 where id = new.check_in_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from signals where id = new.signal_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.current_revision_id is not null and not exists (
+          select 1 from workout_revisions_v2
+          where id = new.current_revision_id and owner_id = new.owner_id and workout_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.proposal_id is not null and not exists (
+          select 1 from proposals where id = new.proposal_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.action_id is not null and not exists (
+          select 1 from actions where id = new.action_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.time_request_id is not null and not exists (
+          select 1 from time_requests where id = new.time_request_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.feedback_id is not null and not exists (
+          select 1 from workout_feedback_v2
+          where id = new.feedback_id and owner_id = new.owner_id and workout_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger workout_revisions_v2_v21_owner_insert
+      before insert on workout_revisions_v2
+      begin
+        select case when not exists (
+          select 1 from workouts_v2 where id = new.workout_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.parent_revision_id is not null and not exists (
+          select 1 from workout_revisions_v2
+          where id = new.parent_revision_id and owner_id = new.owner_id and workout_id = new.workout_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.capability_run_id is not null and not exists (
+          select 1 from v07_capability_runs where id = new.capability_run_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger workout_revision_citations_v2_v21_owner_insert
+      before insert on workout_revision_citations_v2
+      begin
+        select case when not exists (
+          select 1 from workout_revisions_v2 where id = new.revision_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger workout_actions_v2_v21_owner_insert
+      before insert on workout_actions_v2
+      begin
+        select case when not exists (
+          select 1 from workouts_v2 where id = new.workout_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from workout_revisions_v2
+          where id = new.revision_id and owner_id = new.owner_id and workout_id = new.workout_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from actions where id = new.action_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger workout_feedback_v2_v21_owner_insert
+      before insert on workout_feedback_v2
+      begin
+        select case when not exists (
+          select 1 from workouts_v2 where id = new.workout_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from actions where id = new.action_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.activity_session_id is not null and not exists (
+          select 1 from activity_sessions
+          where id = new.activity_session_id and owner_id = new.owner_id and action_id = new.action_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger meal_drafts_v2_v21_owner_insert
+      before insert on meal_drafts_v2
+      begin
+        select case when new.current_revision_id is not null and not exists (
+          select 1 from meal_revisions_v2
+          where id = new.current_revision_id and owner_id = new.owner_id and draft_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.confirmed_meal_id is not null and not exists (
+          select 1 from meals_v2
+          where id = new.confirmed_meal_id and owner_id = new.owner_id and draft_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger meal_drafts_v2_v21_owner_update
+      before update of owner_id, current_revision_id, confirmed_meal_id on meal_drafts_v2
+      begin
+        select case when new.owner_id <> old.owner_id
+          then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.current_revision_id is not null and not exists (
+          select 1 from meal_revisions_v2
+          where id = new.current_revision_id and owner_id = new.owner_id and draft_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.confirmed_meal_id is not null and not exists (
+          select 1 from meals_v2
+          where id = new.confirmed_meal_id and owner_id = new.owner_id and draft_id = new.id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger meal_revisions_v2_v21_owner_insert
+      before insert on meal_revisions_v2
+      begin
+        select case when not exists (
+          select 1 from meal_drafts_v2 where id = new.draft_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.parent_revision_id is not null and not exists (
+          select 1 from meal_revisions_v2
+          where id = new.parent_revision_id and owner_id = new.owner_id and draft_id = new.draft_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.capability_run_id is not null and not exists (
+          select 1 from v07_capability_runs where id = new.capability_run_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger nutrition_food_snapshots_v2_v21_owner_insert
+      before insert on nutrition_food_snapshots_v2
+      begin
+        select case when not exists (
+          select 1 from meal_drafts_v2 where id = new.draft_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from nutrition_source_snapshots_v2
+          where id = new.source_snapshot_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.capability_run_id is not null and not exists (
+          select 1 from v07_capability_runs where id = new.capability_run_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger meals_v2_v21_owner_insert
+      before insert on meals_v2
+      begin
+        select case when not exists (
+          select 1 from meal_drafts_v2 where id = new.draft_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger meal_entries_v2_v21_owner_insert
+      before insert on meal_entries_v2
+      begin
+        select case when not exists (
+          select 1 from meals_v2 where id = new.meal_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from meal_revisions_v2
+          join meals_v2 on meals_v2.id = new.meal_id
+          where meal_revisions_v2.id = new.meal_revision_id
+            and meal_revisions_v2.owner_id = new.owner_id
+            and meal_revisions_v2.draft_id = meals_v2.draft_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from nutrition_food_snapshots_v2
+          join meals_v2 on meals_v2.id = new.meal_id
+          where nutrition_food_snapshots_v2.id = new.food_snapshot_id
+            and nutrition_food_snapshots_v2.owner_id = new.owner_id
+            and nutrition_food_snapshots_v2.draft_id = meals_v2.draft_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger v07_idempotency_records_v21_owner_immutable
+      before update of owner_id on v07_idempotency_records
+      when new.owner_id <> old.owner_id
+      begin
+        select raise(abort, 'v0.7 owner lineage violation');
+      end;
+
+      create trigger v07_capability_runs_v21_owner_immutable
+      before update of owner_id on v07_capability_runs
+      when new.owner_id <> old.owner_id
+      begin
+        select raise(abort, 'v0.7 owner lineage violation');
+      end;
+    `,
+  },
 ];
 
 export function runMigrations(
