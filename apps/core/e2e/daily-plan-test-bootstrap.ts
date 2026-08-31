@@ -16,6 +16,7 @@ import type {
 } from '../src/modules/providers/capabilities';
 import { SecretStoreUnavailableError, type SecretStorePort } from '../src/modules/providers/secret-store';
 import { openDatabase } from '../src/storage/database';
+import { createV07HealthTestAdapters } from './v0.7-health-test-adapters';
 
 const TEST_BOOTSTRAP_FLAG = 'EV_E2E_DAILY_PLAN_TEST_BOOTSTRAP';
 const TEST_CREDENTIAL_MARKER = 'daily-plan-e2e-credential';
@@ -31,6 +32,7 @@ if (
   process.env[TEST_BOOTSTRAP_FLAG] !== '1' ||
   process.env.NODE_ENV !== 'test' ||
   process.env.EV_E2E_V06_LEARNING_TEST_ADAPTERS !== '1'
+  || process.env.EV_E2E_V07_HEALTH_TEST_ADAPTERS !== '1'
 ) {
   throw new Error('The daily plan E2E bootstrap may run only with its explicit test-only environment.');
 }
@@ -216,6 +218,7 @@ const v06PublicResourceFetcher = createPublicResourceFetcher({
 });
 
 const databasePath = join(config.dataDir, 'app.sqlite');
+const v07HealthAdapters = createV07HealthTestAdapters();
 const app = await buildApp({
   databasePath,
   memoryProjectionRoot: join(config.dataDir, 'memory'),
@@ -228,6 +231,8 @@ const app = await buildApp({
   publicSearchCapability: v06PublicSearch,
   publicResourceFetcher: v06PublicResourceFetcher,
   learningAdviceCapability: v06LearningAdvice,
+  ...v07HealthAdapters,
+  v07TestAdapterGate: { nodeEnv: 'test', enabled: true, runnerDataRoot: runDirectory },
 });
 const credentialDatabase = openDatabase(databasePath);
 const insertTestCredential = credentialDatabase.prepare(

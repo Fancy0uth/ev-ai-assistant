@@ -1,9 +1,9 @@
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
-import type { ProviderKey } from '@ev/contracts';
+import type { HealthTextProvider, ProviderKey } from '@ev/contracts';
 import { ApiError, registerErrorHandling } from './http/api-error';
 import { createAgentRepository } from './modules/agent/repository';
 import { registerAgentRoutes } from './modules/agent/routes';
@@ -24,6 +24,7 @@ import { createFitnessRepository } from './modules/fitness/repository';
 import { createFitnessService } from './modules/fitness/service';
 import { createV07IdempotencyService } from './modules/health-loop/idempotency-service';
 import { createV07HealthLoopRepository } from './modules/health-loop/repository';
+import { registerHealthLoopRoutes } from './modules/health-loop/routes';
 import { registerLearningRoutes } from './modules/learning/routes';
 import { createLearningService } from './modules/learning/service';
 import { createDeepSeekLearningAdviceCapability } from './modules/learning/deepseek-learning-advice';
@@ -37,6 +38,7 @@ import { registerProposalRoutes } from './modules/proposals/routes';
 import { createProposalService } from './modules/proposals/service';
 import { registerNutritionRoutes } from './modules/nutrition/routes';
 import { createNutritionService } from './modules/nutrition/service';
+import type { NutritionDataProvider } from './modules/nutrition/provider';
 import { registerProviderRoutes } from './modules/providers/routes';
 import { createProviderService } from './modules/providers/service';
 import { createProviderCredentialService } from './modules/providers/credential-service';
@@ -97,6 +99,9 @@ export interface AppOptions {
   providerReliabilityNow?: () => Date;
   logger?: boolean;
   secureCookies?: boolean;
+  healthTextProvider?: HealthTextProvider;
+  nutritionDataProvider?: NutritionDataProvider;
+  v07TestAdapterGate?: { nodeEnv: 'test'; enabled: true; runnerDataRoot: string };
 }
 
 export async function buildApp(options: AppOptions = {}): Promise<FastifyInstance> {
@@ -104,6 +109,15 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     logger: options.logger ?? true,
   });
   const databasePath = options.databasePath ?? ':memory:';
+  const fixtureRequested = options.healthTextProvider?.descriptor.adapterKind === 'TEST_FIXTURE' || options.nutritionDataProvider?.descriptor.adapterKind === 'TEST_FIXTURE';
+  if (fixtureRequested) {
+    const gate = options.v07TestAdapterGate;
+    const root = gate ? resolve(gate.runnerDataRoot) : '';
+    const pathInsideRoot = databasePath !== ':memory:' && root !== '' && !relative(root, resolve(databasePath)).startsWith('..');
+    if (process.env.NODE_ENV !== 'test' || !gate || gate.nodeEnv !== 'test' || !gate.enabled || !pathInsideRoot) {
+      throw new Error('V07_TEST_FIXTURE_GATE_REJECTED');
+    }
+  }
   const database = openDatabase(databasePath);
   const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
   const artifactRoot = options.artifactRoot ?? join(dataRoot, 'artifacts');
@@ -157,6 +171,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     calendarRepository,
     healthLoopRepository,
     v07IdempotencyService,
+    ...(options.healthTextProvider ? [{ healthTextProvider: options.healthTextProvider }] : []),
   );
   const providerCredentialService = createProviderCredentialService(
     database,
@@ -255,7 +270,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       app.log.warn(event, 'daily plan automation failed');
     },
   });
-  const nutritionService = createNutritionService(database);
+  const nutritionService = createNutritionService(database, {
+    healthLoopRepository,
+    v07IdempotencyService,
+    ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}),
+    ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}),
+  });
   const memoryService = createMemoryService(
     database,
     options.memoryProjectionRoot ?? (databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant-memory') : join(dirname(databasePath), 'memory')),
@@ -267,6 +287,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     if (database.open) database.close();
   });
   await registerHealthRoutes(app, database);
+  await registerHealthLoopRoutes(app, { ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}), ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}) });
   await registerAuthRoutes(app, {
     authService,
     secureCookies: options.secureCookies ?? false,
