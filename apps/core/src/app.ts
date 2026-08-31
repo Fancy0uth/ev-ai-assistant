@@ -1,5 +1,5 @@
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -75,6 +75,7 @@ import {
   type DailyPlanTerminalFaultCheckpoint,
 } from './modules/daily-planning/execution-unit-of-work';
 import { registerDailyPlanningRoutes } from './routes/daily-planning';
+import { isPathInsideRoot } from './filesystem/path-containment';
 
 export interface AppOptions {
   agentProvider?: AgentProvider;
@@ -109,18 +110,19 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     logger: options.logger ?? true,
   });
   const databasePath = options.databasePath ?? ':memory:';
+  const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
+  const artifactRoot = options.artifactRoot ?? join(dataRoot, 'artifacts');
   const fixtureRequested = options.healthTextProvider?.descriptor.adapterKind === 'TEST_FIXTURE' || options.nutritionDataProvider?.descriptor.adapterKind === 'TEST_FIXTURE';
   if (fixtureRequested) {
     const gate = options.v07TestAdapterGate;
-    const root = gate ? resolve(gate.runnerDataRoot) : '';
-    const pathInsideRoot = databasePath !== ':memory:' && root !== '' && !relative(root, resolve(databasePath)).startsWith('..');
-    if (process.env.NODE_ENV !== 'test' || !gate || gate.nodeEnv !== 'test' || !gate.enabled || !pathInsideRoot) {
+    const pathsInsideRunnerRoot = gate
+      && databasePath !== ':memory:'
+      && [databasePath, dataRoot, artifactRoot].every((path) => isPathInsideRoot(gate.runnerDataRoot, path));
+    if (process.env.NODE_ENV !== 'test' || !gate || gate.nodeEnv !== 'test' || !gate.enabled || !pathsInsideRunnerRoot) {
       throw new Error('V07_TEST_FIXTURE_GATE_REJECTED');
     }
   }
   const database = openDatabase(databasePath);
-  const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
-  const artifactRoot = options.artifactRoot ?? join(dataRoot, 'artifacts');
   const explicitLearningAdviceCapability = options.learningAdviceCapability?.descriptor.adapterKind === 'TEST_FAKE'
     ? options.learningAdviceCapability
     : undefined;
@@ -287,7 +289,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     if (database.open) database.close();
   });
   await registerHealthRoutes(app, database);
-  await registerHealthLoopRoutes(app, { ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}), ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}) });
+  await registerHealthLoopRoutes(app, { authService, ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}), ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}) });
   await registerAuthRoutes(app, {
     authService,
     secureCookies: options.secureCookies ?? false,
