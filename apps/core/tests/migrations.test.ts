@@ -1219,7 +1219,7 @@ describe('daily-plan storage migrations', () => {
 });
 
 describe('v0.7 additive health-loop migration', () => {
-  it('adds v20 health tables and the v21 corrective migration once without rebuilding the v19 owner table', () => {
+  it('adds v20 health tables and the v21/v22 corrective migrations once without rebuilding the v19 owner table', () => {
     const database = new Database(':memory:');
     try {
       database.pragma('foreign_keys = ON');
@@ -1232,7 +1232,8 @@ describe('v0.7 additive health-loop migration', () => {
       runMigrations(database);
       expect(database.prepare('select version, name from schema_migrations where version = 20').get()).toEqual({ version: 20, name: 'add_v07_fitness_nutrition_loop' });
       expect(database.prepare('select version, name from schema_migrations where version = 21').get()).toEqual({ version: 21, name: 'enforce_v07_owner_lineage' });
-      expect(database.prepare('select count(*) as count from schema_migrations').get()).toEqual({ count: 21 });
+      expect(database.prepare('select version, name from schema_migrations where version = 22').get()).toEqual({ version: 22, name: 'certify_v07_owner_lineage' });
+      expect(database.prepare('select count(*) as count from schema_migrations').get()).toEqual({ count: 22 });
       expect(database.prepare('select * from owners where id = ?').get('v19-owner')).toEqual(before);
       expect(database.prepare("select rootpage from sqlite_master where type = 'table' and name = 'owners'").get()).toEqual(rootpage);
       expect(database.prepare("select name from sqlite_master where type = 'table' and name = 'fitness_check_ins_v2'").get()).toEqual({ name: 'fitness_check_ins_v2' });

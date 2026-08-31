@@ -115,9 +115,10 @@ function seedV20Graph(database: Database.Database): void {
   }
 }
 
-function acceptedCrossOwnerProbes(database: Database.Database): string[] {
-  const probes: Array<[string, string, unknown[]]> = [
-    ['check-in.signal', `insert into fitness_check_ins_v2 values ('probe-check', 'owner-a', '2026-09-01', 480, 5, 0, 0, 0, 'signal-b', '{}', '{}', 'WORKOUT_SAFETY_V1', 1, ?)`, [timestamp]],
+type CrossOwnerProbe = readonly [label: string, sql: string, params: readonly unknown[]];
+
+const crossOwnerProbes: readonly CrossOwnerProbe[] = [
+  ['check-in.signal', `insert into fitness_check_ins_v2 values ('probe-check', 'owner-a', '2026-09-01', 480, 5, 0, 0, 0, 'signal-b', '{}', '{}', 'WORKOUT_SAFETY_V1', 1, ?)`, [timestamp]],
     ['workout.check-in', `insert into workouts_v2 values ('probe-workout', 'owner-a', 'check-b', 'signal-a', 'MANUAL', 'DRAFT', null, null, null, null, null, 1, ?, ?)`, [timestamp, timestamp]],
     ['workout.signal', `insert into workouts_v2 values ('probe-workout', 'owner-a', 'check-a', 'signal-b', 'MANUAL', 'DRAFT', null, null, null, null, null, 1, ?, ?)`, [timestamp, timestamp]],
     ['workout-revision.workout', `insert into workout_revisions_v2 values ('probe-revision', 'owner-a', 'workout-b', null, 2, 'Probe', 'Probe', '{}', 'ev-ai-internal-starter', '2026.08.31.1', ?, ?, 'MODEL', 'run-a', ?)`, [hash('5'), hash('6'), timestamp]],
@@ -147,9 +148,11 @@ function acceptedCrossOwnerProbes(database: Database.Database): string[] {
     ['meal-entry.food', `insert into meal_entries_v2 values ('probe-entry', 'owner-a', 'meal-a', 'meal-revision-a', 'probe', 'food-b', 'Probe', '1', 'GRAM', '1', '1', '1', '1', ?)`, [timestamp]],
     ['meal-draft.current-revision', `update meal_drafts_v2 set current_revision_id = 'meal-revision-b' where id = 'draft-a'`, []],
     ['meal-draft.confirmed-meal', `update meal_drafts_v2 set state = 'CONFIRMED', confirmed_meal_id = 'meal-b' where id = 'draft-a'`, []],
-  ];
+];
+
+function acceptedCrossOwnerProbes(database: Database.Database): string[] {
   const accepted: string[] = [];
-  for (const [label, sql, params] of probes) {
+  for (const [label, sql, params] of crossOwnerProbes) {
     database.exec('savepoint v07_cross_owner_probe');
     try {
       database.prepare(sql).run(...params);
@@ -162,6 +165,29 @@ function acceptedCrossOwnerProbes(database: Database.Database): string[] {
     }
   }
   return accepted;
+}
+
+const v07LineageTables = [
+  'fitness_check_ins_v2',
+  'workouts_v2',
+  'workout_revisions_v2',
+  'workout_revision_citations_v2',
+  'workout_actions_v2',
+  'workout_feedback_v2',
+  'meal_drafts_v2',
+  'meal_revisions_v2',
+  'nutrition_source_snapshots_v2',
+  'nutrition_food_snapshots_v2',
+  'meals_v2',
+  'meal_entries_v2',
+  'v07_capability_runs',
+] as const;
+
+function snapshotV07Lineage(database: Database.Database): Record<string, Buffer> {
+  return Object.fromEntries(v07LineageTables.map((table) => [
+    table,
+    Buffer.from(JSON.stringify(database.prepare(`select * from ${table} order by id`).all())),
+  ]));
 }
 
 function snapshotBytes(database: Database.Database, startVersion: number): Record<string, Buffer> {
@@ -218,6 +244,27 @@ function seedHistoricalFixture(database: Database.Database, startVersion: number
 }
 
 describe('v0.7 corrective migration', () => {
+  it.each([20, 21].flatMap((startVersion) => crossOwnerProbes.map(([label, sql, params]) => [startVersion, label, sql, params] as const)))(
+    'fails closed upgrading a corrupt v%i database at %s',
+    (startVersion, label, sql, params) => {
+      const database = new Database(':memory:');
+      try {
+        database.pragma('foreign_keys = ON');
+        runMigrations(database, 20);
+        seedV20Graph(database);
+        database.prepare(sql).run(...params);
+        if (startVersion === 21) runMigrations(database, 21);
+        const before = snapshotV07Lineage(database);
+
+        expect(() => runMigrations(database)).toThrow(`V07_OWNER_LINEAGE_PREFLIGHT_FAILED:${label}`);
+        expect(database.prepare('select count(*) as count from schema_migrations where version = 22').get()).toEqual({ count: 0 });
+        expect(snapshotV07Lineage(database)).toEqual(before);
+      } finally {
+        database.close();
+      }
+    },
+  );
+
   it('rejects every new cross-Owner v0.7 lineage write at the database boundary', () => {
     const database = new Database(':memory:');
     try {
@@ -242,7 +289,8 @@ describe('v0.7 corrective migration', () => {
       runMigrations(database);
       runMigrations(database);
       expect(database.prepare('select version, name from schema_migrations where version = 21').get()).toEqual({ version: 21, name: 'enforce_v07_owner_lineage' });
-      expect(database.prepare('select count(*) as count from schema_migrations').get()).toEqual({ count: 21 });
+      expect(database.prepare('select version, name from schema_migrations where version = 22').get()).toEqual({ version: 22, name: 'certify_v07_owner_lineage' });
+      expect(database.prepare('select count(*) as count from schema_migrations').get()).toEqual({ count: 22 });
       for (const table of tables) {
         expect(database.prepare("select rootpage from sqlite_master where type = 'table' and name = ?").get(table)).toEqual(rootpages[table]);
         expect(Buffer.from(JSON.stringify(database.prepare(`select * from ${table} order by id`).all()))).toEqual(rows[table]);
@@ -252,7 +300,7 @@ describe('v0.7 corrective migration', () => {
     }
   });
 
-  it.each([1, 2, 16, 17, 18, 19])('preserves historical v%i fixtures through two normal startups', (startVersion) => {
+  it.each([1, 2, 16, 17, 18, 19, 20, 21])('preserves historical v%i fixtures through two normal startups', (startVersion) => {
     const directory = mkdtempSync(join(tmpdir(), `ev-v07-migration-v${startVersion}-`));
     directories.push(directory);
     const databasePath = join(directory, 'app.sqlite');
@@ -269,7 +317,7 @@ describe('v0.7 corrective migration', () => {
       const upgraded = openDatabase(databasePath);
       try {
         expect(snapshotBytes(upgraded, startVersion)).toEqual(before!);
-        expect(upgraded.prepare('select max(version) as version from schema_migrations').get()).toEqual({ version: 21 });
+        expect(upgraded.prepare('select max(version) as version from schema_migrations').get()).toEqual({ version: 22 });
       } finally {
         upgraded.close();
       }

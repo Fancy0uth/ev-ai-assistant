@@ -1753,6 +1753,270 @@ const migrations: readonly Migration[] = [
       end;
     `,
   },
+  {
+    version: 22,
+    name: 'certify_v07_owner_lineage',
+    sql: `
+      -- v21 prevents new cross-Owner writes. Before certifying an existing v20
+      -- or v21 database, reject every historical row that violates the same
+      -- owner-correlated parent relations. The surrounding migration transaction
+      -- rolls back this temporary probe schema and does not record v22 on failure.
+      create table v07_owner_lineage_preflight_v22 (
+        singleton integer primary key check (singleton = 1)
+      );
+      create trigger v07_owner_lineage_preflight_v22_insert
+      before insert on v07_owner_lineage_preflight_v22
+      begin
+        select case when exists (
+          select 1 from fitness_check_ins_v2 as child
+          where not exists (
+            select 1 from signals as parent
+            where parent.id = child.signal_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:check-in.signal') end;
+
+        select case when exists (
+          select 1 from workouts_v2 as child
+          where not exists (
+            select 1 from fitness_check_ins_v2 as parent
+            where parent.id = child.check_in_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout.check-in') end;
+        select case when exists (
+          select 1 from workouts_v2 as child
+          where not exists (
+            select 1 from signals as parent
+            where parent.id = child.signal_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout.signal') end;
+
+        select case when exists (
+          select 1 from workout_revisions_v2 as child
+          where not exists (
+            select 1 from workouts_v2 as parent
+            where parent.id = child.workout_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-revision.workout') end;
+        select case when exists (
+          select 1 from workout_revisions_v2 as child
+          where child.parent_revision_id is not null and not exists (
+            select 1 from workout_revisions_v2 as parent
+            where parent.id = child.parent_revision_id
+              and parent.owner_id = child.owner_id
+              and parent.workout_id = child.workout_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-revision.parent') end;
+        select case when exists (
+          select 1 from workout_revisions_v2 as child
+          where child.capability_run_id is not null and not exists (
+            select 1 from v07_capability_runs as parent
+            where parent.id = child.capability_run_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-revision.capability') end;
+
+        select case when exists (
+          select 1 from workout_revision_citations_v2 as child
+          where not exists (
+            select 1 from workout_revisions_v2 as parent
+            where parent.id = child.revision_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-citation.revision') end;
+
+        select case when exists (
+          select 1 from workout_actions_v2 as child
+          where not exists (
+            select 1 from workouts_v2 as parent
+            where parent.id = child.workout_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-action.workout') end;
+        select case when exists (
+          select 1 from workout_actions_v2 as child
+          where not exists (
+            select 1 from workout_revisions_v2 as parent
+            where parent.id = child.revision_id
+              and parent.owner_id = child.owner_id
+              and parent.workout_id = child.workout_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-action.revision') end;
+        select case when exists (
+          select 1 from workout_actions_v2 as child
+          where not exists (
+            select 1 from actions as parent
+            where parent.id = child.action_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-action.action') end;
+
+        select case when exists (
+          select 1 from workout_feedback_v2 as child
+          where not exists (
+            select 1 from workouts_v2 as parent
+            where parent.id = child.workout_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-feedback.workout') end;
+        select case when exists (
+          select 1 from workout_feedback_v2 as child
+          where not exists (
+            select 1 from actions as parent
+            where parent.id = child.action_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-feedback.action') end;
+        select case when exists (
+          select 1 from workout_feedback_v2 as child
+          where child.activity_session_id is not null and not exists (
+            select 1 from activity_sessions as parent
+            where parent.id = child.activity_session_id
+              and parent.owner_id = child.owner_id
+              and parent.action_id = child.action_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout-feedback.activity') end;
+
+        select case when exists (
+          select 1 from workouts_v2 as child
+          where child.current_revision_id is not null and not exists (
+            select 1 from workout_revisions_v2 as parent
+            where parent.id = child.current_revision_id
+              and parent.owner_id = child.owner_id
+              and parent.workout_id = child.id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout.current-revision') end;
+        select case when exists (
+          select 1 from workouts_v2 as child
+          where child.proposal_id is not null and not exists (
+            select 1 from proposals as parent
+            where parent.id = child.proposal_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout.proposal') end;
+        select case when exists (
+          select 1 from workouts_v2 as child
+          where child.action_id is not null and not exists (
+            select 1 from actions as parent
+            where parent.id = child.action_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout.action') end;
+        select case when exists (
+          select 1 from workouts_v2 as child
+          where child.time_request_id is not null and not exists (
+            select 1 from time_requests as parent
+            where parent.id = child.time_request_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout.time-request') end;
+        select case when exists (
+          select 1 from workouts_v2 as child
+          where child.feedback_id is not null and not exists (
+            select 1 from workout_feedback_v2 as parent
+            where parent.id = child.feedback_id
+              and parent.owner_id = child.owner_id
+              and parent.workout_id = child.id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:workout.feedback') end;
+
+        select case when exists (
+          select 1 from meal_revisions_v2 as child
+          where not exists (
+            select 1 from meal_drafts_v2 as parent
+            where parent.id = child.draft_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-revision.draft') end;
+        select case when exists (
+          select 1 from meal_revisions_v2 as child
+          where child.parent_revision_id is not null and not exists (
+            select 1 from meal_revisions_v2 as parent
+            where parent.id = child.parent_revision_id
+              and parent.owner_id = child.owner_id
+              and parent.draft_id = child.draft_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-revision.parent') end;
+        select case when exists (
+          select 1 from meal_revisions_v2 as child
+          where child.capability_run_id is not null and not exists (
+            select 1 from v07_capability_runs as parent
+            where parent.id = child.capability_run_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-revision.capability') end;
+
+        select case when exists (
+          select 1 from nutrition_food_snapshots_v2 as child
+          where not exists (
+            select 1 from meal_drafts_v2 as parent
+            where parent.id = child.draft_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:food.draft') end;
+        select case when exists (
+          select 1 from nutrition_food_snapshots_v2 as child
+          where not exists (
+            select 1 from nutrition_source_snapshots_v2 as parent
+            where parent.id = child.source_snapshot_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:food.source') end;
+        select case when exists (
+          select 1 from nutrition_food_snapshots_v2 as child
+          where child.capability_run_id is not null and not exists (
+            select 1 from v07_capability_runs as parent
+            where parent.id = child.capability_run_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:food.capability') end;
+
+        select case when exists (
+          select 1 from meals_v2 as child
+          where not exists (
+            select 1 from meal_drafts_v2 as parent
+            where parent.id = child.draft_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal.draft') end;
+
+        select case when exists (
+          select 1 from meal_entries_v2 as child
+          where not exists (
+            select 1 from meals_v2 as parent
+            where parent.id = child.meal_id and parent.owner_id = child.owner_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-entry.meal') end;
+        select case when exists (
+          select 1 from meal_entries_v2 as child
+          where not exists (
+            select 1 from meal_revisions_v2 as revision
+            join meals_v2 as meal on meal.id = child.meal_id
+            where revision.id = child.meal_revision_id
+              and revision.owner_id = child.owner_id
+              and revision.draft_id = meal.draft_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-entry.revision') end;
+        select case when exists (
+          select 1 from meal_entries_v2 as child
+          where not exists (
+            select 1 from nutrition_food_snapshots_v2 as food
+            join meals_v2 as meal on meal.id = child.meal_id
+            where food.id = child.food_snapshot_id
+              and food.owner_id = child.owner_id
+              and food.draft_id = meal.draft_id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-entry.food') end;
+
+        select case when exists (
+          select 1 from meal_drafts_v2 as child
+          where child.current_revision_id is not null and not exists (
+            select 1 from meal_revisions_v2 as parent
+            where parent.id = child.current_revision_id
+              and parent.owner_id = child.owner_id
+              and parent.draft_id = child.id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-draft.current-revision') end;
+        select case when exists (
+          select 1 from meal_drafts_v2 as child
+          where child.confirmed_meal_id is not null and not exists (
+            select 1 from meals_v2 as parent
+            where parent.id = child.confirmed_meal_id
+              and parent.owner_id = child.owner_id
+              and parent.draft_id = child.id
+          )
+        ) then raise(abort, 'V07_OWNER_LINEAGE_PREFLIGHT_FAILED:meal-draft.confirmed-meal') end;
+      end;
+
+      insert into v07_owner_lineage_preflight_v22 (singleton) values (1);
+      drop trigger v07_owner_lineage_preflight_v22_insert;
+      drop table v07_owner_lineage_preflight_v22;
+    `,
+  },
 ];
 
 export function runMigrations(
