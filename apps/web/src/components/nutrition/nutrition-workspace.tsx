@@ -1,99 +1,193 @@
 'use client';
 
-import { mealRecordResponseSchema } from '@ev/contracts';
+import {
+  mealConfirmResponseSchema,
+  mealDraftCreateResponseSchema,
+  mealDraftDetailResponseSchema,
+  mealDraftListResponseSchema,
+  mealDraftMatchResponseSchema,
+  mealDraftRevisionResponseSchema,
+  type MealDraft,
+  type MealRevision,
+  type MealV2,
+  type NutritionSourceDescriptor,
+} from '@ev/contracts';
 import { Save, Utensils } from 'lucide-react';
 import { useState } from 'react';
+import { MealDraftReview } from '@/components/nutrition/meal-draft-review';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 
-type Field = 'name' | 'grams' | 'calories' | 'proteinGrams' | 'carbohydrateGrams' | 'fatGrams';
+type NutritionStage = 'ENTRY' | 'PARSER_UNAVAILABLE' | 'CANDIDATES_REVIEW' | 'MATCHING' | 'MATCHES_REVIEW' | 'CONFIRM' | 'CONFIRMED' | 'FAILED';
+type MealDetail = { draft: MealDraft; revision: MealRevision; matches: MealCandidateMatch[]; source: NutritionSourceDescriptor | null; meal: MealV2 | null };
+type ManualCandidate = { displayName: string; quantityDecimal: string; unit: 'GRAM' | 'MILLILITER' | 'ITEM' };
+type MealCandidateMatch = ReturnType<typeof mealDraftMatchResponseSchema.parse>['data']['matches'][number];
 
 function failureMessage(error: unknown): string {
-  return error instanceof CoreClientError ? error.message : '饮食记录暂时未保存，请稍后重试。';
+  if (!(error instanceof CoreClientError)) return '本地餐食流程暂时不可用，请稍后重试。';
+  if (error.status === 404 || error.status === 409) return '草稿已变化或不存在，请刷新后重新审阅。';
+  if (error.status === 422) return '候选、单位或版本不符合确认要求；未写入餐食。';
+  if (error.status === 429) return '今日 Provider 调用次数已达上限，请稍后重试。';
+  if (error.status === 503) return '餐食文本 Provider 尚未配置或待审批；请使用手工候选。';
+  return error.message;
+}
+
+function idempotentInit(): { headers: HeadersInit } {
+  return { headers: { 'Idempotency-Key': createIdempotencyKey() } };
 }
 
 export function NutritionWorkspace({ initialDate }: { initialDate: string }) {
-  const [fields, setFields] = useState<Record<Field, string>>({
-    name: '', grams: '0', calories: '0', proteinGrams: '0', carbohydrateGrams: '0', fatGrams: '0',
-  });
-  const [record, setRecord] = useState<ReturnType<typeof mealRecordResponseSchema.parse>['data'] | null>(null);
+  const [localDate, setLocalDate] = useState(initialDate);
+  const [mealText, setMealText] = useState('');
+  const [stage, setStage] = useState<NutritionStage>('ENTRY');
+  const [manualCandidates, setManualCandidates] = useState<ManualCandidate[]>([{ displayName: '', quantityDecimal: '1', unit: 'GRAM' }]);
+  const [detail, setDetail] = useState<MealDetail | null>(null);
+  const [savedDrafts, setSavedDrafts] = useState<MealDraft[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
 
-  function change(field: Field, value: string): void {
-    setFields((current) => ({ ...current, [field]: value }));
+  async function createDraft(body: unknown): Promise<void> {
+    const payload = await requestCore('nutrition/meal-drafts', { method: 'POST', ...idempotentInit(), body: JSON.stringify(body) });
+    const created = mealDraftCreateResponseSchema.parse(payload).data;
+    setDetail({ draft: created.draft, revision: created.revision, matches: [], source: null, meal: null });
+    setStage('CANDIDATES_REVIEW');
   }
 
-  async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+  async function parseMeal(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setFailure(null);
-    setIsSaving(true);
+    setIsBusy(true);
     try {
-      const entry = {
-        name: fields.name,
-        grams: Number(fields.grams),
-        calories: Number(fields.calories),
-        proteinGrams: Number(fields.proteinGrams),
-        carbohydrateGrams: Number(fields.carbohydrateGrams),
-        fatGrams: Number(fields.fatGrams),
-      };
-      const payload = await requestCore('meals', {
-        method: 'POST', body: JSON.stringify({ localDate: initialDate, entries: [entry] }),
+      await createDraft({ mode: 'PARSE_TEXT', localDate, mealText, disclosureVersion: 'HEALTH_DISCLOSURE_V1' });
+    } catch (error) {
+      setFailure(failureMessage(error));
+      setStage(error instanceof CoreClientError && error.status === 503 ? 'PARSER_UNAVAILABLE' : 'FAILED');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function changeManualCandidate(index: number, field: keyof ManualCandidate, value: string): void {
+    setManualCandidates((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, [field]: value } : candidate));
+  }
+
+  async function createManualDraft(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setFailure(null);
+    setIsBusy(true);
+    try {
+      await createDraft({ mode: 'MANUAL', localDate, candidates: manualCandidates });
+    } catch (error) {
+      setFailure(failureMessage(error));
+      setStage('PARSER_UNAVAILABLE');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function matchDraft(): Promise<void> {
+    if (!detail) return;
+    setFailure(null);
+    setStage('MATCHING');
+    setIsBusy(true);
+    try {
+      const payload = await requestCore(`nutrition/meal-drafts/${detail.draft.id}/matches`, { method: 'POST', ...idempotentInit(), body: JSON.stringify({ expectedVersion: detail.draft.version, revisionId: detail.revision.id }) });
+      const matched = mealDraftMatchResponseSchema.parse(payload).data;
+      setDetail((current) => current ? { ...current, draft: matched.draft, revision: matched.revision, matches: matched.matches, source: matched.source } : current);
+      setStage('MATCHES_REVIEW');
+    } catch (error) {
+      setFailure(failureMessage(error));
+      setStage('FAILED');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function saveSelections(selections: Array<{ candidateId: string; selectedFoodSnapshotId: string | null; included: boolean }>): Promise<void> {
+    if (!detail) return;
+    setFailure(null);
+    setIsBusy(true);
+    try {
+      const payload = await requestCore(`nutrition/meal-drafts/${detail.draft.id}/revisions`, {
+        method: 'POST', ...idempotentInit(),
+        body: JSON.stringify({ expectedVersion: detail.draft.version, parentRevisionId: detail.revision.id, operation: 'SELECT_MATCHES', candidates: selections }),
       });
-      setRecord(mealRecordResponseSchema.parse(payload).data);
+      const revised = mealDraftRevisionResponseSchema.parse(payload).data;
+      setDetail((current) => current ? { ...current, draft: revised.draft, revision: revised.revision } : current);
+      setStage('CONFIRM');
+    } catch (error) {
+      setFailure(failureMessage(error));
+      setStage('FAILED');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function confirmDraft(): Promise<void> {
+    if (!detail) return;
+    setFailure(null);
+    setIsBusy(true);
+    try {
+      const payload = await requestCore(`nutrition/meal-drafts/${detail.draft.id}/confirm`, { method: 'POST', ...idempotentInit(), body: JSON.stringify({ expectedVersion: detail.draft.version, revisionId: detail.revision.id }) });
+      const confirmed = mealConfirmResponseSchema.parse(payload).data;
+      setDetail((current) => current ? { ...current, draft: confirmed.draft, meal: confirmed.meal } : current);
+      setStage('CONFIRMED');
+    } catch (error) {
+      setFailure(failureMessage(error));
+      setStage('FAILED');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function loadSavedDrafts(): Promise<void> {
+    setFailure(null);
+    setIsBusy(true);
+    try {
+      const payload = await requestCore(`nutrition/meal-drafts?localDate=${encodeURIComponent(localDate)}&page=1&pageSize=50`, { method: 'GET' });
+      setSavedDrafts(mealDraftListResponseSchema.parse(payload).data.items);
     } catch (error) {
       setFailure(failureMessage(error));
     } finally {
-      setIsSaving(false);
+      setIsBusy(false);
+    }
+  }
+
+  async function openSavedDraft(draftId: string): Promise<void> {
+    setFailure(null);
+    setIsBusy(true);
+    try {
+      const payload = await requestCore(`nutrition/meal-drafts/${draftId}`, { method: 'GET' });
+      const saved = mealDraftDetailResponseSchema.parse(payload).data;
+      setDetail({ draft: saved.draft, revision: saved.revision, matches: saved.matches, source: saved.matches[0]?.snapshots[0]?.source ?? null, meal: saved.confirmedMeal });
+      setStage(saved.draft.state === 'CONFIRMED' ? 'CONFIRMED' : saved.draft.state === 'MATCHES_READY' ? 'CONFIRM' : 'CANDIDATES_REVIEW');
+    } catch (error) {
+      setFailure(failureMessage(error));
+    } finally {
+      setIsBusy(false);
     }
   }
 
   return (
-    <section className="domain-workspace" aria-labelledby="nutrition-heading">
-      <header className="domain-workspace__header">
-        <p className="section-kicker">NUTRITION / CONFIRMED FACTS</p>
-        <h1 id="nutrition-heading">饮食记录</h1>
-        <p>先记录你已经确认的食物和营养数值。后续 API 只负责提出候选，最终写入仍需要你确认。</p>
-      </header>
-
-      <div className="domain-workspace__grid">
-        <form className="domain-card domain-form" onSubmit={(event) => void submit(event)}>
-          <div className="domain-card__heading">
-            <Utensils aria-hidden="true" size={19} />
-            <div><h2>确认一餐</h2><p>{initialDate} · 本地记录</p></div>
-          </div>
-          <label>
-            食物名称
-            <input value={fields.name} onChange={(event) => change('name', event.target.value)} />
-          </label>
-          <div className="nutrition-form__grid">
-            <NumberField label="重量（克）" value={fields.grams} onChange={(value) => change('grams', value)} />
-            <NumberField label="热量（千卡）" value={fields.calories} onChange={(value) => change('calories', value)} />
-            <NumberField label="蛋白质（克）" value={fields.proteinGrams} onChange={(value) => change('proteinGrams', value)} />
-            <NumberField label="碳水（克）" value={fields.carbohydrateGrams} onChange={(value) => change('carbohydrateGrams', value)} />
-            <NumberField label="脂肪（克）" value={fields.fatGrams} onChange={(value) => change('fatGrams', value)} />
-          </div>
-          {failure ? <p className="domain-form__error" role="alert">{failure}</p> : null}
-          <button disabled={isSaving} type="submit"><Save aria-hidden="true" size={16} /> {isSaving ? '正在保存…' : '确认并保存这餐'}</button>
-        </form>
-
-        <aside className="domain-card domain-result" aria-live="polite">
-          <p className="section-kicker">CONFIRMATION</p>
-          {record ? (
-            <>
-              <h2>本餐已确认</h2>
-              <p className="meal-confirmation">{record.totals.calories} kcal · 蛋白质 {record.totals.proteinGrams} g</p>
-              <p>碳水 {record.totals.carbohydrateGrams} g · 脂肪 {record.totals.fatGrams} g</p>
-            </>
-          ) : (
-            <><h2>等待确认的记录</h2><p>所有数值都会显示在这里，便于你核对后再继续安排当天饮食。</p></>
-          )}
-          <p className="domain-result__boundary">系统不会把未经你确认的模型猜测写入饮食记录。</p>
-        </aside>
-      </div>
+    <section className="domain-workspace health-workspace" aria-labelledby="nutrition-heading">
+      <header className="domain-workspace__header"><p className="section-kicker">NUTRITION / SOURCED REVIEW</p><h1 id="nutrition-heading">饮食记录</h1><p>先表达一餐，再审阅候选与来源。营养数字只来自已选择的来源快照。</p></header>
+      {stage === 'ENTRY' || stage === 'FAILED' ? <form className="domain-card domain-form" onSubmit={(event) => void parseMeal(event)}>
+        <div className="domain-card__heading"><Utensils aria-hidden="true" size={19} /><div><h2>输入一餐</h2><p>{localDate} · 仅本地保存</p></div></div>
+        <label>本地日期<input type="date" value={localDate} onChange={(event) => setLocalDate(event.target.value)} /></label>
+        <label>餐食文本<textarea maxLength={1000} required value={mealText} onChange={(event) => setMealText(event.target.value)} /></label>
+        {failure ? <p className="domain-form__error" role="alert">{failure}</p> : null}
+        <button disabled={isBusy} type="submit"><Save aria-hidden="true" size={16} /> {isBusy ? '正在解析…' : '解析候选食物'}</button>
+        <button disabled={isBusy} onClick={() => void loadSavedDrafts()} type="button">读取本地餐食草稿</button>
+        {savedDrafts.map((savedDraft) => <button key={savedDraft.id} disabled={isBusy} onClick={() => void openSavedDraft(savedDraft.id)} type="button">打开餐食草稿 {savedDraft.id}</button>)}
+      </form> : null}
+      {stage === 'PARSER_UNAVAILABLE' ? <form className="health-manual-candidates" onSubmit={(event) => void createManualDraft(event)}>
+        <p className="section-kicker">PARSER UNAVAILABLE</p><h2>手工候选</h2><p>Provider 返回 503 或尚待审批。仅输入名称、十进制数量和单位；这里不接受营养数值。</p>
+        {manualCandidates.map((candidate, index) => <fieldset key={index}><legend>候选 {index + 1}</legend><label>食物名称<input required value={candidate.displayName} onChange={(event) => changeManualCandidate(index, 'displayName', event.target.value)} /></label><label>十进制数量<input inputMode="decimal" pattern="^(0|[1-9][0-9]{0,5})(\\.[0-9]{1,6})?$" required value={candidate.quantityDecimal} onChange={(event) => changeManualCandidate(index, 'quantityDecimal', event.target.value)} /></label><label>单位<select value={candidate.unit} onChange={(event) => changeManualCandidate(index, 'unit', event.target.value)}><option value="GRAM">GRAM</option><option value="MILLILITER">MILLILITER</option><option value="ITEM">ITEM</option></select></label></fieldset>)}
+        <button onClick={() => setManualCandidates((current) => [...current, { displayName: '', quantityDecimal: '1', unit: 'GRAM' }])} type="button">添加候选</button>
+        {failure ? <p className="domain-form__error" role="alert">{failure}</p> : null}
+        <button disabled={isBusy} type="submit">保存手工候选</button>
+      </form> : null}
+      {detail ? <MealDraftReview key={detail.revision.id} draft={detail.draft} revision={detail.revision} matches={detail.matches} source={detail.source} meal={detail.meal} busy={isBusy} failure={failure} onMatch={matchDraft} onSaveSelections={saveSelections} onConfirm={confirmDraft} /> : null}
     </section>
   );
-}
-
-function NumberField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label>{label}<input min="0" step="0.1" type="number" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }

@@ -4515,3 +4515,389 @@
     width: 100%;
   }
 }
+
+/* V7-07 health review loops. */
+.health-workspace {
+  max-width: 72rem;
+}
+
+.health-workspace > .domain-form,
+.health-catalog,
+.health-review,
+.health-manual-candidates {
+  max-width: 48rem;
+  margin-top: var(--space-5);
+  padding: var(--space-5);
+  background: var(--paper-50);
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-md);
+}
+
+.health-toggle {
+  display: flex !important;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.health-toggle input {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  accent-color: var(--cyan-600);
+}
+
+.health-safety__notice,
+.health-review__failure {
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  color: #762a26;
+  background: var(--red-100);
+  border-left: 0.25rem solid var(--red-600);
+  border-radius: var(--radius-sm);
+}
+
+.health-safety__notice h2,
+.health-safety__notice p,
+.health-review__failure {
+  margin: 0;
+}
+
+.health-safety__notice h2 {
+  margin-top: var(--space-2);
+  font-size: 1rem;
+}
+
+.health-safety__notice p {
+  margin-top: var(--space-2);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.health-catalog,
+.health-review,
+.health-manual-candidates {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.health-catalog header h2,
+.health-review__header h2,
+.health-manual-candidates h2 {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-950);
+  font-size: 1.125rem;
+}
+
+.health-catalog header > p:last-child,
+.health-review__header p:last-child,
+.health-manual-candidates > p {
+  margin: var(--space-2) 0 0;
+  color: #59635f;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.health-catalog > label,
+.health-review__form > label,
+.health-manual-candidates label,
+.meal-review__candidates label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--ink-700);
+  font-size: 0.6875rem;
+  font-weight: 750;
+}
+
+.health-catalog select,
+.health-review input,
+.health-review textarea,
+.health-manual-candidates input,
+.health-manual-candidates select,
+.meal-review__candidates select {
+  width: 100%;
+  min-height: 2.625rem;
+  box-sizing: border-box;
+  padding: 0 var(--space-3);
+  color: var(--ink-950);
+  background: #ffffff;
+  border: 1px solid var(--paper-300);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.health-review textarea {
+  min-height: 5.5rem;
+  padding-block: var(--space-3);
+  resize: vertical;
+}
+
+.health-catalog > button,
+.health-review button,
+.health-manual-candidates > button,
+.health-review a {
+  display: inline-flex;
+  min-height: 2.625rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  justify-self: start;
+  padding: 0 var(--space-4);
+  color: #ffffff;
+  background: var(--ink-950);
+  border: 1px solid var(--ink-950);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.health-catalog > button:hover:not(:disabled),
+.health-review button:hover:not(:disabled),
+.health-manual-candidates > button:hover:not(:disabled),
+.health-review a:hover {
+  background: var(--cyan-600);
+  border-color: var(--cyan-600);
+}
+
+.health-catalog > button:disabled,
+.health-review button:disabled,
+.health-manual-candidates > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.health-catalog__provider,
+.fixture-disclaimer {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: #76531f;
+  background: #f5e9cf;
+  border-left: 0.1875rem solid var(--amber-500);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.fixture-disclaimer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: #356c51;
+  background: #e2efe6;
+  border-left-color: var(--green-500);
+}
+
+.health-catalog ul,
+.health-review__items,
+.meal-review__candidates {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-catalog li,
+.health-review__items li,
+.meal-review__candidates > li,
+.meal-review__source,
+.health-manual-candidates fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--paper-100);
+  border: 1px solid var(--paper-200);
+  border-radius: var(--radius-sm);
+}
+
+.health-catalog li label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  color: var(--ink-800);
+  cursor: pointer;
+}
+
+.health-catalog li input {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  accent-color: var(--cyan-600);
+}
+
+.health-catalog li span,
+.health-catalog li small {
+  grid-column: 2;
+  color: #59635f;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.health-catalog li small,
+.health-review__items span,
+.health-review__facts dt,
+.meal-review__lineage,
+.meal-review__source p {
+  color: #6f7975;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.625rem;
+}
+
+.health-review__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.health-review__state {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.4375rem;
+  color: var(--cyan-700);
+  background: var(--cyan-100);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.625rem;
+  font-weight: 800;
+}
+
+.health-review__form,
+.health-manual-candidates fieldset {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.health-review__items li {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.health-review__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.health-review__facts div {
+  min-width: 0;
+}
+
+.health-review__facts dt,
+.health-review__facts dd {
+  margin: 0;
+}
+
+.health-review__facts dd {
+  margin-top: var(--space-1);
+  color: var(--ink-800);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.health-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.health-review__actions p,
+.health-review__done,
+.meal-review__totals,
+.meal-review__lineage,
+.meal-review__candidates h3,
+.meal-review__candidates > li > p,
+.meal-review__source p {
+  margin: 0;
+}
+
+.health-review__actions p,
+.health-review__done,
+.meal-review__totals,
+.meal-review__candidates > li > p {
+  color: #59635f;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.health-review__lineage {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--paper-200);
+}
+
+.health-review__lineage > p {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: #356c51;
+  font-size: 0.75rem;
+}
+
+.meal-review__candidates h3 {
+  color: var(--ink-900);
+  font-size: 0.8125rem;
+}
+
+.meal-review__source {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: #ffffff;
+}
+
+.health-catalog input:focus-visible,
+.health-catalog select:focus-visible,
+.health-review input:focus-visible,
+.health-review textarea:focus-visible,
+.health-review button:focus-visible,
+.health-review a:focus-visible,
+.health-manual-candidates input:focus-visible,
+.health-manual-candidates select:focus-visible,
+.health-manual-candidates button:focus-visible,
+.meal-review__candidates select:focus-visible {
+  outline: 0.1875rem solid var(--cyan-600);
+  outline-offset: 0.125rem;
+}
+
+@media (max-width: 42rem) {
+  .health-workspace {
+    padding-bottom: 5.5rem;
+  }
+
+  .health-review__actions > button {
+    scroll-margin-bottom: 6.5rem;
+  }
+
+  .health-workspace > .domain-form,
+  .health-catalog,
+  .health-review,
+  .health-manual-candidates {
+    padding: var(--space-4);
+  }
+
+  .health-review__header,
+  .health-review__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .health-review__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .health-catalog > button,
+  .health-review button,
+  .health-manual-candidates > button,
+  .health-review a {
+    width: 100%;
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+}
