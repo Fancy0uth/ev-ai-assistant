@@ -778,7 +778,7 @@ describe('local course profiles and attributed resources', () => {
         expect(database.prepare('select count(*) as count from actions').get()).toEqual({ count: 0 });
         expect(database.prepare('select count(*) as count from time_requests').get()).toEqual({ count: 0 });
         expect(database.prepare('select app_version from external_capability_runs where resource_id = ?').get(runId))
-          .toEqual({ app_version: '0.6.0' });
+          .toEqual({ app_version: '0.7.0' });
         expect(database.prepare('select evidence_kind, actual_calls from external_capability_runs where resource_id = ?').get(runId))
           .toEqual({ evidence_kind: 'AUTOMATED_FAKE', actual_calls: 1 });
       } finally { database.close(); }
