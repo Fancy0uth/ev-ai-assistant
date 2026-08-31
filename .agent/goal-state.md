@@ -1,3 +1,11 @@
+# V7 执行状态覆盖（2026-08-31 Asia/Shanghai）
+
+- V7-01..V7-07 已提交完成；授权的仅两行版本期望修复为 `76257a8 test(v0.7): align legacy version gates`，当前 HEAD 为 `76257a8`。提交与每项 RED/GREEN 证据均在 `.agent/reports/v0.7-terra-execution.md`。
+- Gate RED 为 Contracts 1 failed/14 passed、Core 1 failed/11 passed，均只因 `0.6.0` 期望；GREEN 为 Contracts 15/15、Core 12/12。未改生产代码。
+- V7-07 browser GREEN：版本末 `npm run test:e2e -- e2e/v0.7-health-loops.spec.ts` 为 1/1 PASS、exit 0。第二个 context 使用同一 Owner/认证会话和不同 localDate；保存来源后显式等待 `POST /revisions` 响应 schema 与确认按钮 enabled，未忽略 `401` 或 `422` console error。
+- 版本末矩阵已完成：受限环境 root `npm test` Legacy 5/5、Core 317/317、Web 246/246、Contracts 85/85、Domain 11/11，exit 0；build exit 0；两条基线 diff check exit 0。首次普通沙箱 root run 的 Core 13 项 `EPERM` cleanup/timeout 已用同一命令受限环境重跑排除为环境限制。
+- 真实 Provider/network/Key/个人数据仍为 `NOT RUN — APPROVAL REQUIRED`；生产 Nutrition Provider 保持未配置 fail-closed，测试仅使用显式 `TEST_FIXTURE`。
+
 # 长任务状态
 
 ## 最终目标

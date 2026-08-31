@@ -1,3 +1,14 @@
+# V7 Terra 最终验证状态（2026-08-31 Asia/Shanghai）
+
+| 层级 | 命令/范围 | 真实结果 |
+| --- | --- | --- |
+| V7 focused | Contracts/Core/Web 每任务指定测试、affected typecheck、focused lint、diff check | V7-01..V7-07 均 PASS；详见执行报告 |
+| authorized gate fix | Contracts `providers.test.ts` + Core `learning.test.ts` | RED 各 1 failed；Green 为 15/15 + 12/12，独立提交 `76257a8` |
+| V7 browser | `npm run test:e2e -- e2e/v0.7-health-loops.spec.ts` | 1/1 PASS，exit 0（版本末复跑 35.0 s） |
+| version-end root test | `npm test` | 受限环境重跑 exit 0：Legacy 5/5、Core 317/317、Web 246/246、Contracts 85/85、Domain 11/11；首次普通沙箱 run 为 `%TEMP%` cleanup EPERM，不是产品断言 |
+| version-end remaining | build、two-baseline diff、final status | build exit 0；`37982d8..HEAD` 与 `785b7b6..HEAD` diff check exit 0；status 仅四份交接文档 |
+| real-provider smoke | 外部营养/动作数据源、凭据、个人数据 | `NOT RUN — APPROVAL REQUIRED` |
+
 # 测试层级映射
 
 ## check_fast

@@ -1,3 +1,15 @@
+# V7 Terra 执行交接（2026-08-31 Asia/Shanghai）
+
+## 当前状态
+
+V7-01 至 V7-07 已由同一 Terra 顺序完成并各自原子提交；授权的两行版本门禁修复另以 `76257a8 test(v0.7): align legacy version gates` 提交，HEAD 为 `76257a8`。V7-07 的同 Owner、同认证会话、不同 localDate desktop/iPhone 浏览器闭环为 1/1 PASS，且严格保留 console `401`/`422` 失败。
+
+授权机械替换后，Contracts focused 15/15、Core focused 12/12 均 PASS。版本末矩阵已完成：受限环境中的 root `npm test` 为 Legacy 5/5、Core 317/317、Web 246/246、Contracts 85/85、Domain 11/11，exit 0；`npm run build` exit 0；v0.7 E2E 1/1、exit 0；`git diff --check 37982d8..HEAD` 与 `git diff --check 785b7b6..HEAD` 均 exit 0。第一次非受限 root run 曾因 `%TEMP%` cleanup 的 `EPERM` 使 Core 13 项超时，受限环境的同一命令已证明这不是产品失败。
+
+## 留给主 Agent
+
+复核最终交接报告与四份未提交状态文档；除它们外工作树无待提交更改。详见 `.agent/reports/v0.7-terra-execution.md`。
+
 # TASK-V7-01：冻结 v0.7 公共契约
 
 ## 当前目标
