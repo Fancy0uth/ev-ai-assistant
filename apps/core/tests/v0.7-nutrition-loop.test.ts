@@ -93,6 +93,8 @@ describe('v0.7 nutrition candidate and confirmation loop', () => {
       expect(service.confirmMealDraft(ownerId, created.draft.id, { expectedVersion: selected.draft.version, revisionId: selected.revision.id }, 'v07-nutrition-direct-confirm1')).toEqual({ ...confirmed, replayed: true });
       const run = createV07HealthLoopRepository(database).findCapabilityRunByIdempotencyKey(ownerId, 'v07-nutrition-direct-match001');
       expect(run).toMatchObject({ capability: 'NUTRITION_DATA_LOOKUP', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', nutritionSourceVersion: '1', nutritionDatasetHash: 'a'.repeat(64) });
+      expect(run!.inputBytes).toBeGreaterThan(0);
+      expect(run!.outputBytes).toBeGreaterThan(0);
       expect(JSON.stringify(run)).not.toContain('Fixture Food Alpha');
 
       const mismatchedRecord = { ...withoutHash, recordId: 'fixture-mismatch', serving: { quantityDecimal: '100', unit: 'MILLILITER' as const } };

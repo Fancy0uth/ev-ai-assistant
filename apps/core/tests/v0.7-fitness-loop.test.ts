@@ -161,7 +161,9 @@ describe('v0.7 Fitness review loop', () => {
     const database = openDatabase(join(directory, 'app.sqlite'));
     try {
       expect(database.prepare('select count(*) as count from workouts_v2').get()).toEqual({ count: 1 });
-      expect(database.prepare(`select count(*) as count from v07_capability_runs where capability = 'WORKOUT_TEXT_SELECTION'`).get()).toEqual({ count: 1 });
+      const run = database.prepare(`select input_bytes as inputBytes, output_bytes as outputBytes from v07_capability_runs where capability = 'WORKOUT_TEXT_SELECTION'`).get() as { inputBytes: number; outputBytes: number };
+      expect(run.inputBytes).toBeGreaterThan(0);
+      expect(run.outputBytes).toBeGreaterThan(0);
     } finally {
       database.close();
     }
@@ -173,7 +175,7 @@ describe('v0.7 Fitness review loop', () => {
       descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic failing workout fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE' },
       async selectWorkout() {
         providerCalls += 1;
-        throw new Error('SYNTHETIC_PROVIDER_FAILURE');
+        return { schemaVersion: 'WORKOUT_TEXT_SELECTION_V1', title: 'Invalid synthetic workout', rationale: 'Unknown citation must be rejected.', orderedCitationIds: ['f'.repeat(64)] };
       },
       async parseMealCandidates() { throw new Error('not used'); },
     };
