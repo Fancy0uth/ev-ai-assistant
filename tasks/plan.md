@@ -2,8 +2,8 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 状态 | Active — v0.4、v0.5 已关闭；V6-01/V6-02/V6-03 已提交，V6-04 已完成验证，待主 Agent 原子提交与整版 Sol review。 |
-| 当前实现基线 | `155b172de91a62feb2762469536555f9a6b2b025`；v0.5 工程 PASS，真实 DeepSeek 仍为独立证据债。 |
+| 状态 | Active — v0.4、v0.5、v0.6 已关闭；当前进入 v0.7 整版 Sol 规划。 |
+| 当前实现基线 | `7ba44fb8beec01545c64380838ed04341df99c1d`；v0.6 Sol rereview-3 PASS，真实 Provider 仍为独立证据债。 |
 | 权威设计 | [v0.4–v0.9 绑定设计](../docs/superpowers/specs/2026-08-23-v0.4-v0.9-mvp-design.md) |
 | 执行路线 | [v0.4–v0.9 总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) |
 | 版本语义 | v0.9 是完整 MVP 的实现版本，不是对外稳定 1.0、公开发布或兼容性承诺。 |
@@ -14,8 +14,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | v0.4 | 已关闭 | 兼容排程输入、ACTIVE/CLOSED TimeRequest、Task/Calendar Unit of Work、事务外 preflight Provider、手工 Event、详情路由与 UI-origin 闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.4-action-scheduling-foundation.md) | `docs/reviews/2026-08-23-v0.4-sol-smoke-review.md` |
 | 2 | v0.5 | 已关闭于 `155b172` | DeepSeek/DPAPI 通路、幂等、Run 恢复、超时/配额、脱敏日志、版本一致；真实调用未运行证据债保留 | [计划](../docs/superpowers/plans/2026-08-23-v0.5-provider-reliability.md) | `docs/reviews/2026-08-24-v0.5-sol-final-review.md` |
-| 3 | v0.6 | V6-01/V6-02/V6-03 已提交；V6-04 P0/P1=0，含 Owner credential-aware DeepSeek text 编排与仅 terminal success 产生真实 capability evidence/call count，待主 Agent atomic commit 与最终 Sol review | 私有 raw artifact、Provider 外发披露、可编辑 revision、Course/Rule/SCHEDULE Proposal、课程详情、安全公开 citation、Learning Action→TimeRequest、响应式闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md) | `docs/reviews/2026-08-23-v0.6-sol-smoke-review.md` |
-| 4 | v0.7 | 待开始 | 健身/恢复与权威营养数据闭环，无医疗诊断 | [计划](../docs/superpowers/plans/2026-08-23-v0.7-fitness-nutrition-loop.md) | `docs/reviews/2026-08-23-v0.7-sol-smoke-review.md` |
+| 3 | v0.6 | 已关闭于 TARGET `7ba44fb`；最终 Sol rereview-3 PASS，P0=0/P1=0 | 私有 raw artifact、Provider 外发披露、可编辑 revision、Course/Rule/SCHEDULE Proposal、课程详情、安全公开 citation、Learning Action→TimeRequest、响应式闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md) | `docs/reviews/2026-08-31-v0.6-sol-rereview-3.md` |
+| 4 | v0.7 | 整版 Sol 规划中 | 健身/恢复与权威营养数据闭环，无医疗诊断 | [计划](../docs/superpowers/plans/2026-08-23-v0.7-fitness-nutrition-loop.md) | `docs/reviews/2026-08-23-v0.7-sol-smoke-review.md` |
 | 5 | v0.8 | 待开始 | 只读项目分析、本地长期记忆、跨模块唯一排程 Proposal | [计划](../docs/superpowers/plans/2026-08-23-v0.8-project-memory-coordination.md) | `docs/reviews/2026-08-23-v0.8-sol-smoke-review.md` |
 | 6 | v0.9 | 待开始 | 私有 iPhone、Windows 运维、WAL 备份恢复与最终完整门禁 | [计划](../docs/superpowers/plans/2026-08-23-v0.9-private-iphone-operations.md) | `docs/reviews/2026-08-23-v0.9-sol-smoke-review.md` |
 
@@ -40,14 +40,13 @@
 - Prompt、网页、OCR、项目仓库和 RAG 内容都是不可信数据，不是指令。
 - 安装/配置 Tailscale、系统服务/Task Scheduler、端口/防火墙、真实恢复、物理设备、push/发布都需要执行时主 Agent 单独审批。
 
-## 当前冻结里程碑：v0.6
+## 当前冻结里程碑：v0.7
 
-- BASE：`155b172`。
-- 垂直任务数：4；顺序为安全 artifact/披露 → Vision revision/课程日程 → 课程详情/安全 citation → 学习 Action/TimeRequest/响应式证据/0.6.0。
-- Vision 与公开搜索没有获批供应商或真实 Key，生产必须 `BLOCKED_PROVIDER`；DeepSeek 仅承担已支持的文本分析，绝不推断其支持图片。
-- 自动验收只使用三重门控的 Fake，真实 Vision/Search/DeepSeek 成功均保留为 `NOT RUN — APPROVAL REQUIRED`；这不阻止 P0/P1 为零时的工程 PASS。
-- v19 只增不改；原始图片进入本地私有 artifact，citation 不保存整页正文，所有网络位于 SQLite 写事务之外。
-- 最终只做一次 v0.6 Sol 里程碑审查；P0/P1 为零才可 PASS。
+- 入口：v0.6 PASS TARGET `7ba44fb`，准入文档提交 `b3b6409`。
+- 既有计划分为 V7-01–V7-05；Sol 将按现有代码重新冻结整版顺序、数据源合同和最小测试边界。
+- 动作目录必须有 source/license/version/hash；许可不清时不导入。RAG 资料不可信且不能改变工具/权限。
+- 营养数值必须来自权威、带版本的数据源；模型只解析食物/份量候选，Core 计算，Owner 确认后入账。
+- 真实 API、网络、Key、费用和个人健康数据外发均需单独审批；未配置时 fail closed，自动 fixture 不冒充真实数据源。
 
 ## 历史完成基线：v0.4–v0.5
 

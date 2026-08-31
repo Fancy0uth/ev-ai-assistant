@@ -1,6 +1,6 @@
 # EV AI Dashboard MVP 任务清单
 
-执行边界、依赖和命令以 [总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) 与各版独立计划为准。v0.5 已在 `155b172` 工程关版；v0.6 整版实现已完成工程验证，等待 V6-04 原子提交与最终 Sol review。以下 ID 与计划一一对应；版本之间不得跳序。
+执行边界、依赖和命令以 [总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) 与各版独立计划为准。v0.6 已在 TARGET `7ba44fb` 通过最终 Sol rereview-3，P0=0/P1=0；当前进入 v0.7 整版 Sol 规划。以下 ID 与计划一一对应；版本之间不得跳序。
 
 ## v0.4：Action Scheduling Foundation
 
@@ -28,7 +28,7 @@
 - [x] V6-01：已提交为 `8ee52e1 feat(course-import): secure local timetable artifacts`。
 - [x] V6-02：已提交为 `4b4e218 feat(course-import): review timetable candidates before scheduling`。
 - [x] V6-03：已提交为 `b99fdce feat(learning): save safe public course citations`；包含独立 Course 详情、官方/用户/公开来源、版本化学习进度、IPv6 special-use fail-closed 与 DNS-pinned HTTPS metadata-only citation。
-- [x] V6-04：实现与工程验证完成，待主 Agent 提交 `feat(learning): schedule cited study actions`；基于哈希一致 citation 的 strict 学习建议、Owner credential-aware DeepSeek text 编排、仅 terminal success 写入真实 capability evidence/精确 actual_calls、确认后原子 Learning Action + ACTIVE TimeRequest、既有日计划/Today lineage、桌面/iPhone Fake E2E 与 0.6.0 已同步。P0=0/P1=0；最终 Sol review 和真实 Provider 证据仍待流程/审批。
+- [x] V6-04：已提交为 `a94e82e feat(learning): schedule cited study actions`；后续 reliability、artifact、browser identity 与 WebP decodability 修复最终收口于 `7ba44fb`。Sol rereview-3 PASS，P0=0/P1=0；真实 Provider 证据继续为审批后证据债。
 
 v0.6 的 Vision/Search 供应商、真实 Key 和真实调用均未获批准。生产保持未配置，自动测试 Fake 必须满足 `NODE_ENV=test`、显式 v0.6 flag 和 runner-owned 临时数据目录；真实成功证据继续记录为 `NOT RUN — APPROVAL REQUIRED`。
 

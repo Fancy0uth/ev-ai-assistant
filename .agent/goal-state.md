@@ -6,11 +6,11 @@
 
 ## 当前里程碑
 
-M1 / v0.6：课程、课表截图与学习排程闭环。
+M2 / v0.7：健身、恢复与权威营养数据闭环。
 
 ## 当前任务
 
-v0.6 Sol rereview-2 的唯一 P1 `P1-ARTIFACT-001` 已完成 Terra 定点修复：WebP upload 仅在完整本地 VP8/VP8L 像素解码成功后可进入 artifact persistence。主 Agent 已独立完成代码复核、Chromium 正例解码、全套单元/集成测试、typecheck、lint、build 与完整 E2E 8/8；当前等待原子提交和新的 Sol 整版复审。不得在复审归零前声称 v0.6 PASS。
+v0.6 已由最终 Sol rereview-3 在 TARGET `7ba44fb` 上确认 P0=0/P1=0 并 PASS，准入文档提交为 `b3b6409`。当前开始 v0.7 整版 Sol 分析：核对现有健身/饮食底座、冻结动作目录和营养数据 Provider 门、形成 Terra 可连续执行的整版任务与最小测试边界。
 
 ## 已完成任务
 
@@ -20,15 +20,17 @@ v0.6 Sol rereview-2 的唯一 P1 `P1-ARTIFACT-001` 已完成 Terra 定点修复�
 - V6-01 `8ee52e1`、V6-02 `4b4e218`、V6-03 `b99fdce` 已提交；V6-04 产品闭环、0.6.0 版本更新与确定性验证已实现。
 - v0.6 Sol 最终审查发现的 Vision 幂等、capability policy/evidence、WebP artifact 与 diff gate P1/P3 已按两轮 TDD 修复；配额按 claim 的 Asia/Shanghai 执行日原子 reservation。
 - stale capability lease 已按保守 quota 与三类业务状态原子恢复；本轮另修复 Daily Plan preflight 的测试时钟 composition，并同步 v19/APP_VERSION 测试期望。
+- v0.6 最终入口 `7ba44fb`：课程/课表/学习闭环完成，WebP 必须本地完整像素解码；Sol rereview-3 为 PASS，P0=0、P1=0、P2=6、P3=0。
 
 ## 下一任务
 
-原子提交当前 P1 修复并发起 Sol 里程碑复审。只有复审确认 P0/P1 为零并 PASS，才可进入 v0.7。
+由 Sol 基于 v0.6 PASS 入口完成 v0.7 整版分析和任务边界冻结；主 Agent 审核后交由 Terra 从 V7-01 开始 TDD 实现。
 
 ## 当前阻塞
 
-- 本轮确定性门无已知阻塞；只剩新的 Sol 整版复审尚未给出 P0/P1 归零结论。
-- 真实 Vision、Search、DeepSeek 与真实凭据/DPAPI/网络未获授权，继续记录为 `NOT RUN — APPROVAL REQUIRED`，不由 Fake 替代。
+- v0.6 无剩余 P0/P1 阻塞。
+- v0.7 动作数据集来源/许可/版本与营养数据 Provider 契约尚待 Sol 冻结；未获授权前不得抓取、导入许可不明数据或调用真实网络/API。
+- 真实 Vision、Search、DeepSeek 与真实凭据/DPAPI/网络继续记录为 `NOT RUN — APPROVAL REQUIRED`，不由 Fake 替代。
 
 ## 最近测试结果
 
@@ -56,7 +58,8 @@ v0.6 Sol rereview-2 的唯一 P1 `P1-ARTIFACT-001` 已完成 Terra 定点修复�
 
 ## 尚未验证风险
 
-- 仍需 Sol 对 BASE `155b172` 至修复提交执行整版复审；P0/P1 未由最终复审归零前不得进入 v0.7。
+- v0.6 六个 P2 继续作为非阻断债务，不在 v0.7 无关切片中顺带扩张。
+- v0.7 尚未冻结真实动作目录和权威营养数据 Provider；自动 fixture 只能证明工程合同，不能替代真实数据源证据。
 - v0.5 `P2-EVIDENCE-001` 以及三类真实 Provider 成功证据仍是明确证据债。
 
 ## 最后更新时间
