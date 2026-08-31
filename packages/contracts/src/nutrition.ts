@@ -31,30 +31,61 @@ export const nutritionDecimalTotalsSchema = z.object({
   fatGramsDecimal: canonicalDecimalSchema,
 }).strict();
 
+export const testFixtureNutritionSourceDescriptorSchema = z.object({
+  sourceKind: z.literal('TEST_FIXTURE'),
+  sourceId: z.string().trim().min(1).max(120),
+  sourceVersion: z.string().trim().min(1).max(120),
+  datasetHash: sha256Schema,
+  redistribution: z.literal(false),
+  licenseDecisionId: z.null(),
+}).strict();
+export const approvedLocalNutritionSourceDescriptorSchema = z.object({
+  sourceKind: z.literal('APPROVED_LOCAL_DATASET'),
+  sourceId: z.string().trim().min(1).max(120),
+  sourceVersion: z.string().trim().min(1).max(120),
+  datasetHash: sha256Schema,
+  redistribution: z.boolean(),
+  licenseDecisionId: z.string().trim().min(1).max(120),
+}).strict();
+export const remoteNutritionSourceDescriptorSchema = z.object({
+  sourceKind: z.literal('REMOTE_API'),
+  sourceId: z.string().trim().min(1).max(120),
+  sourceVersion: z.string().trim().min(1).max(120),
+  datasetHash: sha256Schema,
+  redistribution: z.boolean(),
+  licenseDecisionId: z.string().trim().min(1).max(120),
+}).strict();
+
 export const nutritionSourceDescriptorSchema = z.discriminatedUnion('sourceKind', [
+  testFixtureNutritionSourceDescriptorSchema,
+  approvedLocalNutritionSourceDescriptorSchema,
+  remoteNutritionSourceDescriptorSchema,
+]);
+
+const nonFixtureNutritionProviderIdSchema = z.string().trim().min(1).max(120)
+  .refine((providerId) => providerId !== 'v07-test-fixture', 'Fixture Provider identity cannot be used outside test fixtures');
+
+export const nutritionDataProviderDescriptorSchema = z.discriminatedUnion('adapterKind', [
   z.object({
-    sourceKind: z.literal('TEST_FIXTURE'),
-    sourceId: z.string().trim().min(1).max(120),
-    sourceVersion: z.string().trim().min(1).max(120),
-    datasetHash: sha256Schema,
-    redistribution: z.literal(false),
-    licenseDecisionId: z.null(),
+    providerId: z.literal('v07-test-fixture'),
+    providerLabel: z.string().trim().min(1).max(120),
+    adapterKind: z.literal('TEST_FIXTURE'),
+    evidenceKind: z.literal('AUTOMATED_TEST_FIXTURE'),
+    source: testFixtureNutritionSourceDescriptorSchema,
   }).strict(),
   z.object({
-    sourceKind: z.literal('APPROVED_LOCAL_DATASET'),
-    sourceId: z.string().trim().min(1).max(120),
-    sourceVersion: z.string().trim().min(1).max(120),
-    datasetHash: sha256Schema,
-    redistribution: z.boolean(),
-    licenseDecisionId: z.string().trim().min(1).max(120),
+    providerId: nonFixtureNutritionProviderIdSchema,
+    providerLabel: z.string().trim().min(1).max(120),
+    adapterKind: z.literal('APPROVED_LOCAL_DATASET'),
+    evidenceKind: z.literal('APPROVED_LOCAL_DATASET'),
+    source: approvedLocalNutritionSourceDescriptorSchema,
   }).strict(),
   z.object({
-    sourceKind: z.literal('REMOTE_API'),
-    sourceId: z.string().trim().min(1).max(120),
-    sourceVersion: z.string().trim().min(1).max(120),
-    datasetHash: sha256Schema,
-    redistribution: z.boolean(),
-    licenseDecisionId: z.string().trim().min(1).max(120),
+    providerId: nonFixtureNutritionProviderIdSchema,
+    providerLabel: z.string().trim().min(1).max(120),
+    adapterKind: z.literal('PRODUCTION_ADAPTER'),
+    evidenceKind: z.literal('REAL_PROVIDER'),
+    source: remoteNutritionSourceDescriptorSchema,
   }).strict(),
 ]);
 
@@ -208,6 +239,7 @@ export type MealRecord = z.infer<typeof mealRecordSchema>;
 export type CanonicalDecimal = z.infer<typeof canonicalDecimalSchema>;
 export type ServingUnit = z.infer<typeof servingUnitSchema>;
 export type NutritionSourceDescriptor = z.infer<typeof nutritionSourceDescriptorSchema>;
+export type NutritionDataProviderDescriptor = z.infer<typeof nutritionDataProviderDescriptorSchema>;
 export type NutritionFoodRecord = z.infer<typeof nutritionFoodRecordSchema>;
 export type MealCandidate = z.infer<typeof mealCandidateSchema>;
 export type MealDraft = z.infer<typeof mealDraftSchema>;

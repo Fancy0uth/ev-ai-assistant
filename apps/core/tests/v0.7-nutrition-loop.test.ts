@@ -129,7 +129,7 @@ describe('v0.7 nutrition candidate and confirmation loop', () => {
   it('maps maximum product and total overflow to terminal 422 without creating a Meal', async () => {
     const source = { sourceKind: 'TEST_FIXTURE', sourceId: 'ev-v07-decimal-range', sourceVersion: '1', datasetHash: 'd'.repeat(64), redistribution: false, licenseDecisionId: null } as const;
     const provider: NutritionDataProvider = {
-      descriptor: { providerId: 'v07-decimal-range', providerLabel: 'Synthetic decimal range fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
+      descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic decimal range fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
       async searchBatch(input) {
         return {
           groups: input.queries.map((query) => {
@@ -273,7 +273,7 @@ describe('v0.7 nutrition candidate and confirmation loop', () => {
     const source = { sourceKind: 'TEST_FIXTURE', sourceId: 'ev-v07-idem-match', sourceVersion: '1', datasetHash: 'b'.repeat(64), redistribution: false, licenseDecisionId: null } as const;
     let providerCalls = 0;
     const provider: NutritionDataProvider = {
-      descriptor: { providerId: 'v07-idem-match-fail', providerLabel: 'Synthetic failing nutrition fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
+      descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic failing nutrition fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
       async searchBatch() {
         providerCalls += 1;
         throw new Error('SYNTHETIC_NUTRITION_FAILURE');

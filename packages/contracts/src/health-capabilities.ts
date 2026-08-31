@@ -17,6 +17,21 @@ const providerDescriptorSchema = z.object({
   evidenceKind: healthEvidenceKindSchema,
 }).strict();
 
+export const healthTextProviderDescriptorSchema = z.discriminatedUnion('adapterKind', [
+  z.object({
+    providerId: z.literal('v07-test-fixture'),
+    providerLabel: z.string().trim().min(1).max(120),
+    adapterKind: z.literal('TEST_FIXTURE'),
+    evidenceKind: z.literal('AUTOMATED_TEST_FIXTURE'),
+  }).strict(),
+  z.object({
+    providerId: z.literal('deepseek'),
+    providerLabel: z.string().trim().min(1).max(120),
+    adapterKind: z.literal('PRODUCTION_ADAPTER'),
+    evidenceKind: z.literal('REAL_PROVIDER'),
+  }).strict(),
+]);
+
 export const healthCapabilityDescriptorSchema = providerDescriptorSchema.extend({
   capability: healthCapabilityKindSchema,
   availability: healthCapabilityAvailabilitySchema,
@@ -88,12 +103,7 @@ export const mealCandidateParseOutputSchema = z.object({
 }).strict();
 
 export interface HealthTextProvider {
-  readonly descriptor: {
-    providerId: 'deepseek' | 'v07-test-fixture';
-    providerLabel: string;
-    adapterKind: 'TEST_FIXTURE' | 'PRODUCTION_ADAPTER';
-    evidenceKind: 'AUTOMATED_TEST_FIXTURE' | 'REAL_PROVIDER';
-  };
+  readonly descriptor: HealthTextProviderDescriptor;
   selectWorkout(input: WorkoutTextSelectionInput, signal: AbortSignal): Promise<unknown>;
   parseMealCandidates(input: MealCandidateParseInput, signal: AbortSignal): Promise<unknown>;
 }
@@ -102,6 +112,7 @@ export type HealthCapabilityKind = z.infer<typeof healthCapabilityKindSchema>;
 export type HealthAdapterKind = z.infer<typeof healthAdapterKindSchema>;
 export type HealthEvidenceKind = z.infer<typeof healthEvidenceKindSchema>;
 export type HealthCapabilityDescriptor = z.infer<typeof healthCapabilityDescriptorSchema>;
+export type HealthTextProviderDescriptor = z.infer<typeof healthTextProviderDescriptorSchema>;
 export type WorkoutTextSelectionInput = z.infer<typeof workoutTextSelectionInputSchema>;
 export type WorkoutTextSelectionOutput = z.infer<typeof workoutTextSelectionOutputSchema>;
 export type MealCandidateParseInput = z.infer<typeof mealCandidateParseInputSchema>;

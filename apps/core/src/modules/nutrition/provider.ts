@@ -3,11 +3,11 @@ import {
   mealCandidateParseInputSchema,
   mealCandidateParseOutputSchema,
   nutritionFoodRecordSchema,
+  type NutritionDataProviderDescriptor,
   type HealthTextProvider,
   type MealCandidate,
   type MealCandidateParseInput,
   type NutritionFoodRecord,
-  type NutritionSourceDescriptor,
   type ServingUnit,
 } from '@ev/contracts';
 import * as z from 'zod';
@@ -30,13 +30,7 @@ export class NutritionProviderError extends Error {
 }
 
 export interface NutritionDataProvider {
-  readonly descriptor: {
-    providerId: string;
-    providerLabel: string;
-    adapterKind: 'TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'PRODUCTION_ADAPTER';
-    evidenceKind: 'AUTOMATED_TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'REAL_PROVIDER';
-    source: NutritionSourceDescriptor;
-  };
+  readonly descriptor: NutritionDataProviderDescriptor;
   searchBatch(input: {
     queries: Array<{ candidateId: string; query: string; unit: ServingUnit; limit: 5 }>;
   }, signal: AbortSignal): Promise<unknown>;

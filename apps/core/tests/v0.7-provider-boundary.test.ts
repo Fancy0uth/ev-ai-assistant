@@ -36,7 +36,7 @@ describe('v0.7 Provider boundary', () => {
       parseMealCandidates: ignoredSignalPromise((signal) => signals.push(signal)),
     };
     const nutritionProvider: NutritionDataProvider = {
-      descriptor: { providerId: 'v07-provider-boundary', providerLabel: 'Synthetic ignored-signal fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
+      descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic ignored-signal fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
       searchBatch: ignoredSignalPromise((signal) => signals.push(signal)),
     };
 
@@ -58,7 +58,7 @@ describe('v0.7 Provider boundary', () => {
   it('rejects canonical UTF-8 input over 24000 bytes before calling the adapter', async () => {
     let providerCalls = 0;
     const provider: NutritionDataProvider = {
-      descriptor: { providerId: 'v07-provider-boundary', providerLabel: 'Synthetic input budget fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
+      descriptor: { providerId: 'v07-test-fixture', providerLabel: 'Synthetic input budget fixture', adapterKind: 'TEST_FIXTURE', evidenceKind: 'AUTOMATED_TEST_FIXTURE', source },
       async searchBatch() {
         providerCalls += 1;
         return { groups: [] };

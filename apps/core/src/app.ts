@@ -3,7 +3,12 @@ import { dirname, join } from 'node:path';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
-import type { HealthTextProvider, ProviderKey } from '@ev/contracts';
+import {
+  healthTextProviderDescriptorSchema,
+  nutritionDataProviderDescriptorSchema,
+  type HealthTextProvider,
+  type ProviderKey,
+} from '@ev/contracts';
 import { ApiError, registerErrorHandling } from './http/api-error';
 import { createAgentRepository } from './modules/agent/repository';
 import { registerAgentRoutes } from './modules/agent/routes';
@@ -106,13 +111,26 @@ export interface AppOptions {
 }
 
 export async function buildApp(options: AppOptions = {}): Promise<FastifyInstance> {
+  let healthTextDescriptor: HealthTextProvider['descriptor'] | undefined;
+  let nutritionDataDescriptor: NutritionDataProvider['descriptor'] | undefined;
+  try {
+    healthTextDescriptor = options.healthTextProvider
+      ? healthTextProviderDescriptorSchema.parse(options.healthTextProvider.descriptor)
+      : undefined;
+    nutritionDataDescriptor = options.nutritionDataProvider
+      ? nutritionDataProviderDescriptorSchema.parse(options.nutritionDataProvider.descriptor)
+      : undefined;
+  } catch {
+    throw new Error('V07_PROVIDER_DESCRIPTOR_REJECTED');
+  }
   const app = Fastify({
     logger: options.logger ?? true,
   });
   const databasePath = options.databasePath ?? ':memory:';
   const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
   const artifactRoot = options.artifactRoot ?? join(dataRoot, 'artifacts');
-  const fixtureRequested = options.healthTextProvider?.descriptor.adapterKind === 'TEST_FIXTURE' || options.nutritionDataProvider?.descriptor.adapterKind === 'TEST_FIXTURE';
+  const fixtureRequested = healthTextDescriptor?.adapterKind === 'TEST_FIXTURE'
+    || nutritionDataDescriptor?.adapterKind === 'TEST_FIXTURE';
   if (fixtureRequested) {
     const gate = options.v07TestAdapterGate;
     const pathsInsideRunnerRoot = gate
