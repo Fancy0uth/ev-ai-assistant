@@ -1,4 +1,32 @@
-# v0.7 Sol P1 remediation final matrix (2026-08-31 Asia/Shanghai)
+# v0.7 third/final repair-cycle verification (2026-08-31 Asia/Shanghai)
+
+Repair base: `caf4b83`; committed HEAD: `346e744`; third Sol review pending Main Agent.
+
+## Third-cycle final matrix
+
+| Layer | Exact command | Exit / count |
+| --- | --- | --- |
+| Root tests | `npm test` | 0; Legacy 7/7, Core 54 files / 448 tests, Web 21 / 246, Contracts 7 / 85, Domain 4 / 11 |
+| Type safety | `npm run typecheck` | 0; Core/Web/Contracts/Domain passed |
+| Lint | `npm run lint` | 0; 0 errors, 4 unchanged warnings in `v0.5-recovery-sweeper.test.ts` |
+| Build | `npm run build` | 0; Next production build and 6/6 static pages passed; generated `next-env.d.ts` restored |
+| Browser | `npm run test:e2e -- e2e/v0.7-health-loops.spec.ts` | 0; 1/1 passed, test 24.4 s / total 27.7 s |
+| Execution-range whitespace | `git diff --check 37982d8..HEAD` | 0; no output after whitespace-only commit `934ae77` |
+| Lineage-range whitespace | `git diff --check 785b7b6..HEAD` | 0; no output after whitespace-only commit `934ae77` |
+| Matrix-end status | `git status --short` | only the four handoff documents before their evidence commit |
+
+Focused third-cycle evidence:
+
+- MIG: RED 69 failed / 1 passed, first failure corrupt v20 `check-in.signal` was certified. GREEN 3 files / 87 tests. Additive v22 checks all 30 edges from corrupt v20 and v21, does not record v22 or mutate bad rows, and preserves clean v1/v2/v16/v17/v18/v19/v20/v21 through two startups.
+- FIXTURE: RED composition 25 failed / 16 passed. GREEN composition 41/41; affected 3 files / 53 tests; contracts 7/7. Runtime strict parse occurs before Fastify/DB side effects and covers all contradictory fixture-marker combinations for both ports plus consistent production/approved-local branches.
+- REPLAY: RED 3/3 failed on missing first-response `Retry-After`. GREEN route 3/3 and affected 4 files / 22 tests; workout selection, meal parse, and nutrition lookup preserve `Retry-After: 86400`, status/body, and replay marker.
+- Affected typechecks, focused ESLint, and diff-checks passed for all three slices. The REPLAY typecheck first exposed an `unknown` test-helper payload at line 102; after a type-only correction, core typecheck and 22/22 affected tests passed.
+
+Retained P2, intentionally unchanged: `V07-CONTRACT-010`, `V07-BROWSER-011`, `V07-EVIDENCE-014`.
+
+Matrix disposition: PASS for local engineering verification. The Main Agent reran the incomplete parent test command to a captured exit 0 and removed only trailing whitespace from the historical Sol FAIL review; no verdict or substantive review content changed. Fresh Sol whole-version review remains required.
+
+## First Sol remediation final matrix (historical)
 
 | Layer | Exact command | Exit / count |
 | --- | --- | --- |
