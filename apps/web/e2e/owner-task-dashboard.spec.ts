@@ -38,21 +38,24 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
 
   await expect(page).toHaveURL(/\/today$/);
   await expect(
-    page.getByRole('heading', { name: '今天，从最重要的事开始。' }),
+    page.getByRole('heading', { name: '今天的控制台' }),
   ).toBeVisible();
   const taskTitlePrefix = `task${randomUUID().replaceAll('-', '')}`;
   const taskTitle = `${taskTitlePrefix}${'x'.repeat(200 - taskTitlePrefix.length)}`;
   expect(taskTitle).toHaveLength(200);
   expect(taskTitle).not.toMatch(/\s/);
   const taskInput = page.getByLabel('新任务');
-  const areaSelect = page.getByLabel('领域');
+  const areaSelect = page.getByLabel('领域', { exact: true });
   const prioritySelect = page.getByLabel('优先级');
+  const includeInDailyPlanCheckbox = page.getByRole('checkbox', { name: '加入每日计划' });
   const addTaskButton = page.getByRole('button', { name: '添加到今天' });
   await taskInput.focus();
   await page.keyboard.press('Tab');
   await expect(areaSelect).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(prioritySelect).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(includeInDailyPlanCheckbox).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(addTaskButton).toBeFocused();
   await taskInput.fill(taskTitle);
@@ -80,6 +83,15 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
     };
     return {
       hasHorizontalOverflow: root.scrollWidth > root.clientWidth,
+      overflowSources: Array.from(document.querySelectorAll<HTMLElement>('body *'))
+        .filter((element) => element.scrollWidth > root.clientWidth)
+        .map((element) => ({
+          tagName: element.tagName,
+          className: element.className,
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        }))
+        .slice(0, 10),
       checkTarget: rect('.task-check-target')?.height,
       composerInput: rect('.task-composer input')?.height,
       composerSelect: rect('.task-composer select')?.height,
@@ -90,7 +102,9 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
       composerSubmitFontSize: fontSize('.composer-submit'),
     };
   });
-  expect(mobileMetrics.hasHorizontalOverflow).toBe(false);
+  if (mobileMetrics.hasHorizontalOverflow) {
+    throw new Error(`Mobile horizontal overflow: ${JSON.stringify(mobileMetrics.overflowSources)}`);
+  }
   expect(mobileMetrics.checkTarget).toBeGreaterThanOrEqual(44);
   expect(mobileMetrics.composerInput).toBeGreaterThanOrEqual(44);
   expect(mobileMetrics.composerSelect).toBeGreaterThanOrEqual(44);

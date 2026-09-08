@@ -49,18 +49,26 @@ async function authenticate(
 test('four isolated contexts for one owner cover dashboard links, direct routes, reload, history and responsive layouts', async ({ browser }, testInfo) => {
   const contextIds = new Set<object>();
   const usernames = new Set<string>();
+  let storageState: Awaited<ReturnType<import('@playwright/test').BrowserContext['storageState']>> | undefined;
 
   for (const viewport of viewports) {
     const context = await browser.newContext({
       viewport: { width: viewport.width, height: viewport.height },
       hasTouch: viewport.hasTouch,
+      ...(storageState ? { storageState } : {}),
     });
     contextIds.add(context);
     const page = await context.newPage();
     const browserProblems = collectBrowserProblems(page);
 
     try {
-      await authenticate(page, owner);
+      if (storageState) {
+        await page.goto('/today');
+        await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
+      } else {
+        await authenticate(page, owner);
+        storageState = await context.storageState();
+      }
       usernames.add(owner.username);
 
       const navigation = page.getByRole('navigation', {
@@ -75,9 +83,9 @@ test('four isolated contexts for one owner cover dashboard links, direct routes,
 
       await page.goto('/today');
       await expect(page).toHaveURL(/\/today$/);
-      await expect(page.getByRole('heading', { name: '今天，从最重要的事开始。' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
       await page.reload();
-      await expect(page.getByRole('heading', { name: '今天，从最重要的事开始。' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '今天的控制台' })).toBeVisible();
       await todayLink.click();
       await expect(page).toHaveURL(/\/today$/);
 

@@ -41,6 +41,35 @@ const task = {
 };
 
 const unbrokenTaskTitle = 'x'.repeat(200);
+const pendingProposal = {
+  id: '00000000-0000-4000-8000-000000000444',
+  kind: 'SCHEDULE',
+  status: 'PENDING',
+  source: 'DAILY_SCHEDULER',
+  title: '确认今天的时间块',
+  changes: [
+    {
+      operation: 'CREATE_EVENT',
+      event: {
+        id: '00000000-0000-4000-8000-000000000445',
+        calendarRuleId: null,
+        title: '今天的深度工作',
+        kind: 'WORK_BLOCK',
+        localDate: '2026-08-07',
+        startLocalTime: '14:00',
+        endLocalTime: '15:00',
+        isHard: false,
+        status: 'CONFIRMED',
+        version: 1,
+        createdAt: '2026-08-07T01:00:00.000Z',
+        updatedAt: '2026-08-07T01:00:00.000Z',
+      },
+    },
+  ],
+  version: 1,
+  createdAt: '2026-08-07T01:00:00.000Z',
+  expiresAt: null,
+};
 
 const populatedSnapshot = {
   data: {
@@ -59,6 +88,24 @@ const populatedSnapshot = {
       ],
     },
     tasks: [task],
+  },
+};
+
+const recoverySnapshot = {
+  data: {
+    ...emptySnapshot.data,
+    signals: [
+      {
+        id: '00000000-0000-4000-8000-000000000111',
+        localDate: '2026-08-07',
+        kind: 'RECOVERY',
+        value: 25,
+        source: 'CHECK_IN',
+        version: 1,
+        createdAt: '2026-08-07T01:00:00.000Z',
+        updatedAt: '2026-08-07T01:00:00.000Z',
+      },
+    ],
   },
 };
 
@@ -110,12 +157,254 @@ describe('TodayDashboard', () => {
     await user.type(screen.getByLabelText('新任务'), task.title);
     await user.click(screen.getByRole('button', { name: '添加到今天' }));
 
-    expect(await screen.findAllByText(task.title)).toHaveLength(2);
+    expect(await screen.findAllByText(task.title)).toHaveLength(3);
     expect(screen.getAllByText('规则引擎')).toHaveLength(1);
     expect(screen.queryByText('Milestone 0.6')).not.toBeInTheDocument();
     const renderedIds = Array.from(document.querySelectorAll('[id]'), ({ id }) => id);
     expect(new Set(renderedIds).size).toBe(renderedIds.length);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('reuses a Today proposal decision key after an uncertain Core gateway failure', async () => {
+    const pendingSnapshot = {
+      data: { ...emptySnapshot.data, pendingProposals: [pendingProposal] },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(pendingSnapshot))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: 'Core 是否已提交该决定未知' } },
+          502,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: { ...pendingProposal, status: 'ACCEPTED', version: 2 } }))
+      .mockResolvedValueOnce(jsonResponse(emptySnapshot));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+    await screen.findByText(pendingProposal.title);
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    await screen.findByText('没有待确认的日程变更。');
+
+    const path = `/api/core/proposals/${pendingProposal.id}/decision`;
+    const decisions = fetchMock.mock.calls.filter(([url]) => url === path);
+    expect(decisions).toHaveLength(2);
+    const firstKey = new Headers(decisions[0]?.[1]?.headers).get('idempotency-key');
+    const retryKey = new Headers(decisions[1]?.[1]?.headers).get('idempotency-key');
+    expect(firstKey).toMatch(/^web-/);
+    expect(retryKey).toBe(firstKey);
+  });
+
+  it('retains a Today proposal key when a 2xx decision body is malformed and refresh fails', async () => {
+    const pendingSnapshot = {
+      data: { ...emptySnapshot.data, pendingProposals: [pendingProposal] },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(pendingSnapshot))
+      .mockResolvedValueOnce(jsonResponse({ malformed: true }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: '今天的数据刷新失败' } },
+          503,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: { ...pendingProposal, status: 'ACCEPTED', version: 2 } }))
+      .mockResolvedValueOnce(jsonResponse(emptySnapshot));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+    await screen.findByText(pendingProposal.title);
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    await screen.findByText('没有待确认的日程变更。');
+
+    const path = `/api/core/proposals/${pendingProposal.id}/decision`;
+    const decisions = fetchMock.mock.calls.filter(([url]) => url === path);
+    expect(decisions).toHaveLength(2);
+    const firstKey = new Headers(decisions[0]?.[1]?.headers).get('idempotency-key');
+    const retryKey = new Headers(decisions[1]?.[1]?.headers).get('idempotency-key');
+    expect(firstKey).toMatch(/^web-/);
+    expect(retryKey).toBe(firstKey);
+  });
+
+  it.each([
+    ['a different proposal id', { ...pendingProposal, id: '00000000-0000-4000-8000-000000000446', status: 'ACCEPTED', version: 2 }],
+    ['a non-increasing version', { ...pendingProposal, status: 'ACCEPTED', version: 1 }],
+    ['the wrong terminal status', { ...pendingProposal, status: 'REJECTED', version: 2 }],
+  ])('retains a Today proposal key when a schema-valid 2xx response has %s', async (_case, uncertainProposal) => {
+    const pendingSnapshot = {
+      data: { ...emptySnapshot.data, pendingProposals: [pendingProposal] },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(pendingSnapshot))
+      .mockResolvedValueOnce(jsonResponse({ data: uncertainProposal }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'CORE_UNAVAILABLE', message: '今天的数据刷新失败' } },
+          503,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: { ...pendingProposal, status: 'ACCEPTED', version: 2 } }))
+      .mockResolvedValueOnce(jsonResponse(emptySnapshot));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+    await screen.findByText(pendingProposal.title);
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认安排' }));
+    await screen.findByText('没有待确认的日程变更。');
+
+    const path = `/api/core/proposals/${pendingProposal.id}/decision`;
+    const decisions = fetchMock.mock.calls.filter(([url]) => url === path);
+    expect(decisions).toHaveLength(2);
+    const firstKey = new Headers(decisions[0]?.[1]?.headers).get('idempotency-key');
+    const retryKey = new Headers(decisions[1]?.[1]?.headers).get('idempotency-key');
+    expect(firstKey).toMatch(/^web-/);
+    expect(retryKey).toBe(firstKey);
+  });
+
+  it('shows the latest local recovery signal as a decision input', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(recoverySnapshot)));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(await screen.findByText('恢复状态')).toBeInTheDocument();
+    expect(screen.getAllByText('注意恢复')).toHaveLength(2);
+    expect(screen.getByText('25 / 100')).toBeInTheDocument();
+    expect(screen.getByText('来自本地打卡，不构成医疗判断')).toBeInTheDocument();
+  });
+
+  it('puts today\'s schedule, concrete actions, recovery summary, and plan review entry in the control console', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      data: {
+        ...recoverySnapshot.data,
+        status: populatedSnapshot.data.status,
+        tasks: [task],
+        events: [
+          {
+            id: '00000000-0000-4000-8000-000000000222',
+            calendarRuleId: null,
+            title: '深度学习课程',
+            kind: 'COURSE',
+            localDate: '2026-08-07',
+            startLocalTime: '09:00',
+            endLocalTime: '10:40',
+            isHard: true,
+            status: 'CONFIRMED',
+            version: 1,
+            createdAt: '2026-08-07T01:00:00.000Z',
+            updatedAt: '2026-08-07T01:00:00.000Z',
+          },
+        ],
+        dailyPlan: {
+          status: 'PENDING_REVIEW',
+          proposalId: '00000000-0000-4000-8000-000000000333',
+          pendingItemCount: 2,
+        },
+      },
+    })));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(await screen.findByRole('heading', { name: '今天的控制台' })).toBeInTheDocument();
+    expect(screen.getByText('深度学习课程')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: `在控制台查看任务详情：${task.title}` })).toHaveAttribute('href', `/tasks/${task.id}`);
+    expect(screen.getByRole('link', { name: `查看日程详情：深度学习课程` })).toHaveAttribute(
+      'href',
+      '/schedule/events/00000000-0000-4000-8000-000000000222',
+    );
+    expect(screen.getByRole('link', { name: `查看优先任务详情：${task.title}` })).toHaveAttribute('href', `/tasks/${task.id}`);
+    expect(document.querySelector('.day-console__recovery')).toHaveTextContent('注意恢复');
+    expect(screen.getByText(/有 2 项建议等待你的审核/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '查看并确认今日计划' })).toHaveAttribute(
+      'href',
+      '/daily-plan?date=2026-08-07',
+    );
+  });
+
+  it('links a Today STUDY event and its cited Action back to the owning course', async () => {
+    const courseId = '00000000-0000-4000-8000-000000000620';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      data: {
+        ...emptySnapshot.data,
+        events: [{
+          id: '00000000-0000-4000-8000-000000000621', calendarRuleId: null, courseId,
+          title: '复习梯度下降', kind: 'STUDY', localDate: '2026-08-07', startLocalTime: '19:00', endLocalTime: '19:45',
+          isHard: false, status: 'CONFIRMED', version: 1, createdAt: '2026-08-07T01:00:00.000Z', updatedAt: '2026-08-07T01:00:00.000Z',
+        }],
+        learningActions: [{
+          action: { id: '00000000-0000-4000-8000-000000000622', eventId: null, title: '复习梯度下降', kind: 'STUDY', status: 'OPEN', targetDate: '2026-08-07', version: 1, createdAt: '2026-08-07T01:00:00.000Z', updatedAt: '2026-08-07T01:00:00.000Z' },
+          courseId, courseTitle: '机器学习', citationCount: 1,
+        }],
+      },
+    })));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    const eventLink = await screen.findByRole('link', { name: '查看课程：复习梯度下降' });
+    expect(eventLink).toHaveAttribute('href', `/courses/${courseId}`);
+    const actionLink = screen.getByRole('link', { name: '查看课程学习行动：复习梯度下降' });
+    expect(actionLink).toHaveAttribute('href', `/courses/${courseId}`);
+    expect(screen.getByText('机器学习 · 1 条 citation')).toBeInTheDocument();
+  });
+
+  it('explains that external context awaits approval without claiming Provider generation ran', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      data: {
+        ...emptySnapshot.data,
+        dailyPlan: {
+          status: 'AWAITING_CONTEXT_APPROVAL',
+          proposalId: null,
+          pendingItemCount: 0,
+        },
+      },
+    })));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(
+      await screen.findByText('外发上下文等待你审阅/批准，尚未调用 Provider。'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('系统正在准备今日计划。生成完成后会显示为待审核草案。')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '审阅外发上下文' })).toHaveAttribute(
+      'href',
+      '/daily-plan?date=2026-08-07',
+    );
+  });
+
+  it('links each daily domain to its dedicated workspace instead of a generic todo flow', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(emptySnapshot)));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    await screen.findByText('今天还没有任务');
+    expect(screen.getByRole('link', { name: '打开日程与课表模块' })).toHaveAttribute('href', '/schedule');
+    expect(screen.getByRole('link', { name: '打开学习模块' })).toHaveAttribute('href', '/learning');
+    expect(screen.getByRole('link', { name: '打开训练恢复模块' })).toHaveAttribute('href', '/fitness');
+    expect(screen.getByRole('link', { name: '打开饮食模块' })).toHaveAttribute('href', '/nutrition');
+    expect(screen.getByRole('link', { name: '打开项目模块' })).toHaveAttribute('href', '/projects');
+    expect(screen.getByRole('link', { name: '打开记忆模块' })).toHaveAttribute('href', '/memory');
+  });
+
+  it('gives a concrete work task a direct route to its real task detail', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(populatedSnapshot)));
+
+    render(<TodayDashboard initialDate="2026-08-07" />);
+
+    expect(await screen.findByRole('link', { name: `查看任务详情：${task.title}` })).toHaveAttribute(
+      'href',
+      `/tasks/${task.id}`,
+    );
   });
 
   it('acknowledges a schema-valid create before its background Today projection settles', async () => {
@@ -176,7 +465,7 @@ describe('TodayDashboard', () => {
 
     await user.click(screen.getByRole('button', { name: '重新加载今天的数据' }));
 
-    expect(await screen.findAllByText(task.title)).toHaveLength(2);
+    expect(await screen.findAllByText(task.title)).toHaveLength(3);
     expect(screen.queryByText('任务已保存，但今天的数据刷新失败')).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/core/tasks')).toHaveLength(1);
@@ -315,9 +604,9 @@ describe('TodayDashboard', () => {
     render(<TodayDashboard initialDate="2026-08-07" />);
 
     expect(unbrokenTaskTitle).toHaveLength(200);
-    expect(await screen.findAllByText(unbrokenTaskTitle)).toHaveLength(2);
+    expect(await screen.findAllByText(unbrokenTaskTitle)).toHaveLength(3);
     expect(screen.getByText(unbrokenTaskTitle, { selector: '.task-row__titleline p' }).closest('.task-row__content')).not.toBeNull();
-    expect(screen.getByText(unbrokenTaskTitle, { selector: '.priority-list p' }).closest('.priority-list li')).not.toBeNull();
+    expect(screen.getByText(unbrokenTaskTitle, { selector: '.priority-list a' }).closest('.priority-list li')).not.toBeNull();
 
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
     const taskContentRule = dashboardCss.match(/\.task-row__content\s*\{[\s\S]*?\n\}/)?.[0];
@@ -326,7 +615,7 @@ describe('TodayDashboard', () => {
     const mobileTitlelineRule = mobileDashboardCss.match(/\.task-row__titleline\s*\{[\s\S]*?\n\s*\}/)?.[0];
     const mobileTaskTitleRule = mobileDashboardCss.match(/\.task-row__titleline p\s*\{[\s\S]*?\n\s*\}/)?.[0];
     const priorityItemRule = dashboardCss.match(/\.priority-list li\s*\{[\s\S]*?\n\}/)?.[0];
-    const priorityTitleRule = dashboardCss.match(/\.priority-list p\s*\{[\s\S]*?\n\}/)?.[0];
+    const priorityTitleRule = dashboardCss.match(/\.priority-list p,[\s\S]*?\.priority-list a\s*\{[\s\S]*?\n\}/)?.[0];
 
     expect(taskContentRule).toContain('min-width: 0;');
     expect(taskTitleRule).toContain('overflow: hidden;');
@@ -345,7 +634,7 @@ describe('TodayDashboard', () => {
 
   it('keeps Today composer controls at the established mobile font and touch-target floor', () => {
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
-    const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileCss = dashboardCss;
     const mobileComposerRule = mobileCss.match(
       /\.task-composer input,[\s\S]*?\.tasks-pagination button\s*\{[\s\S]*?\n\}/,
     )?.[0];
@@ -356,6 +645,23 @@ describe('TodayDashboard', () => {
     expect(mobileComposerRule).toContain('.composer-submit');
     expect(mobileComposerRule).toContain('min-height: 2.75rem;');
     expect(mobileComposerRule).toContain('font-size: 1rem;');
+  });
+
+  it('keeps the daily control console readable on desktop and stacked on iPhone widths', () => {
+    const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
+    const controlGridRule = dashboardCss.match(
+      /\.day-console__grid\s*\{\s*display: grid;[\s\S]*?\n\}/,
+    )?.[0];
+    const dailyPlanCardRule = dashboardCss.match(
+      /\.daily-plan-status-card\s*\{\s*display: grid;[\s\S]*?\n\}/,
+    )?.[0];
+    const mobileControlGridRule = dashboardCss.match(
+      /@media \(max-width: 42rem\) \{\s*\.day-console__grid\s*\{[\s\S]*?\n\s*\}/,
+    )?.[0];
+
+    expect(controlGridRule).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(dailyPlanCardRule).toContain('display: grid;');
+    expect(mobileControlGridRule).toContain('grid-template-columns: 1fr;');
   });
 
   it('routes an expired session to login instead of showing a fake dashboard', async () => {

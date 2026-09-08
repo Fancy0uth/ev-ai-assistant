@@ -1,40 +1,68 @@
-# EV AI Dashboard：v0.2.0 Dashboard 稳定化执行总览
+# EV AI Dashboard：v0.4–v0.9 完整 MVP 实施总览
 
-## 权威文档
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Active — v0.4、v0.5、v0.6 已关闭；当前进入 v0.7 整版 Sol 规划。 |
+| 当前实现基线 | `7ba44fb8beec01545c64380838ed04341df99c1d`；v0.6 Sol rereview-3 PASS，真实 Provider 仍为独立证据债。 |
+| 权威设计 | [v0.4–v0.9 绑定设计](../docs/superpowers/specs/2026-08-23-v0.4-v0.9-mvp-design.md) |
+| 执行路线 | [v0.4–v0.9 总路线](../docs/superpowers/plans/2026-08-23-v0.4-v0.9-mvp-roadmap.md) |
+| 版本语义 | v0.9 是完整 MVP 的实现版本，不是对外稳定 1.0、公开发布或兼容性承诺。 |
 
-- [产品总规格](../docs/superpowers/specs/2026-08-07-local-first-personal-ai-dashboard-v2-design.md)
-- [v0.2.0 改进设计](../docs/superpowers/specs/2026-08-10-v0.2.0-improvement-design.md)
-- [v0.2.0 TDD 实施计划](../docs/superpowers/plans/2026-08-10-v0.2.0-dashboard-stabilization.md)
-- ADR-005 至 ADR-008：本地 Core、Agent 路由、外部集成延期、Windows 先于 Docker。
+## 严格实施顺序
 
-旧 Supabase、`.ics` 与可选 Bridge 规格仅作历史记录。本文件中的 `v0.2.0` 指 Dashboard 稳定化版本，不是 Event/Scheduler 产品 Milestone 0.2。
+| 顺序 | 版本 | 状态 | 退出结果 | 独立计划 | Sol review |
+| --- | --- | --- | --- | --- | --- |
+| 1 | v0.4 | 已关闭 | 兼容排程输入、ACTIVE/CLOSED TimeRequest、Task/Calendar Unit of Work、事务外 preflight Provider、手工 Event、详情路由与 UI-origin 闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.4-action-scheduling-foundation.md) | `docs/reviews/2026-08-23-v0.4-sol-smoke-review.md` |
+| 2 | v0.5 | 已关闭于 `155b172` | DeepSeek/DPAPI 通路、幂等、Run 恢复、超时/配额、脱敏日志、版本一致；真实调用未运行证据债保留 | [计划](../docs/superpowers/plans/2026-08-23-v0.5-provider-reliability.md) | `docs/reviews/2026-08-24-v0.5-sol-final-review.md` |
+| 3 | v0.6 | 已关闭于 TARGET `7ba44fb`；最终 Sol rereview-3 PASS，P0=0/P1=0 | 私有 raw artifact、Provider 外发披露、可编辑 revision、Course/Rule/SCHEDULE Proposal、课程详情、安全公开 citation、Learning Action→TimeRequest、响应式闭环 | [计划](../docs/superpowers/plans/2026-08-23-v0.6-learning-schedule-loop.md) | `docs/reviews/2026-08-31-v0.6-sol-rereview-3.md` |
+| 4 | v0.7 | 整版计划已冻结于 `60fca20`；Terra 连续执行中 | 健身/恢复与权威营养数据闭环，无医疗诊断 | [计划](../docs/superpowers/plans/2026-08-31-v0.7-fitness-nutrition-loop.md) | 待生成 `docs/reviews/2026-08-31-v0.7-sol-review.md` |
+| 5 | v0.8 | 待开始 | 只读项目分析、本地长期记忆、跨模块唯一排程 Proposal | [计划](../docs/superpowers/plans/2026-08-23-v0.8-project-memory-coordination.md) | `docs/reviews/2026-08-23-v0.8-sol-smoke-review.md` |
+| 6 | v0.9 | 待开始 | 私有 iPhone、Windows 运维、WAL 备份恢复与最终完整门禁 | [计划](../docs/superpowers/plans/2026-08-23-v0.9-private-iphone-operations.md) | `docs/reviews/2026-08-23-v0.9-sol-smoke-review.md` |
 
-## 当前真实状态
+严格依赖为 `v0.4 → v0.5 → v0.6 → v0.7 → v0.8 → v0.9`。每版只有在对应 Sol review 为 PASS、P0/P1 为零且目标 commit 冻结后，才作为下版入口。
 
-- [x] 从干净提交 `83f4b37` 发布私有 GitHub 技术预览 `v0.1.0`。
-- [x] 完成 v0.1 基线自动化、Code Intel lite 与桌面/移动浏览器审计。
-- [x] 由主 Agent 复核并冻结 v0.2.0 改进设计与实施计划。
-- [ ] 实现、复审并集成全部 v0.2.0 P0/P1 切片。
-- [ ] 通过全仓、迁移、安全、依赖、Code Intel 和四视口浏览器门禁。
-- [ ] 完成验收文档、推送分支、创建 ready-for-review PR，并启动独立预览。
+## Terra 执行协议
 
-## 阶段顺序
+1. v0.6 由同一个 `gpt-5.6-terra`、`xhigh` reasoning/priority 连续执行四个垂直任务，不派生 Agent，不在任务间询问用户；后续版本继续按其冻结计划执行。
+2. 每个 Vx-xx Task 只能写其 `文件` 范围；迁移/生成文件按任务单列。
+3. 先提交可观察失败的 RED 测试，再写最小 GREEN；随后重构、运行聚焦验证并做原子提交。
+4. 加法迁移必须从冻结旧库升级，核对 Owner/Task/Run ID 与计数；禁止破坏性迁移。
+5. 每版只跑该版聚焦测试、必要 typecheck/build/startup 和一条关键浏览器路径；v0.9 再额外执行完整集成门禁。
+6. 每版 review 记录基线/目标提交、命令与原始结果摘要、浏览器证据、P0/P1/P2/P3、结论和下版入口。
+7. 同一根因最多两轮 Terra 修复；第三次复发、依赖/Provider 选择、外部调用、迁移重构或任务文件越界必须升级 Sol。
 
-1. 契约：Agent 资源、Task 查询与 409 最新实体。
-2. 数据：SQLite migration 002 与 001→002 保留数据证明。
-3. Core：Agent Repository/Service/API、Today 101+、Task 冲突语义。
-4. 安全与认证：BFF loopback/Cookie 最小化、根路由与单 Owner 启动解析。
-5. Dashboard：共享真实路由 Shell、独立 Tasks、Today 恢复与响应式修复、独立 Agent UI。
-6. 质量：隔离 E2E、四视口矩阵、版本与 CHANGELOG。
-7. 发布候选：全套门禁、Sol 最终审查、验收文档、PR 和独立预览。
+## 始终有效的边界
 
-## 角色与提交规则
+- 单 Owner 隔离；用户数据、记忆、日志和备份均在本地；API Key 不提交，使用 DPAPI/等价本机保护。
+- Core 默认且最终仅 `127.0.0.1`；iPhone 只通过认证私有 HTTPS Web 网关/隧道，绝不裸露公网 Core。
+- 外部写入和高影响动作必须 Proposal+Confirm；项目集成只读，绝不写代码/Git。
+- 真实 Provider 未配置时 fail closed；Fake 只在测试环境且证据明确标注。
+- Prompt、网页、OCR、项目仓库和 RAG 内容都是不可信数据，不是指令。
+- 安装/配置 Tailscale、系统服务/Task Scheduler、端口/防火墙、真实恢复、物理设备、push/发布都需要执行时主 Agent 单独审批。
 
-- Terra：每次只实现一个 TDD 切片，使用独立 fork 和原子提交。
-- Sol：每个切片后在新上下文做契约、质量、安全和最小边界复审。
-- 主 Agent：冻结契约、集成、分类审查意见、运行最终门禁和编写验收文档。
-- 当前没有 v0.2.0 实现任务被标记为完成；不得用文档存在代替实现和验证证据。
+## 当前冻结里程碑：v0.7
 
-## 停止边界
+- 入口：v0.6 PASS TARGET `7ba44fb`，准入文档提交 `b3b6409`。
+- 冻结计划分为 V7-01–V7-07：公共契约 → 安全/decimal/migration → 动作目录/Workout revisions → Proposal/反馈 → Meal draft/match/confirm → composition/0.7.0 → Web/E2E。
+- 动作目录必须有 source/license/version/hash；许可不清时不导入。RAG 资料不可信且不能改变工具/权限。
+- 营养数值必须来自权威、带版本的数据源；模型只解析食物/份量候选，Core 计算，Owner 确认后入账。
+- 真实 API、网络、Key、费用和个人健康数据外发均需单独审批；未配置时 fail closed，自动 fixture 不冒充真实数据源。
 
-涉及真实 Provider/Key、长期记忆、外部服务、Docker/Tailscale、原生 App、多用户、破坏性迁移或范围外产品功能时停止并重新请求批准。有效 P0/P1、迁移数据丢失、Agent 503 后写入、BFF 非 loopback 凭据暴露或高危/严重运行时漏洞都会阻止 PR。
+## 历史完成基线：v0.4–v0.5
+
+v0.4 Action Scheduling Foundation 与 v0.5 Provider Reliability 的工程实现和审查历史继续有效。v0.5 关版 commit 为 `155b172`，P0/P1 为零；`P2-EVIDENCE-001` 与真实 DeepSeek 未运行证据保留，不扩大成 v0.6 Daily Plan 重构。
+
+---
+
+## 历史完成基线：v0.3 Daily AI Control Loop
+
+v0.3 已完成的工程工作保留为后续实施底座：
+
+1. **安全 Provider：** DPAPI SecretStore、DeepSeek adapter、连接测试与错误状态。
+2. **可确认计划：** 最小 Context Manifest、Daily Plan Run、结构化 Proposal、确定性校验与部分确认。
+3. **首页产品化：** 日程优先 Today、计划审阅、桌面/iPhone 响应式。
+4. **调度与验收：** Shanghai 07:00 幂等触发、首访补偿、独立 E2E 与发布记录；旧通用调度保留兼容但不再由生产启动。
+
+历史质量门仍有效：每个切片测试先行、目标测试和原子提交；E2E 使用独立端口与 `EV_DATA_DIR`；不以模拟 Provider 伪造真实连接。v0.3 不曾交付 OCR、公开检索、真实项目 Agent、完整健身/饮食链、远程私有 iPhone 或运维闭环，因此这些能力由 v0.4–v0.9 补齐，而不是从 MVP 删除。
+
+历史来源：[v0.3 规格](../docs/superpowers/specs/2026-08-17-v0.3-daily-ai-control-loop.md)、[v0.3 计划](../docs/superpowers/plans/2026-08-17-v0.3-daily-ai-control-loop.md)、[ADR-012](../docs/decisions/ADR-012-dpapi-secrets-and-proposal-only-daily-ai.md)、[v0.3 Sol 审查](../docs/reviews/2026-08-23-v0.3-sol-minimum-viability-review.md)。

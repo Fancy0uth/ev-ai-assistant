@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const configDirectory = dirname(fileURLToPath(import.meta.url));
@@ -9,6 +9,7 @@ const dataRoot = resolve(workspaceRoot, 'data');
 const e2eRunsDirectory = resolve(dataRoot, 'e2e-runs');
 const webBaseUrl = 'http://127.0.0.1:3217';
 const coreBaseUrl = 'http://127.0.0.1:4327';
+const isManagedRun = process.env.EV_E2E_MANAGED === '1';
 
 if (!e2eRunsDirectory.startsWith(`${dataRoot}${sep}`)) {
   throw new Error('Refusing to create E2E data outside the workspace data directory');
@@ -24,9 +25,18 @@ if (dirname(resolvedDataRoot) !== resolvedWorkspaceRoot || dirname(resolvedE2eRu
   throw new Error('Refusing to use an E2E data directory outside the workspace');
 }
 
-const e2eRunDirectory = realpathSync(mkdtempSync(join(resolvedE2eRunsDirectory, 'run-')));
+const managedRunDirectory = process.env.EV_E2E_RUN_DIR;
+if (isManagedRun && !managedRunDirectory) {
+  throw new Error('Managed E2E requires its runner-owned data directory');
+}
 
-if (dirname(e2eRunDirectory) !== resolvedE2eRunsDirectory || !basename(e2eRunDirectory).startsWith('run-')) {
+const e2eRunDirectory = isManagedRun
+  ? realpathSync(managedRunDirectory as string)
+  : realpathSync(mkdtempSync(join(resolvedE2eRunsDirectory, 'run-')));
+const webRelativeDistDir = relative(configDirectory, join(e2eRunDirectory, 'next'));
+
+const expectedRunPrefix = isManagedRun ? 'managed-run-' : 'run-';
+if (dirname(e2eRunDirectory) !== resolvedE2eRunsDirectory || !basename(e2eRunDirectory).startsWith(expectedRunPrefix)) {
   throw new Error('Refusing to use an unsafe E2E run directory');
 }
 
@@ -45,10 +55,10 @@ export const playwrightConfig = defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: [
+  ...(isManagedRun ? {} : { webServer: [
     {
       name: 'Core',
-      command: 'npm run start --workspace @ev/core',
+      command: 'node --import tsx apps/core/src/server.ts',
       cwd: workspaceRoot,
       env: {
         ...process.env,
@@ -65,18 +75,19 @@ export const playwrightConfig = defineConfig({
     },
     {
       name: 'Web',
-      command: 'npm run dev --workspace @ev/web -- --hostname 127.0.0.1 --port 3217',
+      command: 'node node_modules/next/dist/bin/next dev apps/web --hostname 127.0.0.1 --port 3217',
       cwd: workspaceRoot,
       env: {
         ...process.env,
         EV_CORE_URL: coreBaseUrl,
+        EV_NEXT_DIST_DIR: webRelativeDistDir,
       },
       url: `${webBaseUrl}/setup`,
       reuseExistingServer: false,
       timeout: 60_000,
       stdout: 'pipe',
     },
-  ],
+  ] }),
 });
 
 export default playwrightConfig;

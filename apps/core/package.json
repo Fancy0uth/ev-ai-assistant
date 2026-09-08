@@ -1,6 +1,6 @@
 {
   "name": "@ev/core",
-  "version": "0.2.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,11 +10,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@ev/contracts": "0.2.0",
-    "@ev/domain": "0.2.0",
+    "@ev/contracts": "0.7.0",
+    "@ev/domain": "0.7.0",
     "@fastify/cookie": "11.1.2",
     "@fastify/rate-limit": "11.2.0",
     "better-sqlite3": "13.0.3",
-    "fastify": "5.11.2"
+    "fastify": "5.11.2",
+    "sharp": "0.35.3"
   }
 }

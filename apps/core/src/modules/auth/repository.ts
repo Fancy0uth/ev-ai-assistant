@@ -25,6 +25,7 @@ interface NewSession {
 
 export interface AuthRepository {
   hasOwner(): boolean;
+  findOwnerId(): string | undefined;
   createOwner(owner: NewOwner): StoredOwner;
   findOwnerByUsername(username: string): StoredOwner | undefined;
   createSession(session: NewSession): void;
@@ -36,6 +37,13 @@ export function createAuthRepository(database: Database.Database): AuthRepositor
   return {
     hasOwner() {
       return database.prepare('select 1 from owners limit 1').get() !== undefined;
+    },
+
+    findOwnerId() {
+      const owner = database.prepare('select id from owners limit 1').get() as
+        | { id: string }
+        | undefined;
+      return owner?.id;
     },
 
     createOwner(owner) {

@@ -1,6 +1,6 @@
 {
   "name": "@ev/web",
-  "version": "0.2.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,8 +12,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@ev/contracts": "0.2.0",
-    "@ev/domain": "0.2.0",
+    "@ev/contracts": "0.7.0",
+    "@ev/domain": "0.7.0",
     "lucide-react": "1.29.0",
     "next": "16.3.0",
     "react": "19.2.8",

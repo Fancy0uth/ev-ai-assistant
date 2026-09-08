@@ -4,6 +4,7 @@ import {
   taskListResponseSchema,
   taskResponseSchema,
   taskVersionConflictDetailsSchema,
+  type NormalizedTask,
   type Task,
   type TaskArea,
   type TaskStatus,
@@ -184,7 +185,7 @@ export function TasksWorkspace() {
     setReloadKey(nextReloadKey);
   }, []);
 
-  const replaceLocalTask = useCallback((nextTask: Task) => {
+  const replaceLocalTask = useCallback((nextTask: NormalizedTask) => {
     setView((currentView) => {
       if (!currentView || currentView.kind !== 'ready') return currentView;
       return {

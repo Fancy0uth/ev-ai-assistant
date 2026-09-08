@@ -1,10 +1,16 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { todaySnapshotSchema } from '@ev/contracts';
+import { dailyPlanPreflightResponseSchema, todaySnapshotSchema } from '@ev/contracts';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
+import { createCalendarRepository } from '../src/modules/calendar/repository';
+import type {
+  DailyPlanningProvider,
+  DailyPlanningProviderResult,
+} from '../src/modules/daily-planning/provider';
+import type { SecretStorePort } from '../src/modules/providers/secret-store';
 import { createTaskRepository } from '../src/modules/tasks/repository';
 import { openDatabase } from '../src/storage/database';
 
@@ -13,11 +19,86 @@ const credentials = {
   password: 'correct horse battery staple',
 };
 
+const testApiKey = 'test-only-today-daily-plan-api-key';
+
+class InMemorySecretStore implements SecretStorePort {
+  private readonly values = new Map<string, string>();
+  unprotectCalls = 0;
+
+  async protect(plaintext: string): Promise<string> {
+    const protectedValue = `today-snapshot-credential-${this.values.size + 1}`;
+    this.values.set(protectedValue, plaintext);
+    return protectedValue;
+  }
+
+  async unprotect(protectedValue: string): Promise<string> {
+    this.unprotectCalls += 1;
+    const value = this.values.get(protectedValue);
+    if (!value) throw new Error('credential missing');
+    return value;
+  }
+}
+
+const planningProvider: DailyPlanningProvider = {
+  async generate(): Promise<DailyPlanningProviderResult> {
+    const output = {
+      schemaVersion: 'DAILY_PLAN_MODEL_V1',
+      summary: '今天没有可排入时间轴的新增事项。',
+      actions: [],
+    };
+    return {
+      output,
+      model: 'deepseek-v4-flash',
+      finishReason: 'stop',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      outputChars: JSON.stringify(output).length,
+    };
+  },
+};
+
 function readSessionToken(setCookieHeader: string | string[] | undefined): string {
   const header = Array.isArray(setCookieHeader) ? setCookieHeader.join('; ') : setCookieHeader;
   const match = header?.match(/(?:^|;\s*)ev_session=([^;]+)/);
   if (!match?.[1]) throw new Error('ev_session cookie was not set');
   return match[1];
+}
+
+async function generateApprovedPlan(app: FastifyInstance, token: string, localDate: string) {
+  const prepared = await app.inject({
+    method: 'POST',
+    url: '/v1/daily-plans/preflights',
+    cookies: { ev_session: token },
+    payload: { localDate },
+  });
+  expect(prepared.statusCode).toBe(201);
+  const preflight = dailyPlanPreflightResponseSchema.parse(prepared.json()).data;
+  const approved = await app.inject({
+    method: 'POST',
+    url: `/v1/daily-plans/preflights/${preflight.id}/approve`,
+    cookies: { ev_session: token },
+    payload: {
+      expectedPreflightVersion: preflight.version,
+      items: preflight.items.map((item) => ({
+        contextRef: item.contextRef,
+        safeTitle: item.safeTitle,
+        domain: item.domain,
+        deadlineLocalDate: item.deadlineLocalDate,
+        included: item.included,
+      })),
+    },
+  });
+  expect(approved.statusCode).toBe(200);
+  const approvedPreflight = dailyPlanPreflightResponseSchema.parse(approved.json()).data;
+  return app.inject({
+    method: 'POST',
+    url: '/v1/daily-plans/generate',
+    cookies: { ev_session: token },
+    headers: { 'idempotency-key': `v05-today-${approvedPreflight.id}` },
+    payload: {
+      preflightId: approvedPreflight.id,
+      expectedPreflightVersion: approvedPreflight.version,
+    },
+  });
 }
 
 describe('Today snapshot API', () => {
@@ -70,7 +151,8 @@ describe('Today snapshot API', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const snapshot = todaySnapshotSchema.parse(response.json()).data;
+    const responseBody = response.json();
+    const snapshot = todaySnapshotSchema.parse(responseBody).data;
     expect(snapshot.date).toBe('2026-08-07');
     expect(snapshot.tasks).toHaveLength(3);
     expect(snapshot.status).toMatchObject({
@@ -84,6 +166,253 @@ describe('Today snapshot API', () => {
       deepSeek: 'NOT_CONFIGURED',
       codex: 'NOT_CONFIGURED',
     });
+    expect(responseBody.data.dailyPlan).toEqual({
+      status: 'NOT_CONFIGURED',
+      proposalId: null,
+      pendingItemCount: 0,
+    });
+  });
+
+  it('includes the signed-in owner’s recovery signals for the requested day', async () => {
+    app = await buildApp({ logger: false });
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/setup',
+      payload: credentials,
+    });
+    const token = readSessionToken(setup.headers['set-cookie']);
+
+    const checkIn = await app.inject({
+      method: 'POST',
+      url: '/v1/check-ins',
+      cookies: { ev_session: token },
+      payload: {
+        localDate: '2026-08-07',
+        sleepHours: 5,
+        energy: 2,
+        discomfort: 4,
+      },
+    });
+    expect(checkIn.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/today?date=2026-08-07',
+      cookies: { ev_session: token },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(todaySnapshotSchema.parse(response.json()).data.signals).toEqual([
+      expect.objectContaining({
+        kind: 'RECOVERY',
+        source: 'CHECK_IN',
+        value: 25,
+        localDate: '2026-08-07',
+      }),
+    ]);
+  });
+
+  it('summarizes the latest reviewable daily plan instead of presenting an unconfigured placeholder', async () => {
+    const date = '2026-08-07';
+    app = await buildApp({
+      logger: false,
+      secretStore: new InMemorySecretStore(),
+      dailyPlanningProvider: planningProvider,
+    });
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/setup',
+      payload: credentials,
+    });
+    const token = readSessionToken(setup.headers['set-cookie']);
+
+    const credential = await app.inject({
+      method: 'PUT',
+      url: '/v1/providers/deepseek/credential',
+      cookies: { ev_session: token },
+      payload: { apiKey: testApiKey },
+    });
+    expect(credential.statusCode).toBe(200);
+
+    const generated = await generateApprovedPlan(app, token, date);
+    expect(generated.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/today?date=${date}`,
+      cookies: { ev_session: token },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.dailyPlan).toMatchObject({
+      status: 'PENDING_REVIEW',
+      proposalId: generated.json().data.id,
+      pendingItemCount: 0,
+    });
+  });
+
+  it('schedules an accepted course-linked study Action through Daily Plan and exposes its course lineage in Today', async () => {
+    const date = '2026-09-09';
+    testDirectory = mkdtempSync(join(tmpdir(), 'ev-v06-today-learning-'));
+    const databasePath = join(testDirectory, 'app.sqlite');
+    const provider: DailyPlanningProvider = {
+      async generate(_apiKey, input): Promise<DailyPlanningProviderResult> {
+        const request = input.timeRequests[0];
+        if (!request) throw new Error('expected an active learning TimeRequest');
+        const output = {
+          schemaVersion: 'DAILY_PLAN_MODEL_V1',
+          summary: '为课程复习安排一个可确认时段。',
+          actions: [{
+            operation: 'SCHEDULE_TIME_REQUEST', contextRef: request.contextRef,
+            startLocalTime: '19:00', endLocalTime: '19:45', rationale: '在课程复习时间窗内安排。',
+          }],
+        };
+        return { output, model: 'deepseek-v4-flash', finishReason: 'stop', usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }, outputChars: JSON.stringify(output).length };
+      },
+    };
+    app = await buildApp({ databasePath, logger: false, secretStore: new InMemorySecretStore(), dailyPlanningProvider: provider });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const ownerId = setup.json().data.owner.id as string;
+    await app.inject({ method: 'PUT', url: '/v1/providers/deepseek/credential', cookies: { ev_session: token }, payload: { apiKey: testApiKey } });
+    const term = await app.inject({ method: 'POST', url: '/v1/terms', cookies: { ev_session: token }, payload: { title: '2026 秋季', timezone: 'Asia/Shanghai', weekOneMonday: '2026-09-07' } });
+    const course = await app.inject({ method: 'POST', url: '/v1/courses', cookies: { ev_session: token }, payload: { termId: term.json().data.id, title: '机器学习' } });
+    const courseId = course.json().data.id as string;
+    const ids = {
+      searchCapability: '00000000-0000-4000-8000-000000000881', searchRun: '00000000-0000-4000-8000-000000000882', resource: '00000000-0000-4000-8000-000000000883', citation: '00000000-0000-4000-8000-000000000884',
+      adviceCapability: '00000000-0000-4000-8000-000000000885', learningRun: '00000000-0000-4000-8000-000000000886', action: '00000000-0000-4000-8000-000000000887', request: '00000000-0000-4000-8000-000000000888',
+    };
+    const database = openDatabase(databasePath);
+    try {
+      const timestamp = '2026-09-08T00:00:00.000Z';
+      const capability = (id: string, capabilityName: string, operation: string, resourceId: string) => database.prepare(`insert into external_capability_runs (
+        id, owner_id, capability, operation, resource_id, provider_id, provider_label, adapter_kind, evidence_kind,
+        disclosure_json, disclosure_version, idempotency_key, request_hash, status, lease_token, lease_expires_at, deadline_at,
+        policy_version, local_date, reserved_calls, actual_calls, input_chars, output_chars, failure_code, app_version, created_at, updated_at, version
+      ) values (?, ?, ?, ?, ?, 'test', '自动测试 Fake', 'TEST_FAKE', 'AUTOMATED_FAKE', '{}', 'CAPABILITY_DISCLOSURE_V1', null, null, 'SUCCEEDED', null, null, null, 'CAPABILITY_POLICY_V1', '2026-09-08', 0, 1, 0, 0, null, '0.5.0', ?, ?, 1)`)
+        .run(id, ownerId, capabilityName, operation, resourceId, timestamp, timestamp);
+      capability(ids.searchCapability, 'PUBLIC_LEARNING_SEARCH', 'COURSE_RESOURCE_SEARCH', ids.searchRun);
+      database.prepare(`insert into course_resource_search_runs (id, owner_id, course_id, capability_run_id, query, status, citation_count, rejected_count, failure_code, created_at, updated_at, version)
+        values (?, ?, ?, ?, '梯度下降', 'SUCCEEDED', 1, 0, null, ?, ?, 1)`).run(ids.searchRun, ownerId, courseId, ids.searchCapability, timestamp, timestamp);
+      database.prepare('insert into course_resources (id, owner_id, course_id, title, url, source, created_at) values (?, ?, ?, ?, ?, ?, ?)')
+        .run(ids.resource, ownerId, courseId, '梯度讲义', 'https://example.edu/gradient', 'PUBLIC_SEARCH', timestamp);
+      database.prepare(`insert into course_resource_citations (id, owner_id, course_id, course_resource_id, search_run_id, title, url, publisher, retrieved_at, content_hash, media_type, created_at)
+        values (?, ?, ?, ?, ?, '梯度讲义', 'https://example.edu/gradient', 'example.edu', ?, ?, 'text/html', ?)`)
+        .run(ids.citation, ownerId, courseId, ids.resource, ids.searchRun, timestamp, 'a'.repeat(64), timestamp);
+      capability(ids.adviceCapability, 'LEARNING_TEXT_ANALYSIS', 'LEARNING_ADVICE_GENERATE', ids.learningRun);
+      database.prepare(`insert into learning_runs (id, owner_id, course_id, search_run_id, capability_run_id, citation_ids_json, status, proposal_id, failure_code, created_at, updated_at, version)
+        values (?, ?, ?, ?, ?, ?, 'ACCEPTED', null, null, ?, ?, 1)`)
+        .run(ids.learningRun, ownerId, courseId, ids.searchRun, ids.adviceCapability, JSON.stringify({ citationIds: [ids.citation], objective: '复习', targetDate: date, earliestStartLocalTime: '19:00', latestEndLocalTime: '21:00' }), timestamp, timestamp);
+      database.prepare(`insert into actions (id, owner_id, event_id, title, kind, status, target_date, version, created_at, updated_at)
+        values (?, ?, null, '复习梯度下降', 'STUDY', 'OPEN', ?, 1, ?, ?)`).run(ids.action, ownerId, date, timestamp, timestamp);
+      database.prepare('insert into learning_actions (owner_id, action_id, course_id, learning_run_id, created_at) values (?, ?, ?, ?, ?)').run(ownerId, ids.action, courseId, ids.learningRun, timestamp);
+      database.prepare('insert into learning_action_citations (owner_id, action_id, citation_id, created_at) values (?, ?, ?, ?)').run(ownerId, ids.action, ids.citation, timestamp);
+      createCalendarRepository(database).createActiveTimeRequest({
+        id: ids.request, ownerId, source: 'LEARNING_AGENT', title: '复习梯度下降', targetDate: date, durationMinutes: 45, priority: 'MEDIUM',
+        earliestStartLocalTime: '19:00', latestEndLocalTime: '21:00', isFixed: false,
+        origin: { kind: 'ACTION', entityId: ids.action, entityVersion: 1 }, version: 1, createdAt: timestamp, updatedAt: timestamp,
+      });
+    } finally { database.close(); }
+
+    const generated = await generateApprovedPlan(app, token, date);
+    expect(generated.statusCode).toBe(201);
+    const proposal = generated.json().data;
+    const applied = await app.inject({
+      method: 'POST', url: `/v1/daily-plans/proposals/${proposal.id}/decisions`, cookies: { ev_session: token },
+      headers: { 'idempotency-key': 'v06-today-learning-apply-01' },
+      payload: { expectedProposalVersion: proposal.version, decisions: [{ itemId: proposal.items[0].id, decision: 'APPLY' }] },
+    });
+    expect(applied.statusCode).toBe(200);
+    const today = todaySnapshotSchema.parse((await app.inject({ method: 'GET', url: `/v1/today?date=${date}`, cookies: { ev_session: token } })).json()).data;
+    expect(today.events).toEqual([expect.objectContaining({ kind: 'STUDY', title: '复习梯度下降', courseId })]);
+    expect(today.learningActions).toEqual([expect.objectContaining({ courseId, courseTitle: '机器学习', citationCount: 1, action: expect.objectContaining({ id: ids.action, kind: 'STUDY' }) })]);
+  });
+
+  it('prepares one post-07:00 local recovery run without calling the Provider or SecretStore', async () => {
+    const date = '2026-08-18';
+    testDirectory = mkdtempSync(join(tmpdir(), 'ev-today-automation-'));
+    const databasePath = join(testDirectory, 'app.sqlite');
+    let providerCalls = 0;
+    const provider: DailyPlanningProvider = {
+      async generate() {
+        providerCalls += 1;
+        return planningProvider.generate('', {
+          localDate: date,
+          fixedBlocks: [],
+          softBlocks: [],
+          timeRequests: [],
+          recoveryLevel: 'NONE',
+        });
+      },
+    };
+    const secretStore = new InMemorySecretStore();
+    app = await buildApp({
+      databasePath,
+      logger: false,
+      secretStore,
+      dailyPlanningProvider: provider,
+      enableDailyPlanAutomation: true,
+      dailyPlanAutomationNow: () => new Date('2026-08-17T23:05:00.000Z'),
+    });
+    const setup = await app.inject({ method: 'POST', url: '/v1/auth/setup', payload: credentials });
+    const token = readSessionToken(setup.headers['set-cookie']);
+    const ownerId = setup.json().data.owner.id;
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/providers/deepseek/credential',
+      cookies: { ev_session: token },
+      payload: { apiKey: testApiKey },
+    });
+    const unprotectCallsBeforeAutomation = secretStore.unprotectCalls;
+
+    const awaiting = await app.inject({
+      method: 'GET',
+      url: `/v1/today?date=${date}`,
+      cookies: { ev_session: token },
+    });
+    expect(awaiting.statusCode).toBe(200);
+    expect(todaySnapshotSchema.parse(awaiting.json()).data.dailyPlan).toEqual({
+      status: 'AWAITING_CONTEXT_APPROVAL',
+      proposalId: null,
+      pendingItemCount: 0,
+    });
+    const repeated = await app.inject({
+      method: 'GET',
+      url: `/v1/today?date=${date}`,
+      cookies: { ev_session: token },
+    });
+    expect(repeated.statusCode).toBe(200);
+    expect(todaySnapshotSchema.parse(repeated.json()).data.dailyPlan.status).toBe(
+      'AWAITING_CONTEXT_APPROVAL',
+    );
+    expect(providerCalls).toBe(0);
+    expect(secretStore.unprotectCalls).toBe(unprotectCallsBeforeAutomation);
+
+    const database = openDatabase(databasePath);
+    try {
+      expect(
+        Number(
+          database
+            .prepare('select count(*) from daily_plan_runs where owner_id = ? and local_date = ?')
+            .pluck()
+            .get(ownerId, date),
+        ),
+      ).toBe(1);
+      expect(
+        Number(
+          database
+            .prepare(
+              `select count(*) from daily_plan_preflights
+               join daily_plan_runs on daily_plan_runs.id = daily_plan_preflights.run_id
+               where daily_plan_runs.owner_id = ? and daily_plan_runs.local_date = ?`,
+            )
+            .pluck()
+            .get(ownerId, date),
+        ),
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
   });
 
   it('calculates Today from every task for the signed-in owner and date', async () => {

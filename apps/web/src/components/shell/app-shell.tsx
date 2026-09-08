@@ -1,6 +1,6 @@
 'use client';
 
-import { Bot, CalendarDays, ListTodo, LogOut } from 'lucide-react';
+import { Bot, CalendarCheck, CalendarDays, ListTodo, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { logoutResponseSchema } from '@ev/contracts';
@@ -13,6 +13,7 @@ interface AppShellProps {
 
 const navigationItems = [
   { href: '/today', label: '今天', icon: CalendarDays },
+  { href: '/daily-plan', label: '每日计划', icon: CalendarCheck },
   { href: '/tasks', label: '任务', icon: ListTodo },
   { href: '/agent', label: 'Agent', icon: Bot },
 ] as const;

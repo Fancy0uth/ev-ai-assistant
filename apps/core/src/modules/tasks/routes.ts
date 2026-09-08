@@ -40,6 +40,16 @@ export async function registerTaskRoutes(
     return taskListResponseSchema.parse({ data: result });
   });
 
+  app.get('/v1/tasks/:id', { preHandler: authGuard }, async (request) => {
+    const { id } = parseRequestInput(
+      taskPathParamsSchema,
+      request.params,
+      '任务路径参数不符合要求',
+    );
+    const task = taskService.get(authenticatedOwnerId(request), id);
+    return taskResponseSchema.parse({ data: task });
+  });
+
   app.patch('/v1/tasks/:id', { preHandler: authGuard }, async (request) => {
     const { id } = parseRequestInput(
       taskPathParamsSchema,

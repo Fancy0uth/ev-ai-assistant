@@ -5,8 +5,15 @@ interface RouteContext {
 const ALLOWED_CORE_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const CORE_ORIGIN_PATTERN =
   /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/?$/;
-const FORWARDED_REQUEST_HEADERS = ['content-type'] as const;
-const FORWARDED_RESPONSE_HEADERS = ['content-type', 'set-cookie'] as const;
+/** Explicitly bounded so browser clients cannot turn the BFF into a header proxy. */
+const FORWARDED_REQUEST_HEADERS = ['content-type', 'idempotency-key'] as const;
+const FORWARDED_RESPONSE_HEADERS = [
+  'content-type',
+  'set-cookie',
+  'idempotency-replayed',
+  'retry-after',
+] as const;
+const MAX_REQUEST_BODY_BYTES = 5_000_000;
 
 function coreBaseUrl(): string {
   const value = process.env.EV_CORE_URL ?? 'http://127.0.0.1:4311';
@@ -58,6 +65,38 @@ function safePath(segments: string[]): string | null {
   return segments.map(encodeURIComponent).join('/');
 }
 
+async function readBoundedBody(request: Request, maxBytes: number): Promise<Uint8Array> {
+  const declared = request.headers.get('content-length');
+  if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+    throw new RangeError('BFF_BODY_TOO_LARGE');
+  }
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new RangeError('BFF_BODY_TOO_LARGE');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 async function proxyToCore(request: Request, context: RouteContext): Promise<Response> {
   const { path } = await context.params;
   const encodedPath = safePath(path);
@@ -92,8 +131,18 @@ async function proxyToCore(request: Request, context: RouteContext): Promise<Res
     redirect: 'manual',
   };
   if (!['GET', 'HEAD'].includes(request.method)) {
-    const body = await request.arrayBuffer();
-    if (body.byteLength > 0) init.body = body;
+    try {
+      const body = await readBoundedBody(request, MAX_REQUEST_BODY_BYTES);
+      if (body.byteLength > 0) init.body = new Uint8Array(body).buffer;
+    } catch (error) {
+      if (error instanceof RangeError && error.message === 'BFF_BODY_TOO_LARGE') {
+        return Response.json(
+          { error: { code: 'BFF_BODY_TOO_LARGE', message: '上传内容超过 5 MB 限制' } },
+          { status: 413 },
+        );
+      }
+      throw error;
+    }
   }
 
   let upstream: Response;
@@ -125,5 +174,6 @@ async function proxyToCore(request: Request, context: RouteContext): Promise<Res
 export const dynamic = 'force-dynamic';
 export const GET = proxyToCore;
 export const POST = proxyToCore;
+export const PUT = proxyToCore;
 export const PATCH = proxyToCore;
 export const DELETE = proxyToCore;

@@ -1,16 +1,23 @@
 # EV AI Assistant
 
-EV AI Assistant v0.2 是仅供本机使用、单一 Owner 的技术预览。它用于验证个人任务 Dashboard 的本地闭环：账号、任务和会话数据只保存在运行 Core 的这台电脑上，不面向团队、局域网或公网部署。
+EV AI Dashboard 是仅供本机使用、单一 Owner 的技术预览。当前 `v0.2` 基础上完成了 `v0.3` Daily AI Control Loop：账号、日程、任务、恢复、记忆和项目快照都只保存在运行 Core 的这台电脑上，不面向团队、局域网或公网部署。
 
 ## 当前预览内容
 
-首次启动后，用户在本机创建唯一 Owner 账号并通过 HttpOnly 会话登录；**没有预设账号、默认密码或演示账号**。创建账号后，Dashboard 提供三条真实路由：
+首次启动后，用户在本机创建唯一 Owner 账号并通过 HttpOnly 会话登录；**没有预设账号、默认密码或演示账号**。创建账号后，Dashboard 提供以下真实路由：
 
 - `/today`：展示根据真实任务计算的今日分数、优先项和中文规则解释。
+- `/daily-plan`：手动生成或审核每日计划；可查看本次最小 Context 类别、日程版本和本地冲突校验，再逐项采用或拒绝。
 - `/tasks`：创建开发、学习和生活任务，设置优先级，并完成、恢复或推迟任务。
 - `/agent`：显示 Agent 能力边界与配置状态，不会伪造 AI 回复。
+- `/settings/providers`：Owner 可保存、删除并测试 DeepSeek 凭据；浏览器只能读取非敏感状态，不能读取 Key。
+- `/schedule`：建立学期锚点和课表导入请求；未接视觉 Provider 时不伪造识别。
+- `/learning`：维护课程档案和用户提供的资料链接。
+- `/fitness`、`/nutrition`：记录本地恢复打卡和已确认的餐食数值。
+- `/memory`：编辑、恢复、删除可检查的本地分域记忆。
+- `/projects`：登记项目目录并查看过滤后的只读规划快照；无执行或写入能力。
 
-这是技术预览而非已发布产品。当前没有可用的真实 AI Provider、长期记忆或外部集成；不会连接 DeepSeek、Codex、日历、提醒或其它第三方服务。
+这是技术预览而非已发布产品。当前分支已提供 Owner 主动配置的 DeepSeek 每日计划链路：Key 只在 Windows Core 内经 DPAPI 保护，模型只得到最小排程 Context，并只生成待审核草案；它不会自动写入日程。Core 会在 `Asia/Shanghai` 每天 07:00 触发一次，若错过则在当天首次打开 Today 时补偿一次。未配置 Key 时系统明确阻断，绝不伪造 AI 结果。课程视觉识别、公开资料搜索、动作 RAG、自然语言营养分析、Codex 项目执行、外部日历与提醒仍未接入。完整边界见[本地 MVP 技术设计](docs/technical/IMPLEMENTED-MVP-DESIGN.md)与[ADR-013](docs/decisions/ADR-013-daily-plan-local-automation.md)。
 
 ## 环境要求
 
@@ -64,7 +71,7 @@ npm run test:e2e
 git diff --check
 ```
 
-端到端测试会启动独立的 Core 与 Web，并且只重置被 Git 忽略的 `data/e2e`。它覆盖首次建号、创建高优先级开发任务、刷新后仍存在、完成后规则解释变化、退出后接口返回 401。
+端到端测试会启动独立的 Core 与 Web，并且只使用被 Git 忽略的 `data/e2e-runs/managed-run-*` 及其私有 Next 构建目录。它覆盖首次建号、真实路由、任务闭环、课程/恢复/餐食/记忆/项目工作区、Provider 未配置和多个桌面/移动视口；不会重置用户预览数据或与手工预览抢 `.next` 锁。
 
 ## 架构
 
@@ -79,10 +86,12 @@ Browser / future iPhone client
 ```
 
 - `apps/web`：Next.js Dashboard；浏览器只能通过同源 BFF 访问固定 Core。
-- `apps/core`：只监听 loopback 的 Fastify 服务，负责身份、任务和聚合。
+- `apps/core`：只监听 loopback 的 Fastify 服务，负责身份、日程、专业模块、聚合和本地 SQLite。
 - `packages/contracts`：跨端共享的 Zod API 契约。
 - `packages/domain`：不依赖 UI/数据库的确定性领域规则。
 - [产品 v2 规格](docs/superpowers/specs/2026-08-07-local-first-personal-ai-dashboard-v2-design.md)
 - [Milestone 0.1 实施计划](docs/superpowers/plans/2026-08-07-local-foundation-owner-task-dashboard.md)
 - [本地 Core 决策 ADR-005](docs/decisions/ADR-005-local-first-owner-hosted-core.md)
 - [Agent 路由决策 ADR-006](docs/decisions/ADR-006-agent-routing-and-project-runner.md)
+- [当前实际技术设计](docs/technical/IMPLEMENTED-MVP-DESIGN.md)
+- [本地 MVP 验收文档](docs/releases/2026-08-17-mvp-acceptance.md)

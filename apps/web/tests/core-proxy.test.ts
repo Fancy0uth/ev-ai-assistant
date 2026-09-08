@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { POST } from '../src/app/api/core/[...path]/route';
+import { POST, PUT } from '../src/app/api/core/[...path]/route';
 
 describe('Core BFF proxy', () => {
   beforeEach(() => {
@@ -58,6 +58,27 @@ describe('Core BFF proxy', () => {
     expect(response.status).toBe(200);
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect((init.headers as Headers).get('cookie')).toBeNull();
+  });
+
+  it('forwards a versioned memory write through PUT', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { scope: 'GENERAL', version: 1 } }), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await PUT(
+      new Request('http://web.local/api/core/memory/GENERAL', {
+        method: 'PUT',
+        body: JSON.stringify({ content: '稳定偏好', expectedVersion: null }),
+      }),
+      { params: Promise.resolve({ path: ['memory', 'GENERAL'] }) },
+    );
+
+    expect(response.status).toBe(201);
+    const [target, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(target).toBe('http://127.0.0.1:4311/v1/memory/GENERAL');
+    expect(init.method).toBe('PUT');
   });
 
   it.each([
