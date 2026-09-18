@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { StrictMode, useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { DailyPlanWorkspace } from '@/components/daily-plan/daily-plan-workspace';
-import { TaskDetailWorkspace, EventDetailWorkspace, ProjectDetailWorkspace } from '@/components/details/entity-detail-workspaces';
+import { TaskDetailWorkspace, EventDetailWorkspace } from '@/components/details/entity-detail-workspaces';
 import { ManualEventProposalPanel } from '@/components/schedule/manual-event-proposal-panel';
 import { TodayDashboard } from '@/components/today/today-dashboard';
 import {
@@ -28,8 +28,8 @@ const proposalIdB = '00000000-0000-4000-8000-000000000710';
 const eventId = '00000000-0000-4000-8000-000000000703';
 const taskIdA = '00000000-0000-4000-8000-000000000704';
 const taskIdB = '00000000-0000-4000-8000-000000000705';
-const projectIdA = '00000000-0000-4000-8000-000000000706';
-const projectIdB = '00000000-0000-4000-8000-000000000707';
+const calendarRuleId = '00000000-0000-4000-8000-000000000706';
+const calendarTermId = '00000000-0000-4000-8000-000000000707';
 
 function collectMediaBlocks(css: string, mediaQuery: string): string {
   const blocks: string[] = [];
@@ -218,8 +218,8 @@ function mixedScheduleProposal(
       {
         operation: 'CREATE_CALENDAR_RULE',
         rule: {
-          id: projectIdA,
-          termId: projectIdB,
+          id: calendarRuleId,
+          termId: calendarTermId,
           title: 'Hidden calendar rule',
           weekday: 1,
           startLocalTime: '09:00',
@@ -235,21 +235,6 @@ function mixedScheduleProposal(
   };
 }
 
-function projectSnapshot(id: string, label: string) {
-  return {
-    data: {
-      scope: {
-        id,
-        label,
-        rootPath: `C:\\projects\\${label}`,
-        createdAt: '2026-08-24T01:00:00.000Z',
-        updatedAt: '2026-08-24T01:00:00.000Z',
-      },
-      files: [{ relativePath: 'PRD.md', content: `# ${label}` }],
-    },
-  };
-}
-
 function todaySnapshot() {
   return {
     data: {
@@ -261,7 +246,7 @@ function todaySnapshot() {
       pendingProposals: [],
       yesterday: null,
       dailyPlan: { status: 'NOT_CONFIGURED', proposalId: null, pendingItemCount: 0 },
-      agents: { deepSeek: 'NOT_CONFIGURED', codex: 'NOT_CONFIGURED' },
+      agents: { deepSeek: 'NOT_CONFIGURED' },
     },
   };
 }
@@ -1255,13 +1240,11 @@ describe('V4-06 scheduling workspaces', () => {
     expect(screen.getByRole('heading', { name: 'Task B' })).toBeInTheDocument();
   });
 
-  it('uses strict Task, Event, and Project snapshot reads and exposes resource-specific failures', async () => {
+  it('uses strict Task and Event reads', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(taskPayload(taskIdA, 'Task A')))
-      .mockResolvedValueOnce(jsonResponse({ data: eventPayload() }))
-      .mockResolvedValueOnce(jsonResponse(projectSnapshot(projectIdA, 'Project A')))
-      .mockResolvedValueOnce(jsonResponse({ error: { code: 'PROJECT_ROOT_UNAVAILABLE', message: '项目根不可读' } }, 422));
+      .mockResolvedValueOnce(jsonResponse({ data: eventPayload() }));
     vi.stubGlobal('fetch', fetchMock);
 
     const task = render(<TaskDetailWorkspace id={taskIdA} />);
@@ -1270,15 +1253,8 @@ describe('V4-06 scheduling workspaces', () => {
     const event = render(<EventDetailWorkspace id={eventId} />);
     expect(await screen.findByRole('heading', { name: 'Team review' })).toBeInTheDocument();
     event.unmount();
-    const project = render(<ProjectDetailWorkspace id={projectIdA} />);
-    expect(await screen.findByRole('heading', { name: 'Project A' })).toBeInTheDocument();
-    project.rerender(<ProjectDetailWorkspace id={projectIdB} />);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('项目根当前不可读');
     expect(fetchMock).toHaveBeenCalledWith(`/api/core/tasks/${taskIdA}`, expect.objectContaining({ method: 'GET', cache: 'no-store' }));
     expect(fetchMock).toHaveBeenCalledWith(`/api/core/events/${eventId}`, expect.objectContaining({ method: 'GET', cache: 'no-store' }));
-    expect(fetchMock).toHaveBeenCalledWith(`/api/core/projects/${projectIdA}/snapshot`, expect.objectContaining({ method: 'GET', cache: 'no-store' }));
-    expect(fetchMock).toHaveBeenCalledWith(`/api/core/projects/${projectIdB}/snapshot`, expect.objectContaining({ method: 'GET', cache: 'no-store' }));
   });
 
   it('redirects a 401 detail response to login without showing the previous entity', async () => {
@@ -1302,11 +1278,9 @@ describe('V4-06 scheduling workspaces', () => {
     const dailyWorkspace = read('components/daily-plan/daily-plan-workspace.tsx');
     const preflightPanel = read('components/daily-plan/preflight-review-panel.tsx');
     const preflightHook = read('components/daily-plan/use-daily-plan-preflight.ts');
-    const details = read('components/details/entity-detail-workspaces.tsx');
     const routes = [
       read('app/(dashboard)/tasks/[id]/page.tsx'),
       read('app/(dashboard)/schedule/events/[id]/page.tsx'),
-      read('app/(dashboard)/projects/[id]/page.tsx'),
     ];
 
     expect(dailyWorkspace).not.toContain('dailyPlanGenerationInputSchema');
@@ -1315,21 +1289,17 @@ describe('V4-06 scheduling workspaces', () => {
     expect(dailyWorkspace.split('\n').length).toBeLessThan(516);
     expect(preflightPanel).not.toContain('requestCore');
     expect(preflightHook).not.toMatch(/<(?:section|form|button|input)\b/);
-    expect(details).toContain('projects/${id}/snapshot');
-    expect(details).not.toMatch(/projects\/\$\{id\}(?!\/snapshot)/);
     for (const route of routes) {
       expect(route).not.toMatch(/'use client'|useState|useEffect|requestCore|useSearchParams/);
     }
     expect(routes[0]).toContain('taskPathParamsSchema');
     expect(routes[1]).toContain('eventPathParamsSchema');
-    expect(routes[2]).toContain('projectScopePathSchema');
     const concreteSources = [
       read('components/today/task-list.tsx'),
       read('components/today/day-console.tsx'),
       read('components/today/status-overview.tsx'),
-      read('components/projects/project-workspace.tsx'),
     ].join('\n');
-    expect(concreteSources).not.toMatch(/\?(?:taskId|eventId|projectId|detail)=/);
+    expect(concreteSources).not.toMatch(/\?(?:taskId|eventId|detail)=/);
     expect(read('components/schedule/manual-event-proposal-panel.tsx')).not.toMatch(/change\.event\.status/);
   });
 

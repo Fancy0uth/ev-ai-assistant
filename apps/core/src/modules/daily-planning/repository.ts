@@ -5,6 +5,7 @@ import {
   dailyPlanProposalSchema,
   dailyPlanRunSchema,
   type DailyPlanContextManifest,
+  type DailyPlanCoordinationMode,
   type DailyPlanDecisionInput,
   type DailyPlanDecisionRecord,
   type DailyPlanFailureCode,
@@ -341,6 +342,7 @@ interface DailyPlanPreflightRow {
 interface DailyPlanProposalRow {
   id: string;
   contract_version: 'DAILY_PLAN_V1';
+  mode: DailyPlanCoordinationMode;
   run_id: string;
   local_date: string;
   status: DailyPlanProposal['status'];
@@ -416,6 +418,7 @@ function toDailyPlanProposal(row: DailyPlanProposalRow): DailyPlanProposal {
   return dailyPlanProposalSchema.parse({
     id: row.id,
     contractVersion: row.contract_version,
+    ...(row.mode === 'LOCAL_RULES' ? { mode: row.mode } : {}),
     runId: row.run_id,
     localDate: row.local_date,
     status: row.status,
@@ -579,13 +582,13 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      limit 1`,
   );
   const findProposalByRun = database.prepare(
-    `select id, contract_version, run_id, local_date, status, base_schedule_version, summary,
+    `select id, contract_version, mode, run_id, local_date, status, base_schedule_version, summary,
             items_json, version, created_at, updated_at
      from daily_plan_proposals
      where run_id = ? and owner_id = ?`,
   );
   const findProposal = database.prepare(
-    `select id, contract_version, run_id, local_date, status, base_schedule_version, summary,
+    `select id, contract_version, mode, run_id, local_date, status, base_schedule_version, summary,
             items_json, version, created_at, updated_at
      from daily_plan_proposals
      where id = ? and owner_id = ?`,
@@ -598,7 +601,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      order by created_at asc, id asc`,
   );
   const listProposalsForOwner = database.prepare(
-    `select id, contract_version, run_id, local_date, status, base_schedule_version, summary,
+    `select id, contract_version, mode, run_id, local_date, status, base_schedule_version, summary,
             items_json, version, created_at, updated_at
      from daily_plan_proposals
      where owner_id = ?
@@ -606,7 +609,7 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
      limit ? offset ?`,
   );
   const listProposalsForOwnerDate = database.prepare(
-    `select id, contract_version, run_id, local_date, status, base_schedule_version, summary,
+    `select id, contract_version, mode, run_id, local_date, status, base_schedule_version, summary,
             items_json, version, created_at, updated_at
      from daily_plan_proposals
      where owner_id = ? and local_date = ?
@@ -720,9 +723,14 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
   }
   const insertProposal = database.prepare(
     `insert into daily_plan_proposals (
-       id, owner_id, run_id, contract_version, local_date, status, base_schedule_version,
+       id, owner_id, run_id, contract_version, mode, local_date, status, base_schedule_version,
        summary, items_json, version, created_at, updated_at
-     ) values (?, ?, ?, 'DAILY_PLAN_V1', ?, 'PENDING_REVIEW', ?, ?, ?, ?, ?, ?)`,
+     ) values (?, ?, ?, 'DAILY_PLAN_V1', ?, ?, 'PENDING_REVIEW', ?, ?, ?, ?, ?, ?)`,
+  );
+  const staleActiveProposals = database.prepare(
+    `update daily_plan_proposals
+     set status = 'STALE', version = version + 1, updated_at = ?
+     where owner_id = ? and local_date = ? and status in ('PENDING_REVIEW', 'PARTIALLY_APPLIED')`,
   );
   const completeRun = database.prepare(
     `update daily_plan_runs
@@ -1036,10 +1044,16 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         }
         return { stale: true };
       }
+      staleActiveProposals.run(
+        timestampAtLeast(input.proposal.updatedAt, run.created_at),
+        input.ownerId,
+        input.proposal.localDate,
+      );
       insertProposal.run(
         input.proposal.id,
         input.ownerId,
         preflight.runId,
+        input.proposal.mode ?? 'EXTERNAL',
         input.proposal.localDate,
         preflight.baseScheduleVersion,
         input.proposal.summary,
@@ -1153,10 +1167,16 @@ export function createDailyPlanRunRepository(database: Database.Database): Daily
         return { stale: true };
       }
 
+      staleActiveProposals.run(
+        timestampAtLeast(proposal.updatedAt, run.created_at),
+        ownerId,
+        proposal.localDate,
+      );
       insertProposal.run(
         proposal.id,
         ownerId,
         runId,
+        proposal.mode ?? 'EXTERNAL',
         proposal.localDate,
         baseScheduleVersion,
         proposal.summary,

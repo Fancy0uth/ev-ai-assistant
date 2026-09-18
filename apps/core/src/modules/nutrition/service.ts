@@ -21,6 +21,7 @@ import {
   createNutritionRepository,
   MealConfirmationError,
   MealDraftStateConflictError,
+  NutritionSourceDescriptorConflictError,
   type MealDraftDetail,
   type NutritionRepository,
 } from './repository';
@@ -300,6 +301,9 @@ export function createNutritionService(database: Database.Database, options: Nut
           return { status: 202, body: { draft: stored.draft, revision: stored.revision, matches: stored.matches, source: provider.descriptor.source } };
         } catch (error) {
           if (error instanceof MealDraftStateConflictError) throw new ApiError(409, 'VERSION_CONFLICT', '餐食草稿版本已变化');
+          if (error instanceof NutritionSourceDescriptorConflictError) {
+            throw new ApiError(409, 'NUTRITION_SOURCE_DESCRIPTOR_CONFLICT', '营养来源的不可变描述符与已保存快照冲突');
+          }
           throw error;
         }
       }, () => {

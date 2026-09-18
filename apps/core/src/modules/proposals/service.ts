@@ -166,6 +166,10 @@ export function createProposalService(
             if (!workoutProposalApplier) throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', '训练提案不可应用');
             if (input.decision === 'ACCEPT') workoutProposalApplier.applyAccepted(ownerId, proposal);
             else workoutProposalApplier.applyRejected(ownerId, proposal);
+          } else if (proposal.kind === 'PROJECT') {
+            if (input.decision === 'ACCEPT') {
+              throw new ApiError(409, 'PROJECT_PROPOSAL_RETIRED', '项目分析模块已退役，历史项目提案不能确认');
+            }
           } else if (input.decision === 'ACCEPT') {
             applyAcceptedScheduleChanges(ownerId, proposal);
           }

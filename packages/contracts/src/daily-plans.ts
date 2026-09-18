@@ -13,6 +13,7 @@ const positiveVersionSchema = z.number().int().positive();
 
 export const dailyPlanContractVersionSchema = z.literal('DAILY_PLAN_V1');
 export const dailyPlanModelSchemaVersionSchema = z.literal('DAILY_PLAN_MODEL_V1');
+export const dailyPlanCoordinationModeSchema = z.enum(['LOCAL_RULES', 'EXTERNAL']);
 
 export const dailyPlanTriggerSchema = z.enum([
   'MANUAL',
@@ -413,6 +414,7 @@ export const dailyPlanProposalSchema = z
   .object({
     id: z.uuid(),
     contractVersion: dailyPlanContractVersionSchema,
+    mode: dailyPlanCoordinationModeSchema.optional(),
     runId: z.uuid(),
     localDate: z.iso.date(),
     status: dailyPlanProposalStatusSchema,
@@ -443,6 +445,13 @@ export const dailyPlanProposalSchema = z
 export const dailyPlanGenerationInputSchema = z
   .object({
     localDate: z.iso.date(),
+  })
+  .strict();
+
+export const dailyPlanCoordinationInputSchema = z
+  .object({
+    localDate: z.iso.date(),
+    mode: dailyPlanCoordinationModeSchema,
   })
   .strict();
 
@@ -776,6 +785,7 @@ export const dailyPlanRunSchema = z
 
 export type DailyPlanContractVersion = z.infer<typeof dailyPlanContractVersionSchema>;
 export type DailyPlanModelSchemaVersion = z.infer<typeof dailyPlanModelSchemaVersionSchema>;
+export type DailyPlanCoordinationMode = z.infer<typeof dailyPlanCoordinationModeSchema>;
 export type DailyPlanTrigger = z.infer<typeof dailyPlanTriggerSchema>;
 export type DailyPlanRunStatus = z.infer<typeof dailyPlanRunStatusSchema>;
 export type DailyPlanProposalStatus = z.infer<typeof dailyPlanProposalStatusSchema>;
@@ -793,6 +803,7 @@ export type DailyPlanModelOutput = z.infer<typeof dailyPlanModelOutputSchema>;
 export type DailyPlanProposalItem = z.infer<typeof dailyPlanProposalItemSchema>;
 export type DailyPlanProposal = z.infer<typeof dailyPlanProposalSchema>;
 export type DailyPlanGenerationInput = z.input<typeof dailyPlanGenerationInputSchema>;
+export type DailyPlanCoordinationInput = z.input<typeof dailyPlanCoordinationInputSchema>;
 export type DailyPlanProposalResponse = z.infer<typeof dailyPlanProposalResponseSchema>;
 export type DailyPlanDecisionInput = z.input<typeof dailyPlanDecisionInputSchema>;
 export type DailyPlanDecisionRecord = z.infer<typeof dailyPlanDecisionRecordSchema>;

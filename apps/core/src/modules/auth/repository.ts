@@ -11,6 +11,10 @@ export interface PublicOwner {
   username: string;
 }
 
+export interface AuthSessionLookupOptions {
+  readOnly?: true;
+}
+
 interface NewOwner extends StoredOwner {
   createdAt: string;
 }
@@ -29,7 +33,11 @@ export interface AuthRepository {
   createOwner(owner: NewOwner): StoredOwner;
   findOwnerByUsername(username: string): StoredOwner | undefined;
   createSession(session: NewSession): void;
-  findOwnerBySession(tokenHash: string, now: string): PublicOwner | undefined;
+  findOwnerBySession(
+    tokenHash: string,
+    now: string,
+    options?: AuthSessionLookupOptions,
+  ): PublicOwner | undefined;
   revokeSession(tokenHash: string): void;
 }
 
@@ -85,7 +93,7 @@ export function createAuthRepository(database: Database.Database): AuthRepositor
         );
     },
 
-    findOwnerBySession(tokenHash, now) {
+    findOwnerBySession(tokenHash, now, options: AuthSessionLookupOptions = {}) {
       const owner = database
         .prepare(
           `select owners.id, owners.username
@@ -95,7 +103,7 @@ export function createAuthRepository(database: Database.Database): AuthRepositor
         )
         .get(tokenHash, now) as PublicOwner | undefined;
 
-      if (!owner) {
+      if (!owner && options.readOnly !== true) {
         database
           .prepare('delete from sessions where token_hash = ? and expires_at <= ?')
           .run(tokenHash, now);

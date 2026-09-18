@@ -65,6 +65,7 @@ const dailyPlanWithoutProposalSchema = z
 
 const dailyPlanWithPendingReviewSchema = z
   .object({
+    mode: z.enum(['LOCAL_RULES', 'EXTERNAL']).optional(),
     status: z.enum(['PENDING_REVIEW', 'PARTIALLY_APPLIED']),
     proposalId: z.uuid(),
     pendingItemCount: z.number().int().min(0),
@@ -73,6 +74,7 @@ const dailyPlanWithPendingReviewSchema = z
 
 const dailyPlanTerminalSchema = z
   .object({
+    mode: z.enum(['LOCAL_RULES', 'EXTERNAL']).optional(),
     status: z.enum(['APPLIED', 'REJECTED', 'STALE']),
     proposalId: z.uuid(),
     pendingItemCount: z.literal(0),
@@ -116,7 +118,6 @@ export const todaySnapshotSchema = z
         agents: z
           .object({
             deepSeek: z.literal('NOT_CONFIGURED'),
-            codex: z.literal('NOT_CONFIGURED'),
           })
           .strict(),
       })

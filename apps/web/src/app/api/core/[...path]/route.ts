@@ -1,3 +1,10 @@
+import {
+  applyApiSecurityHeaders,
+  hasMatchingCsrfToken,
+  isTrustedOrigin,
+  loadWebSecurityConfig,
+} from '../../../../lib/web-security';
+
 interface RouteContext {
   params: Promise<{ path: string[] }>;
 }
@@ -65,6 +72,24 @@ function safePath(segments: string[]): string | null {
   return segments.map(encodeURIComponent).join('/');
 }
 
+function isRetiredProjectPath(path: string[]): boolean {
+  return path[0]?.toLowerCase() === 'projects';
+}
+
+function isLocalAdminPath(path: string[]): boolean {
+  return path[0]?.toLowerCase() === 'local-admin';
+}
+
+function isMutation(method: string): boolean {
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+}
+
+function responseJson(body: unknown, status: number): Response {
+  return applyApiSecurityHeaders(
+    Response.json(body, { status, headers: { 'cache-control': 'no-store' } }),
+  );
+}
+
 async function readBoundedBody(request: Request, maxBytes: number): Promise<Uint8Array> {
   const declared = request.headers.get('content-length');
   if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
@@ -99,21 +124,57 @@ async function readBoundedBody(request: Request, maxBytes: number): Promise<Uint
 
 async function proxyToCore(request: Request, context: RouteContext): Promise<Response> {
   const { path } = await context.params;
+  let webSecurity;
+  try {
+    webSecurity = loadWebSecurityConfig();
+  } catch {
+    return responseJson(
+      { error: { code: 'WEB_ORIGIN_CONFIGURATION_ERROR', message: 'Web Origin 配置无效' } },
+      500,
+    );
+  }
+  if (isRetiredProjectPath(path)) {
+    return responseJson(
+      { error: { code: 'PROJECT_MODULE_RETIRED', message: '项目分析模块已退役，项目路径不可用' } },
+      405,
+    );
+  }
+  if (isLocalAdminPath(path)) {
+    return responseJson(
+      { error: { code: 'LOCAL_ADMIN_PROXY_FORBIDDEN', message: '本机管理路径不通过 Web 代理' } },
+      404,
+    );
+  }
   const encodedPath = safePath(path);
   if (!encodedPath) {
-    return Response.json(
+    return responseJson(
       { error: { code: 'INVALID_PROXY_PATH', message: '请求路径不符合要求' } },
-      { status: 400 },
+      400,
     );
+  }
+
+  if (isMutation(request.method)) {
+    if (!isTrustedOrigin(request.headers, webSecurity.origin)) {
+      return responseJson(
+        { error: { code: 'BFF_ORIGIN_REJECTED', message: '请求来源不符合要求' } },
+        403,
+      );
+    }
+    if (!hasMatchingCsrfToken(request.headers)) {
+      return responseJson(
+        { error: { code: 'BFF_CSRF_REJECTED', message: 'CSRF Token 不符合要求' } },
+        403,
+      );
+    }
   }
 
   let target: string;
   try {
     target = `${coreBaseUrl()}/v1/${encodedPath}${new URL(request.url).search}`;
   } catch {
-    return Response.json(
+    return responseJson(
       { error: { code: 'CORE_CONFIGURATION_ERROR', message: '本地 Core 地址配置无效' } },
-      { status: 500 },
+      500,
     );
   }
 
@@ -136,9 +197,9 @@ async function proxyToCore(request: Request, context: RouteContext): Promise<Res
       if (body.byteLength > 0) init.body = new Uint8Array(body).buffer;
     } catch (error) {
       if (error instanceof RangeError && error.message === 'BFF_BODY_TOO_LARGE') {
-        return Response.json(
+        return responseJson(
           { error: { code: 'BFF_BODY_TOO_LARGE', message: '上传内容超过 5 MB 限制' } },
-          { status: 413 },
+          413,
         );
       }
       throw error;
@@ -149,14 +210,14 @@ async function proxyToCore(request: Request, context: RouteContext): Promise<Res
   try {
     upstream = await fetch(target, init);
   } catch {
-    return Response.json(
+    return responseJson(
       {
         error: {
           code: 'CORE_UNAVAILABLE',
           message: '本地 Core 暂时不可用，请确认服务已启动',
         },
       },
-      { status: 502 },
+      502,
     );
   }
 
@@ -165,10 +226,10 @@ async function proxyToCore(request: Request, context: RouteContext): Promise<Res
     const value = upstream.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }
-  return new Response(await upstream.arrayBuffer(), {
+  return applyApiSecurityHeaders(new Response(await upstream.arrayBuffer(), {
     status: upstream.status,
     headers: responseHeaders,
-  });
+  }));
 }
 
 export const dynamic = 'force-dynamic';

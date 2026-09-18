@@ -63,6 +63,7 @@ function dailyPlanSummary(
     case 'PARTIALLY_APPLIED':
       return {
         status: latest.proposal.status,
+        ...(latest.proposal.mode ? { mode: latest.proposal.mode } : {}),
         proposalId: latest.proposal.id,
         pendingItemCount: latest.proposal.items.filter((item) => item.status === 'PENDING_REVIEW').length,
       };
@@ -71,6 +72,7 @@ function dailyPlanSummary(
     case 'STALE':
       return {
         status: latest.proposal.status,
+        ...(latest.proposal.mode ? { mode: latest.proposal.mode } : {}),
         proposalId: latest.proposal.id,
         pendingItemCount: 0,
       };
@@ -129,7 +131,6 @@ export async function registerTodayRoutes(
         ),
         agents: {
           deepSeek: 'NOT_CONFIGURED',
-          codex: 'NOT_CONFIGURED',
         },
       },
     });

@@ -2017,6 +2017,377 @@ const migrations: readonly Migration[] = [
       drop table v07_owner_lineage_preflight_v22;
     `,
   },
+  {
+    version: 23,
+    name: 'add_bounded_project_briefs',
+    sql: `
+      create table project_briefs (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        project_scope_id text not null references project_scopes(id) on delete restrict,
+        mode text not null check (mode in ('LOCAL_RULES', 'EXTERNAL')),
+        status text not null check (status in ('PROPOSAL_PENDING', 'ACCEPTED', 'REJECTED')),
+        snapshot_json text not null check (json_valid(snapshot_json)),
+        snapshot_hash text not null check (length(snapshot_hash) = 64),
+        analysis_json text not null check (json_valid(analysis_json)),
+        proposal_id text not null unique references proposals(id) on delete restrict,
+        action_id text unique references actions(id) on delete restrict,
+        time_request_id text unique references time_requests(id) on delete restrict,
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create index project_briefs_owner_status_created_idx
+        on project_briefs(owner_id, status, created_at, id);
+
+      create trigger project_briefs_v23_validate_before_insert
+      before insert on project_briefs
+      when
+        not exists (
+          select 1 from project_scopes
+          where id = new.project_scope_id and owner_id = new.owner_id
+        )
+        or not exists (
+          select 1 from proposals
+          where id = new.proposal_id and owner_id = new.owner_id
+            and kind = 'PROJECT' and source = 'PROJECT_AGENT'
+        )
+        or (new.status = 'PROPOSAL_PENDING' and (new.action_id is not null or new.time_request_id is not null))
+        or (new.status = 'ACCEPTED' and (new.action_id is null or new.time_request_id is null))
+        or (new.status = 'REJECTED' and (new.action_id is not null or new.time_request_id is not null))
+        or (new.action_id is not null and not exists (
+          select 1 from actions where id = new.action_id and owner_id = new.owner_id
+        ))
+        or (new.time_request_id is not null and not exists (
+          select 1 from time_requests
+          where id = new.time_request_id and owner_id = new.owner_id
+            and source = 'PROJECT_AGENT' and origin_kind = 'PROJECT_BRIEF' and origin_id = new.id
+        ))
+      begin
+        select raise(abort, 'invalid project brief lineage');
+      end;
+
+      create trigger project_briefs_v23_validate_before_update
+      before update on project_briefs
+      when
+        new.owner_id is not old.owner_id
+        or new.project_scope_id is not old.project_scope_id
+        or new.mode is not old.mode
+        or new.snapshot_json is not old.snapshot_json
+        or new.snapshot_hash is not old.snapshot_hash
+        or new.analysis_json is not old.analysis_json
+        or new.proposal_id is not old.proposal_id
+        or old.status is not 'PROPOSAL_PENDING'
+        or (new.status = 'PROPOSAL_PENDING' and (new.action_id is not null or new.time_request_id is not null))
+        or (new.status = 'ACCEPTED' and (new.action_id is null or new.time_request_id is null))
+        or (new.status = 'REJECTED' and (new.action_id is not null or new.time_request_id is not null))
+        or (new.action_id is not null and not exists (
+          select 1 from actions where id = new.action_id and owner_id = new.owner_id
+        ))
+        or (new.time_request_id is not null and not exists (
+          select 1 from time_requests
+          where id = new.time_request_id and owner_id = new.owner_id
+            and source = 'PROJECT_AGENT' and origin_kind = 'PROJECT_BRIEF' and origin_id = new.id
+        ))
+      begin
+        select raise(abort, 'invalid project brief transition');
+      end;
+    `,
+  },
+  {
+    version: 24,
+    name: 'add_entity_memory_documents',
+    sql: `
+      create table entity_memory_documents (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        scope_type text not null check (scope_type in ('PROJECT', 'COURSE', 'FITNESS', 'NUTRITION', 'DAILY')),
+        scope_id text not null check (length(trim(scope_id)) between 1 and 200),
+        content text not null check (length(content) between 1 and 20000),
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        unique (owner_id, scope_type, scope_id)
+      );
+
+      create index entity_memory_documents_owner_scope_idx
+        on entity_memory_documents(owner_id, scope_type, scope_id);
+
+      create table entity_memory_revisions (
+        id text primary key,
+        document_id text not null references entity_memory_documents(id) on delete cascade,
+        owner_id text not null references owners(id) on delete cascade,
+        scope_type text not null check (scope_type in ('PROJECT', 'COURSE', 'FITNESS', 'NUTRITION', 'DAILY')),
+        scope_id text not null check (length(trim(scope_id)) between 1 and 200),
+        content text not null check (length(content) between 1 and 20000),
+        version integer not null check (version >= 1),
+        parent_revision_id text references entity_memory_revisions(id) on delete cascade,
+        source_revision_id text references entity_memory_revisions(id) on delete cascade,
+        source text not null check (source in ('WRITE', 'RESTORE')),
+        expected_version integer check (expected_version is null or expected_version >= 1),
+        content_bytes integer not null check (content_bytes between 1 and 80000),
+        created_at text not null,
+        unique (document_id, version)
+      );
+
+      create index entity_memory_revisions_document_version_idx
+        on entity_memory_revisions(document_id, version desc);
+
+      create trigger entity_memory_documents_v24_validate_before_insert
+      before insert on entity_memory_documents
+      when
+        (new.scope_type = 'PROJECT' and not exists (
+          select 1 from project_scopes where id = new.scope_id and owner_id = new.owner_id
+        ))
+        or (new.scope_type = 'COURSE' and not exists (
+          select 1 from courses where id = new.scope_id and owner_id = new.owner_id
+        ))
+        or (new.scope_type in ('FITNESS', 'NUTRITION') and new.scope_id <> new.owner_id)
+        or (new.scope_type = 'DAILY' and (
+          new.scope_id not glob '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+          or strftime('%Y-%m-%d', new.scope_id) is null
+        ))
+      begin
+        select raise(abort, 'invalid entity memory scope ownership');
+      end;
+
+      create trigger entity_memory_documents_v24_identity_immutable
+      before update of owner_id, scope_type, scope_id on entity_memory_documents
+      when new.owner_id is not old.owner_id
+        or new.scope_type is not old.scope_type
+        or new.scope_id is not old.scope_id
+      begin
+        select raise(abort, 'entity memory identity is immutable');
+      end;
+
+      create trigger entity_memory_revisions_v24_validate_before_insert
+      before insert on entity_memory_revisions
+      when
+        not exists (
+          select 1 from entity_memory_documents
+          where id = new.document_id
+            and owner_id = new.owner_id
+            and scope_type = new.scope_type
+            and scope_id = new.scope_id
+            and version = new.version
+        )
+        or (new.parent_revision_id is not null and not exists (
+          select 1 from entity_memory_revisions
+          where id = new.parent_revision_id and document_id = new.document_id
+        ))
+        or (new.source_revision_id is not null and not exists (
+          select 1 from entity_memory_revisions
+          where id = new.source_revision_id and document_id = new.document_id
+        ))
+      begin
+        select raise(abort, 'invalid entity memory revision lineage');
+      end;
+
+      create trigger entity_memory_revisions_v24_immutable_update
+      before update on entity_memory_revisions
+      begin
+        select raise(abort, 'entity memory revisions are immutable');
+      end;
+    `,
+  },
+  {
+    version: 25,
+    name: 'add_memory_compaction_drafts',
+    sql: `
+      create table memory_compaction_baselines (
+        owner_id text not null references owners(id) on delete cascade,
+        scope_type text not null check (scope_type in ('DOMAIN', 'PROJECT', 'COURSE', 'FITNESS', 'NUTRITION', 'DAILY')),
+        scope_id text not null check (length(trim(scope_id)) between 1 and 200),
+        processed_version integer not null check (processed_version >= 1),
+        processed_at text not null,
+        primary key (owner_id, scope_type, scope_id)
+      );
+
+      create table memory_compaction_drafts (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        scope_type text not null check (scope_type in ('DOMAIN', 'PROJECT', 'COURSE', 'FITNESS', 'NUTRITION', 'DAILY')),
+        scope_id text not null check (length(trim(scope_id)) between 1 and 200),
+        mode text not null check (mode in ('LOCAL_RULES', 'EXTERNAL')),
+        trigger text not null check (trigger in ('MANUAL', 'THRESHOLD')),
+        status text not null check (status in ('PENDING', 'REJECTED', 'ACCEPTED', 'BLOCKED', 'FAILED', 'INVALIDATED')),
+        base_version integer not null check (base_version >= 1),
+        source_revisions_json text not null check (json_valid(source_revisions_json)),
+        content text check (content is null or length(content) between 1 and 20000),
+        summary text not null check (length(summary) between 1 and 500),
+        diff_json text check (diff_json is null or json_valid(diff_json)),
+        input_bytes integer not null check (input_bytes >= 1),
+        output_bytes integer check (output_bytes is null or output_bytes >= 1),
+        byte_budget integer not null check (byte_budget = 16384),
+        failure_code text check (failure_code is null or length(failure_code) between 1 and 120),
+        result_revision_version integer check (result_revision_version is null or result_revision_version >= 1),
+        version integer not null check (version >= 1),
+        created_at text not null,
+        updated_at text not null,
+        decided_at text,
+        invalidated_at text
+      );
+
+      create unique index memory_compaction_drafts_pending_identity_base_uidx
+        on memory_compaction_drafts(owner_id, scope_type, scope_id, base_version)
+        where status = 'PENDING';
+      create index memory_compaction_drafts_owner_scope_created_idx
+        on memory_compaction_drafts(owner_id, scope_type, scope_id, created_at desc, id);
+
+      create table memory_compaction_revision_links (
+        id text primary key,
+        draft_id text not null references memory_compaction_drafts(id) on delete cascade,
+        owner_id text not null references owners(id) on delete cascade,
+        scope_type text not null check (scope_type in ('DOMAIN', 'PROJECT', 'COURSE', 'FITNESS', 'NUTRITION', 'DAILY')),
+        scope_id text not null check (length(trim(scope_id)) between 1 and 200),
+        relation text not null check (relation in ('COMPACTION', 'RESTORE')),
+        source_revision_version integer not null check (source_revision_version >= 1),
+        result_revision_version integer not null check (result_revision_version >= 1),
+        created_at text not null
+      );
+
+      create index memory_compaction_revision_links_draft_idx
+        on memory_compaction_revision_links(draft_id, created_at, id);
+
+      create trigger memory_compaction_revision_links_v25_validate_before_insert
+      before insert on memory_compaction_revision_links
+      when not exists (
+        select 1 from memory_compaction_drafts
+        where id = new.draft_id
+          and owner_id = new.owner_id
+          and scope_type = new.scope_type
+          and scope_id = new.scope_id
+          and status = 'ACCEPTED'
+      )
+      begin
+        select raise(abort, 'invalid memory compaction revision link');
+      end;
+
+      create trigger memory_compaction_legacy_document_deleted_v25
+      after delete on memory_documents
+      begin
+        update memory_compaction_drafts
+        set status = 'INVALIDATED',
+            source_revisions_json = '[]',
+            content = null,
+            diff_json = null,
+            failure_code = 'MEMORY_DELETED',
+            result_revision_version = null,
+            version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            invalidated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = old.owner_id
+          and scope_type = 'DOMAIN'
+          and scope_id = old.scope
+          and status <> 'INVALIDATED';
+
+        delete from memory_compaction_baselines
+        where owner_id = old.owner_id
+          and scope_type = 'DOMAIN'
+          and scope_id = old.scope;
+      end;
+
+      create trigger memory_compaction_entity_document_deleted_v25
+      after delete on entity_memory_documents
+      begin
+        update memory_compaction_drafts
+        set status = 'INVALIDATED',
+            source_revisions_json = '[]',
+            content = null,
+            diff_json = null,
+            failure_code = 'MEMORY_DELETED',
+            result_revision_version = null,
+            version = version + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            invalidated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        where owner_id = old.owner_id
+          and scope_type = old.scope_type
+          and scope_id = old.scope_id
+          and status <> 'INVALIDATED';
+
+        delete from memory_compaction_baselines
+        where owner_id = old.owner_id
+          and scope_type = old.scope_type
+          and scope_id = old.scope_id;
+      end;
+    `,
+  },
+  {
+    version: 26,
+    name: 'add_daily_plan_coordination_uniqueness',
+    sql: `
+      alter table daily_plan_proposals add column mode text not null default 'EXTERNAL'
+        check (mode in ('LOCAL_RULES', 'EXTERNAL'));
+
+      update daily_plan_proposals as stale
+      set status = 'STALE',
+          version = version + 1,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      where stale.status in ('PENDING_REVIEW', 'PARTIALLY_APPLIED')
+        and exists (
+          select 1
+          from daily_plan_proposals as retained
+          where retained.owner_id = stale.owner_id
+            and retained.local_date = stale.local_date
+            and retained.status in ('PENDING_REVIEW', 'PARTIALLY_APPLIED')
+            and (
+              retained.updated_at > stale.updated_at
+              or (retained.updated_at = stale.updated_at and retained.id < stale.id)
+            )
+        );
+
+      create unique index daily_plan_proposals_owner_date_active_coordination_uidx
+        on daily_plan_proposals(owner_id, local_date)
+        where status in ('PENDING_REVIEW', 'PARTIALLY_APPLIED');
+    `,
+  },
+  {
+    version: 27,
+    name: 'add_project_conversation_storage',
+    sql: `
+      create unique index project_scopes_owner_id_id_uidx
+        on project_scopes(owner_id, id);
+
+      create table project_conversations (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        project_scope_id text not null,
+        created_at text not null,
+        unique(owner_id, project_scope_id),
+        foreign key (owner_id, project_scope_id)
+          references project_scopes(owner_id, id) on delete restrict
+      );
+
+      create index project_conversations_owner_project_idx
+        on project_conversations(owner_id, project_scope_id);
+
+      create table project_conversation_messages (
+        sequence integer primary key autoincrement,
+        id text not null unique,
+        session_id text not null references project_conversations(id) on delete cascade,
+        client_message_id text not null,
+        role text not null check (role = 'USER'),
+        content text not null check (
+          length(content) between 1 and 8000
+          and length(trim(content)) > 0
+        ),
+        created_at text not null,
+        unique(session_id, client_message_id)
+      );
+
+      create index project_conversation_messages_session_sequence_idx
+        on project_conversation_messages(session_id, sequence);
+
+      create trigger project_conversations_v27_identity_immutable
+      before update of owner_id, project_scope_id on project_conversations
+      when new.owner_id is not old.owner_id
+        or new.project_scope_id is not old.project_scope_id
+      begin
+        select raise(abort, 'project conversation identity is immutable');
+      end;
+    `,
+  },
 ];
 
 export function runMigrations(
@@ -2055,4 +2426,12 @@ export function runMigrations(
       applyMigration(migration);
     }
   }
+}
+
+export function latestSchemaVersion(): number {
+  const latest = migrations[migrations.length - 1];
+  if (!latest) {
+    throw new Error('MIGRATIONS_NOT_CONFIGURED');
+  }
+  return latest.version;
 }

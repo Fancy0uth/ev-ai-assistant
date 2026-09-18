@@ -1,13 +1,41 @@
 import * as z from 'zod';
 
 /** The only application version fact exposed by runtime contracts. */
-export const APP_VERSION = '0.7.0' as const;
+export const APP_VERSION = '0.9.0' as const;
 
 export const appVersionSchema = z
   .string()
   .regex(
     /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
   );
+
+export const operationsHealthCheckStatusSchema = z.enum([
+  'up',
+  'down',
+  'degraded',
+  'unknown',
+  'not_run',
+  'unconfigured',
+]);
+
+export type OperationsHealthCheckStatus = z.infer<typeof operationsHealthCheckStatusSchema>;
+
+export const backupHealthSnapshotSchema = z.object({
+  status: operationsHealthCheckStatusSchema,
+}).strict();
+
+export const ownerOperationsHealthResponseSchema = z.object({
+  appVersion: appVersionSchema,
+  schemaVersion: z.number().int().nonnegative(),
+  checks: z.object({
+    database: operationsHealthCheckStatusSchema,
+    migration: operationsHealthCheckStatusSchema,
+    backup: operationsHealthCheckStatusSchema,
+    provider: operationsHealthCheckStatusSchema,
+    scheduler: operationsHealthCheckStatusSchema,
+    log: operationsHealthCheckStatusSchema,
+  }).strict(),
+}).strict();
 
 export const idempotencyKeySchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/);
 
@@ -40,3 +68,5 @@ export type IdempotencyOperation = z.infer<typeof idempotencyOperationSchema>;
 export type DeepSeekModel = z.infer<typeof deepSeekModelSchema>;
 export type DeepSeekFinishReason = z.infer<typeof deepSeekFinishReasonSchema>;
 export type DeepSeekUsage = z.infer<typeof deepSeekUsageSchema>;
+export type BackupHealthSnapshot = z.infer<typeof backupHealthSnapshotSchema>;
+export type OwnerOperationsHealthResponse = z.infer<typeof ownerOperationsHealthResponseSchema>;

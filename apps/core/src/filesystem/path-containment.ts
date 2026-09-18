@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import * as nativePath from 'node:path';
 
 type PathImplementation = Pick<typeof nativePath, 'basename' | 'dirname' | 'isAbsolute' | 'join' | 'relative' | 'resolve' | 'sep'>;
@@ -31,6 +31,39 @@ function resolveWithExistingRealPath(path: string, implementation: PathImplement
   return missingSegments.length === 0
     ? implementation.resolve(realExisting)
     : implementation.resolve(realExisting, ...missingSegments);
+}
+
+export function normalizePhysicalPath(path: string): string {
+  const normalized = nativePath.resolve(path);
+  return process.platform === 'win32'
+    ? normalized.replace(/^\\\\\?\\/, '').replaceAll('/', '\\').toLowerCase()
+    : normalized;
+}
+
+export function samePhysicalPath(left: string, right: string): boolean {
+  return normalizePhysicalPath(left) === normalizePhysicalPath(right);
+}
+
+export function resolveUnlinkedExistingDirectory(path: string): string {
+  const absolutePath = nativePath.resolve(path);
+  const root = nativePath.parse(absolutePath).root;
+  const segments = nativePath.relative(root, absolutePath).split(nativePath.sep).filter(Boolean);
+  let current = root;
+  for (const segment of segments) {
+    current = nativePath.join(current, segment);
+    if (lstatSync(current).isSymbolicLink()) {
+      throw new Error('linked directory segment');
+    }
+  }
+  const entry = lstatSync(absolutePath);
+  if (entry.isSymbolicLink() || !entry.isDirectory() || !statSync(absolutePath).isDirectory()) {
+    throw new Error('not an existing directory');
+  }
+  const physicalPath = realpathSync.native(absolutePath);
+  if (!samePhysicalPath(physicalPath, absolutePath)) {
+    throw new Error('directory physical path changed');
+  }
+  return physicalPath;
 }
 
 export function isPathInsideRoot(root: string, candidate: string): boolean {

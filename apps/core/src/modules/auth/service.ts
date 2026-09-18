@@ -2,7 +2,12 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Credentials, Owner } from '@ev/contracts';
 import { ApiError } from '../../http/api-error';
 import { hashPassword, verifyPassword } from './password';
-import type { AuthRepository, PublicOwner, StoredOwner } from './repository';
+import type {
+  AuthRepository,
+  AuthSessionLookupOptions,
+  PublicOwner,
+  StoredOwner,
+} from './repository';
 
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -20,8 +25,8 @@ export interface AuthService {
   needsSetup(): boolean;
   setup(credentials: Credentials): Promise<AuthResult>;
   login(credentials: Credentials): Promise<AuthResult>;
-  optionalSessionOwner(token: string | undefined): Owner | null;
-  authenticate(token: string | undefined): Owner;
+  optionalSessionOwner(token: string | undefined, options?: AuthSessionLookupOptions): Owner | null;
+  authenticate(token: string | undefined, options?: AuthSessionLookupOptions): Owner;
   logout(token: string | undefined): void;
 }
 
@@ -54,9 +59,12 @@ export async function createAuthService(
     return { owner: publicOwner(owner), token, expiresAt };
   }
 
-  function optionalSessionOwner(token: string | undefined): Owner | null {
+  function optionalSessionOwner(
+    token: string | undefined,
+    options?: AuthSessionLookupOptions,
+  ): Owner | null {
     const owner = token
-      ? repository.findOwnerBySession(sessionDigest(token), now().toISOString())
+      ? repository.findOwnerBySession(sessionDigest(token), now().toISOString(), options)
       : null;
     return owner ? publicOwner(owner) : null;
   }
@@ -103,8 +111,8 @@ export async function createAuthService(
 
     optionalSessionOwner,
 
-    authenticate(token) {
-      const owner = optionalSessionOwner(token);
+    authenticate(token, options) {
+      const owner = optionalSessionOwner(token, options);
       if (!owner) {
         throw new ApiError(401, 'AUTHENTICATION_REQUIRED', '请先登录本地账号');
       }

@@ -3,6 +3,7 @@
 import {
   dailyPlanDecisionBatchInputSchema,
   dailyPlanDecisionBatchResponseSchema,
+  dailyPlanProposalResponseSchema,
   dailyPlanReviewExplanationResponseSchema,
   dailyPlanReviewListResponseSchema,
   dailyPlanReviewSchema,
@@ -69,16 +70,27 @@ function proposalStatusLabel(status: DailyPlanReview['proposal']['status']): str
   }
 }
 
+function unschedulableReasonLabel(reasonCode: string): string {
+  switch (reasonCode) {
+    case 'OUTSIDE_AVAILABILITY': return '可用时间窗不足以容纳该请求';
+    case 'CAPACITY_LIMIT': return '加入该请求会超过当日可安排时长上限';
+    case 'INSUFFICIENT_TIME': return '现有可用时间无法避开全部已确认时间块';
+    default: return reasonCode;
+  }
+}
+
 export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
   const [localDate, setLocalDate] = useState(initialDate);
   const [reviews, setReviews] = useState<DailyPlanReview[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCoordinating, setIsCoordinating] = useState(false);
   const [mutationKey, setMutationKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<FailureState | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const updateStatusRef = useRef<HTMLParagraphElement>(null);
   const selectedDateRef = useRef(initialDate);
   const decisionIdempotencyKeysRef = useRef(new Map<string, string>());
+  const coordinationIdempotencyKeysRef = useRef(new Map<string, string>());
 
   const loadReviews = useCallback(async (date: string): Promise<DailyPlanReview[]> => {
     const payload = await requestCore(`daily-plans/proposals?localDate=${encodeURIComponent(date)}&page=1&pageSize=20`, { method: 'GET' });
@@ -141,6 +153,37 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
     setUpdateMessage(null);
   }
 
+  async function coordinateLocalRules(): Promise<void> {
+    if (isCoordinating) return;
+    const semanticAction = `LOCAL_RULES:${localDate}`;
+    const idempotencyKey = coordinationIdempotencyKeysRef.current.get(semanticAction) ?? createIdempotencyKey();
+    coordinationIdempotencyKeysRef.current.set(semanticAction, idempotencyKey);
+    setFailure(null);
+    setUpdateMessage(null);
+    setIsCoordinating(true);
+    try {
+      const payload = await requestCore('daily-plans/coordinate', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ localDate, mode: 'LOCAL_RULES' }),
+      });
+      const proposal = dailyPlanProposalResponseSchema.parse(payload).data;
+      if (proposal.localDate !== localDate || proposal.mode !== 'LOCAL_RULES') {
+        throw new Error('LOCAL_RULES coordination response did not match the selected date.');
+      }
+      coordinationIdempotencyKeysRef.current.delete(semanticAction);
+      const nextReviews = await loadReviews(localDate);
+      if (localDate !== selectedDateRef.current) return;
+      setReviews(nextReviews);
+      setUpdateMessage('本地静态协调草案已生成；每项仍需单独审核后才会写入日程。');
+    } catch (error) {
+      if (!isUncertainTransportFailure(error)) coordinationIdempotencyKeysRef.current.delete(semanticAction);
+      setFailure(failureState(error));
+    } finally {
+      setIsCoordinating(false);
+    }
+  }
+
   async function submitDecision(
     review: DailyPlanReview,
     decision: { itemId: string; decision: 'APPLY'; startLocalTime?: string; endLocalTime?: string } | { itemId: string; decision: 'REJECT'; reason?: string },
@@ -201,7 +244,23 @@ export function DailyPlanWorkspace({ initialDate }: DailyPlanWorkspaceProps) {
         </label>
       </header>
 
-      <PreflightReviewPanel controller={preflight} />
+      <section className="daily-plan-local-rules" aria-labelledby="daily-plan-local-rules-heading">
+        <div>
+          <p className="section-kicker">LOCAL_RULES / EXPLICIT</p>
+          <h2 id="daily-plan-local-rules-heading">本地静态协调</h2>
+          <p>按 TimeRequest 优先级与可用时间窗排布，并避开全部已确认时间块。未安排项会保留原因；不会调用模型或外部 Provider。</p>
+        </div>
+        <button disabled={isCoordinating} aria-busy={isCoordinating || undefined} type="button" onClick={() => void coordinateLocalRules()}>{isCoordinating ? '正在协调…' : '按本地静态规则协调'}</button>
+      </section>
+
+      <section className="daily-plan-external-flow" aria-labelledby="daily-plan-external-heading">
+        <div>
+          <p className="section-kicker">EXTERNAL / OWNER REVIEW</p>
+          <h2 id="daily-plan-external-heading">外部 Provider 审核流程</h2>
+          <p>该流程仍要求先审阅外发上下文；未配置 Provider 时会明确返回不可用，不会自动切换到本地规则。</p>
+        </div>
+        <PreflightReviewPanel controller={preflight} />
+      </section>
 
       {failure ? (
         <div className="daily-plan-workspace__failure" role="alert">
@@ -271,17 +330,19 @@ function DailyPlanReviewCard({
   ) => Promise<void>;
 }) {
   const { proposal } = review;
+  const isLocalRules = proposal.mode === 'LOCAL_RULES';
 
   return (
     <article className="daily-plan-review-card" aria-labelledby={`daily-plan-${proposal.id}`}>
       <header className="daily-plan-review-card__header">
         <div>
-          <p className="section-kicker">{proposal.localDate} / {proposalStatusLabel(proposal.status)}</p>
+          <p className="section-kicker">{proposal.localDate} / {proposalStatusLabel(proposal.status)} / {isLocalRules ? 'LOCAL_RULES' : 'EXTERNAL'}</p>
           <h2 id={`daily-plan-${proposal.id}`}>每日计划草案</h2>
         </div>
         <span className="daily-plan-review-card__version">v{proposal.version}</span>
       </header>
       <p className="daily-plan-review-card__summary">{proposal.summary}</p>
+      <p className="daily-plan-review-card__source">协调来源：{isLocalRules ? 'LOCAL_RULES 静态规则（无模型）' : '外部 Provider 审核流程'}。</p>
       <DailyPlanExplanationDetails proposalId={proposal.id} />
       {proposal.items.length === 0 ? (
         <p className="daily-plan-review-card__empty">这个草案没有需要审核的安排。</p>
@@ -292,6 +353,7 @@ function DailyPlanReviewCard({
               item={item}
               isMutating={mutationKey === `${proposal.id}:${item.id}`}
               isProposalStale={proposal.status === 'STALE'}
+              isLocalRules={isLocalRules}
               key={item.id}
               onDecision={(decision) => onDecision(review, decision)}
             />
@@ -402,6 +464,7 @@ function DailyPlanExplanationDetails({ proposalId }: { proposalId: string }) {
             {explanation.items.map((item) => (
               <li key={item.itemId}>
                 <strong>{item.timeRequest?.title ?? `请求 ${item.ordinal}`}</strong>
+                {item.timeRequest ? <p>来源：{item.timeRequest.source} · 优先级：{item.timeRequest.priority} · 时长：{item.timeRequest.durationMinutes} 分钟。</p> : <p>来源：原 TimeRequest 已不存在。</p>}
                 <p>{verificationLabel(item.verification.status)}</p>
                 {item.verification.conflicts.length > 0 ? (
                   <p>
@@ -423,11 +486,13 @@ function DailyPlanItemCard({
   item,
   isMutating,
   isProposalStale,
+  isLocalRules,
   onDecision,
 }: {
   item: DailyPlanProposalItem;
   isMutating: boolean;
   isProposalStale: boolean;
+  isLocalRules: boolean;
   onDecision: (
     decision:
       | { itemId: string; decision: 'APPLY'; startLocalTime?: string; endLocalTime?: string }
@@ -467,9 +532,10 @@ function DailyPlanItemCard({
       {isScheduled ? (
         <p className="daily-plan-item-card__time">{item.startLocalTime}–{item.endLocalTime}</p>
       ) : (
-        <p className="daily-plan-item-card__time">{item.reasonCode}</p>
+        <p className="daily-plan-item-card__time">未安排：{unschedulableReasonLabel(item.reasonCode)}</p>
       )}
       <p className="daily-plan-item-card__rationale">{item.rationale}</p>
+      {isLocalRules ? <p className="daily-plan-item-card__conflict">{isScheduled ? '冲突：已避开全部当前已确认时间块；采用前仍会重新校验。' : '冲突/容量：未安排原因见上方；该项不会写入日程。'}</p> : null}
 
       {item.status === 'PENDING_REVIEW' ? (
         <div className="daily-plan-item-card__controls">

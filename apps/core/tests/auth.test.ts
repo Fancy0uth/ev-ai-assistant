@@ -202,6 +202,17 @@ describe('local owner authentication', () => {
 
   });
 
+  it('rejects logout without a valid Owner session', async () => {
+    app = await buildApp({ logger: false });
+
+    const logout = await app.inject({ method: 'POST', url: '/v1/auth/logout' });
+
+    expect(logout.statusCode).toBe(401);
+    expect(logout.json()).toEqual({
+      error: { code: 'AUTHENTICATION_REQUIRED', message: '请先登录本地账号' },
+    });
+  });
+
   it('keeps task and agent capability endpoints protected from anonymous requests', async () => {
     app = await buildApp({ logger: false });
 

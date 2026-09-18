@@ -80,21 +80,12 @@ test('local domain workspaces keep day actions concrete and persist only reviewe
   await page.getByRole('button', { name: '查看历史版本' }).click();
   await expect(page.getByRole('heading', { name: '历史版本' })).toBeVisible();
 
-  await page.goto('/projects');
-  await expect(page.getByRole('heading', { name: '项目与工作流' })).toBeVisible();
-  await page.getByLabel('项目名称').fill(`受限项目-${suffix}`);
-  await page.getByLabel('本机项目目录').fill(process.cwd());
-  await page.getByRole('button', { name: '登记只读项目范围' }).click();
-  await expect(page.getByRole('button', { name: `选择项目：受限项目-${suffix}` })).toBeVisible();
-  await page.getByRole('button', { name: '读取只读规划快照' }).click();
-  await expect(page.getByText('本页不会执行命令、修改文件、提交 Git 或读取 .env。')).toBeVisible();
-
   await page.goto('/today');
   await expect(page.getByText('恢复状态', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   for (const [path, heading] of [
     ['/schedule', '日程与课表'], ['/learning', '学习与课程'], ['/fitness', '训练与恢复'],
-    ['/nutrition', '饮食记录'], ['/memory', 'Agent 本地记忆'], ['/projects', '项目与工作流'],
+    ['/nutrition', '饮食记录'], ['/memory', 'Agent 本地记忆'],
   ] as const) {
     await page.goto(path);
     await expect(page.getByRole('heading', { name: heading })).toBeVisible();

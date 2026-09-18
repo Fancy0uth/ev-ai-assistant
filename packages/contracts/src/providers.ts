@@ -101,6 +101,18 @@ export const agentContextManifestSchema = z
   })
   .strict();
 
+const activeAgentRunCapabilitySchema = z.enum([
+  'LIFE_PLANNING',
+  'FITNESS_COACHING',
+  'LEARNING_SUPPORT',
+]);
+const activeAgentContextManifestSchema = z
+  .object({
+    domains: z.array(z.enum(['SCHEDULE', 'FITNESS', 'NUTRITION', 'LEARNING', 'MEMORY'])).min(1).max(5),
+    entityIds: z.array(z.uuid()).max(100),
+  })
+  .strict();
+
 export const agentRunOutputSchema = z
   .object({
     summary: z.string().min(1).max(2000).refine((value) => value.trim().length > 0),
@@ -128,9 +140,9 @@ export const agentRunSchema = z
 
 export const createAgentRunSchema = z
   .object({
-    providerKey: providerKeySchema,
-    capability: agentRunCapabilitySchema,
-    context: agentContextManifestSchema,
+    providerKey: z.literal('DEEPSEEK'),
+    capability: activeAgentRunCapabilitySchema,
+    context: activeAgentContextManifestSchema,
   })
   .strict();
 

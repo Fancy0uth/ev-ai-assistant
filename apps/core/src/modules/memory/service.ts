@@ -20,6 +20,24 @@ export interface MemoryRevision {
   createdAt: string;
 }
 
+export interface MemoryRevisionWritten {
+  document: MemoryDocument;
+  revision: MemoryRevision;
+}
+
+export type MemoryBeforeProjection = (event: MemoryRevisionWritten) => void;
+
+export type MemoryRevisionSource = 'WRITE' | 'RESTORE';
+
+export interface MemoryRevisionHook {
+  onRevisionAppended(event: {
+    ownerId: string;
+    document: MemoryDocument;
+    revision: MemoryRevision;
+    source: MemoryRevisionSource;
+  }): void;
+}
+
 interface MemoryDocumentRow {
   scope: MemoryScope;
   content: string;
@@ -38,6 +56,7 @@ interface MemoryRevisionRow {
 interface MemoryServiceOptions {
   now?: () => Date;
   newId?: () => string;
+  revisionHook?: MemoryRevisionHook;
 }
 
 function toDocument(row: MemoryDocumentRow): MemoryDocument {
@@ -63,7 +82,21 @@ export function createMemoryService(
   list(ownerId: string): MemoryDocument[];
   listRevisions(ownerId: string, scope: MemoryScope): MemoryRevision[];
   write(ownerId: string, scope: MemoryScope, content: string, expectedVersion?: number | null): MemoryDocument;
+  writeForCompaction(
+    ownerId: string,
+    scope: MemoryScope,
+    content: string,
+    expectedVersion: number,
+    beforeProjection: MemoryBeforeProjection,
+  ): MemoryDocument;
   restore(ownerId: string, scope: MemoryScope, revisionVersion: number, expectedVersion?: number): MemoryDocument;
+  restoreForCompaction(
+    ownerId: string,
+    scope: MemoryScope,
+    revisionVersion: number,
+    expectedVersion: number,
+    beforeProjection: MemoryBeforeProjection,
+  ): MemoryDocument;
   remove(ownerId: string, scope: MemoryScope, expectedVersion: number): void;
 } {
   const now = options.now ?? (() => new Date());
@@ -71,6 +104,10 @@ export function createMemoryService(
   const findDocument = database.prepare(
     `select scope, content, version, created_at, updated_at
      from memory_documents where owner_id = ? and scope = ?`,
+  );
+  const findRevision = database.prepare(
+    `select scope, content, version, created_at from memory_revisions
+     where owner_id = ? and scope = ? and version = ?`,
   );
 
   function read(ownerId: string, scope: MemoryScope): MemoryDocument | undefined {
@@ -86,16 +123,40 @@ export function createMemoryService(
     }
   }
 
-  function write(ownerId: string, scope: MemoryScope, content: string, expectedVersion?: number | null): MemoryDocument {
-    const normalized = content.trim();
-    if (normalized.length === 0 || normalized.length > 20_000) {
-      throw new RangeError('memory content must be between 1 and 20000 characters');
-    }
-    const existing = read(ownerId, scope);
-    assertExpectedVersion(existing, expectedVersion);
-    const version = (existing?.version ?? 0) + 1;
-    const timestamp = now().toISOString();
-    const save = database.transaction(() => {
+  function appendRevision(
+    ownerId: string,
+    scope: MemoryScope,
+    content: string | undefined,
+    expectedVersion: number | null | undefined,
+    source: MemoryRevisionSource,
+    restoreRevisionVersion?: number,
+    beforeProjection?: MemoryBeforeProjection,
+  ): MemoryDocument {
+    let document: MemoryDocument | undefined;
+    let revision: MemoryRevision | undefined;
+    database.transaction(() => {
+      const existing = read(ownerId, scope);
+      const restoredRevision = source === 'RESTORE'
+        ? findRevision.get(ownerId, scope, restoreRevisionVersion) as MemoryRevisionRow | undefined
+        : undefined;
+      if (source === 'RESTORE' && !restoredRevision) {
+        throw new ApiError(404, 'MEMORY_REVISION_NOT_FOUND', '记忆历史版本不存在');
+      }
+      assertExpectedVersion(existing, expectedVersion);
+      const normalized = (source === 'RESTORE' ? restoredRevision!.content : content ?? '').trim();
+      if (normalized.length === 0 || normalized.length > 20_000) {
+        throw new RangeError('memory content must be between 1 and 20000 characters');
+      }
+      const version = (existing?.version ?? 0) + 1;
+      const timestamp = now().toISOString();
+      const nextDocument = {
+        scope,
+        content: normalized,
+        version,
+        createdAt: existing?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      } satisfies MemoryDocument;
+      const nextRevision = { scope, content: normalized, version, createdAt: timestamp } satisfies MemoryRevision;
       if (existing) {
         database
           .prepare(
@@ -118,12 +179,27 @@ export function createMemoryService(
            values (?, ?, ?, ?, ?, ?)`,
         )
         .run(newId(), ownerId, scope, normalized, version, timestamp);
+      beforeProjection?.({ document: nextDocument, revision: nextRevision });
       writeMemoryProjection(projectionRoot, scope, normalized);
-    });
-    save();
-    const document = read(ownerId, scope);
-    if (!document) throw new Error('memory document disappeared');
+      document = nextDocument;
+      revision = nextRevision;
+    })();
+    if (!document || !revision) throw new Error('memory document disappeared');
+    try {
+      options.revisionHook?.onRevisionAppended({
+        ownerId,
+        document,
+        revision,
+        source,
+      });
+    } catch {
+      // Optional local compaction bookkeeping cannot make a committed memory write fail.
+    }
     return document;
+  }
+
+  function write(ownerId: string, scope: MemoryScope, content: string, expectedVersion?: number | null): MemoryDocument {
+    return appendRevision(ownerId, scope, content, expectedVersion, 'WRITE');
   }
 
   return {
@@ -135,15 +211,14 @@ export function createMemoryService(
       return (database.prepare(`select scope, content, version, created_at from memory_revisions where owner_id = ? and scope = ? order by version desc`).all(ownerId, scope) as MemoryRevisionRow[]).map(toRevision);
     },
     write,
+    writeForCompaction(ownerId, scope, content, expectedVersion, beforeProjection) {
+      return appendRevision(ownerId, scope, content, expectedVersion, 'WRITE', undefined, beforeProjection);
+    },
     restore(ownerId, scope, revisionVersion, expectedVersion) {
-      const revision = database
-        .prepare(
-          `select content from memory_revisions
-           where owner_id = ? and scope = ? and version = ?`,
-        )
-        .get(ownerId, scope, revisionVersion) as { content: string } | undefined;
-      if (!revision) throw new ApiError(404, 'MEMORY_REVISION_NOT_FOUND', '记忆历史版本不存在');
-      return write(ownerId, scope, revision.content, expectedVersion);
+      return appendRevision(ownerId, scope, undefined, expectedVersion, 'RESTORE', revisionVersion);
+    },
+    restoreForCompaction(ownerId, scope, revisionVersion, expectedVersion, beforeProjection) {
+      return appendRevision(ownerId, scope, undefined, expectedVersion, 'RESTORE', revisionVersion, beforeProjection);
     },
     remove(ownerId, scope, expectedVersion) {
       const existing = read(ownerId, scope);

@@ -164,7 +164,6 @@ describe('Today snapshot API', () => {
     expect(snapshot.yesterday).toBeNull();
     expect(snapshot.agents).toEqual({
       deepSeek: 'NOT_CONFIGURED',
-      codex: 'NOT_CONFIGURED',
     });
     expect(responseBody.data.dailyPlan).toEqual({
       status: 'NOT_CONFIGURED',

@@ -11,7 +11,6 @@ export * from './fitness';
 export * from './memory';
 export * from './nutrition';
 export * from './proposals';
-export * from './projects';
 export * from './providers';
 export * from './reliability';
 export * from './tasks';

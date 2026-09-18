@@ -1,4 +1,5 @@
 import { apiErrorSchema } from '@ev/contracts';
+import { isCsrfToken, readCsrfCookie } from './web-security';
 
 export class CoreClientError extends Error {
   readonly code: string;
@@ -24,10 +25,68 @@ export function isUncertainCoreWriteFailure(error: unknown): boolean {
   return !(error instanceof CoreClientError) || error.status === 0 || error.status === 502;
 }
 
+let csrfInitialization: Promise<string> | undefined;
+
+function browserCsrfToken(): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const cookie = readCsrfCookie(document.cookie);
+  return cookie.kind === 'valid' ? cookie.token : undefined;
+}
+
+async function csrfToken(): Promise<string> {
+  const existing = browserCsrfToken();
+  if (existing) return existing;
+
+  if (!csrfInitialization) {
+    csrfInitialization = (async () => {
+      let response: Response;
+      try {
+        response = await fetch('/api/csrf', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+      } catch {
+        throw new CoreClientError(0, 'CSRF_INITIALIZATION_FAILED', '安全校验初始化失败，请稍后重试');
+      }
+
+      const payload = await response.json().catch(() => null);
+      const token = typeof payload === 'object'
+        && payload !== null
+        && 'token' in payload
+        && typeof payload.token === 'string'
+        ? payload.token
+        : undefined;
+      if (!response.ok || !token || !isCsrfToken(token)) {
+        throw new CoreClientError(response.status, 'CSRF_INITIALIZATION_FAILED', '安全校验初始化失败，请稍后重试');
+      }
+
+      const cookie = browserCsrfToken();
+      if (typeof document !== 'undefined' && cookie !== token) {
+        throw new CoreClientError(response.status, 'CSRF_INITIALIZATION_FAILED', '安全校验初始化失败，请稍后重试');
+      }
+      return token;
+    })();
+  }
+
+  try {
+    return await csrfInitialization;
+  } finally {
+    csrfInitialization = undefined;
+  }
+}
+
+function isMutation(method: string | undefined): boolean {
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes((method ?? 'GET').toUpperCase());
+}
+
 export async function requestCore(path: string, init: RequestInit): Promise<unknown> {
   const headers = new Headers(init.headers);
   if (init.body != null && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
+  }
+  if (isMutation(init.method)) {
+    headers.set('x-ev-csrf-token', await csrfToken());
   }
   let response: Response;
   try {

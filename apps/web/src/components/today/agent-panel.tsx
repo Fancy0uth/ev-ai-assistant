@@ -1,5 +1,5 @@
 import type { TodaySnapshot } from '@ev/contracts';
-import { Bot, Braces, Cpu, Sparkles } from 'lucide-react';
+import { Bot, Cpu, Sparkles } from 'lucide-react';
 
 type Snapshot = TodaySnapshot['data'];
 
@@ -46,7 +46,7 @@ function AgentContent({ snapshot, idPrefix }: { snapshot: Snapshot; idPrefix: st
       <section className="capability-section" aria-labelledby={capabilityHeadingId}>
         <div className="agent-section-heading">
           <h3 id={capabilityHeadingId}>能力接口</h3>
-          <span>2 providers</span>
+          <span>1 provider</span>
         </div>
         <dl className="capability-list">
           <div>
@@ -54,12 +54,6 @@ function AgentContent({ snapshot, idPrefix }: { snapshot: Snapshot; idPrefix: st
               <Cpu aria-hidden="true" size={16} /> DeepSeek
             </dt>
             <dd>{capabilityCopy(snapshot.agents.deepSeek)}</dd>
-          </div>
-          <div>
-            <dt>
-              <Braces aria-hidden="true" size={16} /> Codex
-            </dt>
-            <dd>{capabilityCopy(snapshot.agents.codex)}</dd>
           </div>
         </dl>
       </section>

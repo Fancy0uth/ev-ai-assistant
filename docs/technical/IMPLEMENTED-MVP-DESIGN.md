@@ -1,12 +1,14 @@
 # EV AI Dashboard：本地 MVP 技术设计与实施状态
 
+> 历史实施截面（v0.3），保留当时正文，不继续更新进度。当前权威技术正文为 [TECH_SPEC](../TECH_SPEC.md)、[ARCHITECTURE](../ARCHITECTURE.md)，实际接口见 [API](../API.md)，唯一进度见 [TASKS](../../plans/TASKS.md)。下文“当前/已实现/未实现”均指原日期，不代表后续版本。
+
 | 字段 | 内容 |
 | --- | --- |
 | 版本 | 0.3.0 候选 |
 | 状态 | Daily AI Control Loop 已实现，待独立浏览器验收；不是生产发布声明 |
 | 日期 | 2026-08-23 |
-| 产品依据 | [PRD](../product/PRD.md)、[MVP 范围](../product/MVP-SCOPE.md) |
-| 长期蓝图 | [TECH_SPEC](TECH_SPEC.md)、[ARCHITECTURE](ARCHITECTURE.md) |
+| 产品依据 | [PRD](../PRD.md)、[MVP 范围](../product/MVP-SCOPE.md) |
+| 长期蓝图 | [TECH_SPEC](../TECH_SPEC.md)、[ARCHITECTURE](../ARCHITECTURE.md) |
 
 ## 1. 设计结论
 

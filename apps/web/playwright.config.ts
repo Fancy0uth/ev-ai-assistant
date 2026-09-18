@@ -80,6 +80,7 @@ export const playwrightConfig = defineConfig({
       env: {
         ...process.env,
         EV_CORE_URL: coreBaseUrl,
+        EV_WEB_ORIGIN: webBaseUrl,
         EV_NEXT_DIST_DIR: webRelativeDistDir,
       },
       url: `${webBaseUrl}/setup`,

@@ -2,10 +2,8 @@
 
 import {
   eventResponseSchema,
-  projectSnapshotResponseSchema,
   taskResponseSchema,
   type Event,
-  type ProjectScope,
   type Task,
 } from '@ev/contracts';
 import Link from 'next/link';
@@ -19,16 +17,8 @@ type DetailState<T> =
   | { phase: 'notFound'; id: string; requestKey: number }
   | { phase: 'error'; id: string; requestKey: number; message: string };
 
-interface ProjectSnapshot {
-  scope: ProjectScope;
-  files: Array<{ relativePath: 'PRD.md' | 'TECH_SPEC.md' | 'ARCHITECTURE.md' | 'TASKS.md'; content: string }>;
-}
-
-function messageFor(error: unknown, resource: 'Task' | 'Event' | '项目'): string {
+function messageFor(error: unknown, resource: 'Task' | 'Event'): string {
   if (error instanceof CoreClientError) {
-    if (resource === '项目' && error.status === 422 && error.code === 'PROJECT_ROOT_UNAVAILABLE') {
-      return '项目根当前不可读/快照不可用，请检查本机目录后重试。';
-    }
     return error.message;
   }
   return `${resource}详情暂时不可用，请稍后重试。`;
@@ -50,7 +40,7 @@ function useEntityDetail<T>({
 }: {
   id: string;
   path: string;
-  resource: 'Task' | 'Event' | '项目';
+  resource: 'Task' | 'Event';
   parse: (payload: unknown) => T;
 }): { state: DetailState<T>; retry: () => void } {
   const { replace } = useRouter();
@@ -130,10 +120,6 @@ function eventFromPayload(payload: unknown): Event {
   return eventResponseSchema.parse(payload).data;
 }
 
-function projectFromPayload(payload: unknown): ProjectSnapshot {
-  return projectSnapshotResponseSchema.parse(payload).data;
-}
-
 export function TaskDetailWorkspace({ id }: { id: string }) {
   const { state, retry } = useEntityDetail({ id, path: `tasks/${id}`, resource: 'Task', parse: taskFromPayload });
   if (state.phase === 'loading') return <DetailLoading resource="任务" />;
@@ -177,28 +163,6 @@ export function EventDetailWorkspace({ id }: { id: string }) {
         <div><dt>版本</dt><dd>v{event.version}</dd></div>
       </dl>
       <Link href="/schedule">返回日程模块</Link>
-    </section>
-  );
-}
-
-export function ProjectDetailWorkspace({ id }: { id: string }) {
-  const { state, retry } = useEntityDetail({ id, path: `projects/${id}/snapshot`, resource: '项目', parse: projectFromPayload });
-  if (state.phase === 'loading') return <DetailLoading resource="项目快照" />;
-  if (state.phase === 'notFound') return <DetailNotFound href="/projects" resource="项目" />;
-  if (state.phase === 'error') return <DetailError message={state.message} retry={retry} />;
-  const snapshot = state.data;
-  return (
-    <section className="entity-detail" aria-labelledby="project-detail-heading">
-      <p className="section-kicker">PROJECT SNAPSHOT</p>
-      <h1 id="project-detail-heading">{snapshot.scope.label}</h1>
-      <dl className="entity-detail__facts">
-        <div><dt>本机项目目录</dt><dd>{snapshot.scope.rootPath}</dd></div>
-        <div><dt>创建时间</dt><dd>{snapshot.scope.createdAt}</dd></div>
-        <div><dt>更新时间</dt><dd>{snapshot.scope.updatedAt}</dd></div>
-      </dl>
-      <p>仅展示当前快照，不在 Web 中编辑文件。</p>
-      {snapshot.files.length > 0 ? <ul className="entity-detail__files">{snapshot.files.map((file) => <li key={file.relativePath}><h2>{file.relativePath}</h2><pre>{file.content}</pre></li>)}</ul> : <p>当前快照没有 allowlisted 规划文件。</p>}
-      <Link href="/projects">返回项目模块</Link>
     </section>
   );
 }

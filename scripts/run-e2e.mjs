@@ -18,6 +18,12 @@ const nextEnvPath = join(webDirectory, 'next-env.d.ts');
 const originalNextEnv = await readFile(nextEnvPath, 'utf8');
 const v07HealthEvidenceSource = join(dataDirectory, 'v0.7-health-evidence.json');
 const v07HealthEvidenceResult = join(webDirectory, 'test-results', 'evidence', 'v0.7-health-evidence.json');
+const selectors = process.argv.slice(2);
+const isV08Only = selectors.length === 1 && selectors[0] === 'v0.8-project-memory-coordination.spec.ts';
+const isV09Only = selectors.length === 1 && selectors[0] === 'v0.9-private-iphone.spec.ts';
+// These two bounded LOCAL_RULES paths do not invoke the V07 health fixture producers.
+// Every other selector continues to require the V07 evidence archive.
+const skipsV07HealthEvidence = isV08Only || isV09Only;
 
 function start(command, args, environment, cwd = root, stdio = 'inherit') {
   return spawn(command, args, {
@@ -79,9 +85,10 @@ async function waitForReady(url, process) {
 
 function runPlaywright() {
   return new Promise((resolve) => {
-    const child = start(process.execPath, [join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', ...process.argv.slice(2)], {
+    const child = start(process.execPath, [join(root, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', ...selectors], {
       EV_E2E_MANAGED: '1',
       EV_E2E_RUN_DIR: dataDirectory,
+      NEXT_TELEMETRY_DISABLED: '1',
     }, join(root, 'apps', 'web'));
     child.once('exit', (code) => resolve(code ?? 1));
   });
@@ -93,22 +100,35 @@ await assertPortAvailable(3217);
 let core;
 let web;
 try {
-  core = start(process.execPath, ['--import', 'tsx', join(root, 'apps', 'core', 'e2e', 'daily-plan-test-bootstrap.ts')], {
+  const coreEntryPoint = isV09Only
+    ? join(root, 'apps', 'core', 'src', 'server.ts')
+    : join(root, 'apps', 'core', 'e2e', 'daily-plan-test-bootstrap.ts');
+  const coreEnvironment = {
     EV_CORE_HOST: '127.0.0.1',
     EV_CORE_PORT: '4327',
     EV_DATA_DIR: dataDirectory,
-    EV_E2E_DAILY_PLAN_TEST_BOOTSTRAP: '1',
-    EV_E2E_V06_LEARNING_TEST_ADAPTERS: '1',
-    EV_E2E_V07_HEALTH_TEST_ADAPTERS: '1',
     EV_E2E_RUN_DIR: dataDirectory,
     EV_SECURE_COOKIES: 'false',
-    NODE_ENV: 'test',
-  }, root, 'ignore');
+    EV_WEB_ORIGIN: 'http://127.0.0.1:3217',
+    NEXT_TELEMETRY_DISABLED: '1',
+    // The production entry point deliberately does not self-start under NODE_ENV=test.
+    // V9 uses that entry point without fixture adapters, while older selectors retain test mode.
+    NODE_ENV: isV09Only ? 'e2e' : 'test',
+    ...(isV09Only ? {} : {
+      EV_E2E_DAILY_PLAN_TEST_BOOTSTRAP: '1',
+      EV_E2E_V06_LEARNING_TEST_ADAPTERS: '1',
+      EV_E2E_V07_HEALTH_TEST_ADAPTERS: '1',
+    }),
+  };
+  core = start(process.execPath, ['--import', 'tsx', coreEntryPoint], coreEnvironment, root);
   await waitForReady(coreUrl, core);
   web = start(process.execPath, [join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev', join(root, 'apps', 'web'), '--hostname', '127.0.0.1', '--port', '3217'], {
     EV_CORE_URL: 'http://127.0.0.1:4327',
+    EV_WEB_ORIGIN: 'http://127.0.0.1:3217',
     EV_NEXT_DIST_DIR: webRelativeDistDir,
-  }, root, 'ignore');
+    NEXT_TELEMETRY_DISABLED: '1',
+    __NEXT_NODE_NATIVE_TS_LOADER_ENABLED: 'true',
+  }, root);
   await waitForReady(webUrl, web);
   process.exitCode = await runPlaywright();
 } finally {
@@ -116,7 +136,7 @@ try {
   await stop(core);
   await writeFile(nextEnvPath, originalNextEnv, 'utf8');
   if (process.exitCode === 0) {
-    await preserveV07HealthEvidence(v07HealthEvidenceSource, v07HealthEvidenceResult);
+    if (!skipsV07HealthEvidence) await preserveV07HealthEvidence(v07HealthEvidenceSource, v07HealthEvidenceResult);
     await rm(dataDirectory, { recursive: true, force: true });
   }
 }

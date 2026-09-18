@@ -6,6 +6,7 @@ import {
 } from '@ev/contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { parseRequestInput } from '../../http/validation';
+import { authenticatedOwnerId, createAuthGuard } from './guard';
 import type { AuthService } from './service';
 
 const SESSION_COOKIE = 'ev_session';
@@ -22,6 +23,7 @@ export async function registerAuthRoutes(
 ): Promise<void> {
   const { authService, secureCookies } = options;
   const rateLimit = { max: 5, timeWindow: '1 minute' };
+  const authGuard = createAuthGuard(authService);
 
   function setSessionCookie(
     reply: FastifyReply,
@@ -77,7 +79,8 @@ export async function registerAuthRoutes(
     });
   });
 
-  app.post('/v1/auth/logout', async (request, reply) => {
+  app.post('/v1/auth/logout', { preHandler: authGuard }, async (request, reply) => {
+    authenticatedOwnerId(request);
     authService.logout(request.cookies[SESSION_COOKIE]);
     reply.clearCookie(SESSION_COOKIE, {
       httpOnly: true,

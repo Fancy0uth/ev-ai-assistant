@@ -9,9 +9,18 @@ declare module 'fastify' {
   }
 }
 
-export function createAuthGuard(authService: AuthService): preHandlerHookHandler {
+export interface AuthGuardOptions {
+  readOnlySessionLookup?: true;
+}
+
+export function createAuthGuard(
+  authService: AuthService,
+  options: AuthGuardOptions = {},
+): preHandlerHookHandler {
   return async (request) => {
-    request.owner = authService.authenticate(request.cookies.ev_session);
+    request.owner = options.readOnlySessionLookup === true
+      ? authService.authenticate(request.cookies.ev_session, { readOnly: true })
+      : authService.authenticate(request.cookies.ev_session);
   };
 }
 

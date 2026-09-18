@@ -4,8 +4,6 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMemoryService } from '../src/modules/memory/service';
-import { createProjectSnapshot } from '../src/modules/projects/snapshot';
-import { createProjectBrief } from '../src/modules/projects/service';
 import { openDatabase } from '../src/storage/database';
 
 const ownerId = '00000000-0000-4000-8000-000000000401';
@@ -50,33 +48,5 @@ describe('local inspectable memory', () => {
     expect(() => memory.write(ownerId, 'GENERAL', '这次写入必须完整。')).toThrow();
     expect(memory.read(ownerId, 'GENERAL')).toBeUndefined();
     expect(memory.listRevisions(ownerId, 'GENERAL')).toEqual([]);
-  });
-});
-
-describe('read-only project snapshots', () => {
-  let directory: string;
-
-  beforeEach(() => {
-    directory = mkdtempSync(join(tmpdir(), 'ev-project-snapshot-'));
-    writeFileSync(join(directory, 'PRD.md'), '# My Project\n\nBuild a local assistant.');
-    writeFileSync(join(directory, 'TASKS.md'), '# Tasks\n\n- [ ] Build read-only snapshot');
-    writeFileSync(join(directory, '.env'), 'REAL_SECRET=must-not-enter-snapshot');
-  });
-
-  afterEach(() => {
-    rmSync(directory, { recursive: true, force: true });
-  });
-
-  it('reads allowlisted project planning files without mutating the project or exposing .env', () => {
-    const before = readFileSync(join(directory, 'PRD.md'), 'utf8');
-    const snapshot = createProjectSnapshot(directory);
-
-    expect(snapshot.files).toEqual([
-      expect.objectContaining({ relativePath: 'PRD.md', content: before }),
-      expect.objectContaining({ relativePath: 'TASKS.md' }),
-    ]);
-    expect(JSON.stringify(snapshot)).not.toContain('REAL_SECRET');
-    expect(readFileSync(join(directory, 'PRD.md'), 'utf8')).toBe(before);
-    expect(createProjectBrief(directory)).toMatchObject({ status: 'PROVIDER_NOT_CONFIGURED' });
   });
 });

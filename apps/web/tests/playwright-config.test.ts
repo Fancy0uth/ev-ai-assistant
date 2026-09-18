@@ -73,6 +73,7 @@ describe('Playwright server isolation', () => {
     expect(core.env.EV_CORE_HOST).toBe('127.0.0.1');
     expect(core.env.EV_CORE_PORT).toBe('4327');
     expect(web.env.EV_CORE_URL).toBe('http://127.0.0.1:4327');
+    expect(web.env.EV_WEB_ORIGIN).toBe('http://127.0.0.1:3217');
     expect(web.env.EV_NEXT_DIST_DIR).toMatch(/^\.\.[\\/]\.\.[\\/]data[\\/]e2e-runs[\\/]run-[^\\/]+[\\/]next$/);
     expect(core.reuseExistingServer).toBe(false);
     expect(web.reuseExistingServer).toBe(false);

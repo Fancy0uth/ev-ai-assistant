@@ -1,0 +1,992 @@
+# C2 review snapshot
+
+New gateway/client/test files are complete additions. Dockerfile/.dockerignore snapshot includes C1 baseline; C2 adds only auth helper cleanup/directories and three COPY/allowlist entries. Existing download layer is unchanged. No commits.
+
+## scripts/codex-container/auth-gateway.py
+
+```
+#!/usr/bin/env python3
+"""AF_UNIX CONNECT gateway restricted to the official Codex auth host."""
+
+from __future__ import annotations
+
+import ipaddress
+import os
+from pathlib import Path
+import select
+import socket
+import stat
+import sys
+import threading
+import time
+from typing import Callable
+
+
+GATEWAY_SOCKET = Path("/run/ev-auth/gateway.sock")
+ALLOWED_HOST = "auth.openai.com"
+ALLOWED_PORT = 443
+ALLOWED_AUTHORITY = f"{ALLOWED_HOST}:{ALLOWED_PORT}"
+MAX_WORKERS = 8
+MAX_HEADER_BYTES = 8 * 1024
+MAX_TUNNEL_BYTES = 4 * 1024 * 1024
+CONNECT_TIMEOUT_SECONDS = 10
+IDLE_TIMEOUT_SECONDS = 30
+MAX_LIFETIME_SECONDS = 600
+COPY_CHUNK_BYTES = 64 * 1024
+
+
+SUCCESS_RESPONSE = b"HTTP/1.1 200 Connection Established\r\n\r\n"
+RESPONSES = {
+    "METHOD_REJECTED": b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n",
+    "AUTHORITY_REJECTED": b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n",
+    "HEADER_REJECTED": b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n",
+    "BODY_REJECTED": b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n",
+    "HEADER_LIMIT": b"HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\n\r\n",
+    "DNS_FAILED": b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n",
+    "DNS_REJECTED": b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n",
+    "UPSTREAM_CONNECT_FAILED": b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n",
+    "WORKER_LIMIT": b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n",
+}
+ERROR_CODES = frozenset(
+    {
+        *RESPONSES,
+        "REQUEST_CLOSED",
+        "TUNNEL_LIMIT",
+        "TUNNEL_IDLE",
+        "TUNNEL_LIFETIME",
+        "TUNNEL_IO",
+        "SOCKET_DIR_INSECURE",
+        "SOCKET_PATH_OCCUPIED",
+        "GATEWAY_BIND_FAILED",
+        "GATEWAY_ACCEPT_FAILED",
+        "GATEWAY_INTERNAL",
+    }
+)
+HEADER_TOKEN_BYTES = frozenset(b"!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+class GatewayError(Exception):
+    """A fixed-code failure which never includes peer-controlled text."""
+
+    def __init__(self, code: str) -> None:
+        if code not in ERROR_CODES:
+            raise ValueError("invalid gateway error code")
+        self.code = code
+
+
+def emit_error(code: str) -> None:
+    """Emit only a fixed diagnostic category; never log request content or exceptions."""
+    if code in ERROR_CODES:
+        print(f"auth-gateway: {code}", file=sys.stderr)
+
+
+def close_quietly(sock: object | None) -> None:
+    if sock is not None:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def is_public_routable_ip(value: str) -> bool:
+    """Accept only public unicast addresses; ``is_global`` alone permits multicast."""
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return (
+        address.is_global
+        and not address.is_multicast
+        and not address.is_private
+        and not address.is_loopback
+        and not address.is_link_local
+        and not address.is_reserved
+        and not address.is_unspecified
+    )
+
+
+def read_header_block(client: object) -> tuple[bytes, bytes]:
+    """Read one bounded HTTP header block and preserve any following tunnel bytes."""
+    data = bytearray()
+    while True:
+        marker = data.find(b"\r\n\r\n")
+        if marker >= 0:
+            end = marker + 4
+            return bytes(data[:end]), bytes(data[end:])
+        if len(data) >= MAX_HEADER_BYTES:
+            raise GatewayError("HEADER_LIMIT")
+        try:
+            chunk = client.recv(min(1024, MAX_HEADER_BYTES - len(data)))
+        except OSError as error:
+            raise GatewayError("REQUEST_CLOSED") from error
+        if not chunk:
+            raise GatewayError("REQUEST_CLOSED")
+        data.extend(chunk)
+
+
+def _is_header_token(value: bytes) -> bool:
+    return bool(value) and all(character in HEADER_TOKEN_BYTES for character in value)
+
+
+def _has_illegal_header_value_byte(value: bytes) -> bool:
+    return any(character < 32 and character != 9 or character == 127 for character in value)
+
+
+def validate_connect_request(header: bytes) -> None:
+    """Require a single syntactically unambiguous CONNECT for the fixed authority."""
+    if not header.endswith(b"\r\n\r\n"):
+        raise GatewayError("HEADER_REJECTED")
+    lines = header[:-4].split(b"\r\n")
+    if not lines or not lines[0]:
+        raise GatewayError("HEADER_REJECTED")
+
+    request_parts = lines[0].split(b" ")
+    if len(request_parts) != 3 or any(not part for part in request_parts):
+        raise GatewayError("HEADER_REJECTED")
+    method, authority, version = request_parts
+    if method != b"CONNECT":
+        raise GatewayError("METHOD_REJECTED")
+    if authority != ALLOWED_AUTHORITY.encode("ascii"):
+        raise GatewayError("AUTHORITY_REJECTED")
+    if version not in {b"HTTP/1.0", b"HTTP/1.1"}:
+        raise GatewayError("HEADER_REJECTED")
+
+    saw_host = False
+    for line in lines[1:]:
+        if not line or b":" not in line:
+            raise GatewayError("HEADER_REJECTED")
+        name, value = line.split(b":", 1)
+        if not _is_header_token(name) or _has_illegal_header_value_byte(value):
+            raise GatewayError("HEADER_REJECTED")
+        normalized_name = name.lower()
+        normalized_value = value.strip(b" \t")
+        if normalized_name == b"host":
+            if saw_host or normalized_value != ALLOWED_AUTHORITY.encode("ascii"):
+                raise GatewayError("AUTHORITY_REJECTED")
+            saw_host = True
+        elif normalized_name in {b"content-length", b"transfer-encoding", b"proxy-authorization"}:
+            raise GatewayError("BODY_REJECTED")
+
+    if version == b"HTTP/1.1" and not saw_host:
+        raise GatewayError("HEADER_REJECTED")
+
+
+def resolve_public_addresses(
+    resolver: Callable[..., list[tuple[int, int, int, str, tuple[object, ...]]]] = socket.getaddrinfo,
+) -> list[tuple[int, int, int, tuple[object, ...]]]:
+    """Resolve once, filter addresses, and return only literal IP socket targets."""
+    try:
+        answers = resolver(ALLOWED_HOST, ALLOWED_PORT, type=socket.SOCK_STREAM)
+    except OSError as error:
+        raise GatewayError("DNS_FAILED") from error
+
+    validated: list[tuple[int, int, int, tuple[object, ...]]] = []
+    seen: set[tuple[int, tuple[object, ...]]] = set()
+    for family, socktype, protocol, _canonical_name, sockaddr in answers:
+        if family not in {socket.AF_INET, socket.AF_INET6} or socktype != socket.SOCK_STREAM:
+            continue
+        if len(sockaddr) < 2 or sockaddr[1] != ALLOWED_PORT:
+            continue
+        ip_literal = sockaddr[0]
+        if not isinstance(ip_literal, str) or not is_public_routable_ip(ip_literal):
+            continue
+        key = (family, sockaddr)
+        if key not in seen:
+            seen.add(key)
+            validated.append((family, socktype, protocol, sockaddr))
+    if not validated:
+        raise GatewayError("DNS_REJECTED")
+    return validated
+
+
+def connect_validated_address(
+    addresses: list[tuple[int, int, int, tuple[object, ...]]],
+    socket_factory: Callable[[int, int, int], object] = socket.socket,
+) -> object:
+    """Connect a previously validated literal address without another DNS operation."""
+    for family, _socktype, protocol, sockaddr in addresses:
+        upstream: object | None = None
+        try:
+            upstream = socket_factory(family, socket.SOCK_STREAM, protocol)
+            upstream.settimeout(CONNECT_TIMEOUT_SECONDS)
+            upstream.connect(sockaddr)
+            upstream.settimeout(IDLE_TIMEOUT_SECONDS)
+            return upstream
+        except OSError:
+            close_quietly(upstream)
+    raise GatewayError("UPSTREAM_CONNECT_FAILED")
+
+
+def relay_tunnel(client: object, upstream: object, initial_client_bytes: bytes) -> None:
+    """Copy a bounded tunnel in both directions until EOF, timeout, or lifetime expiry."""
+    transferred = len(initial_client_bytes)
+    if transferred > MAX_TUNNEL_BYTES:
+        raise GatewayError("TUNNEL_LIMIT")
+    try:
+        if initial_client_bytes:
+            upstream.sendall(initial_client_bytes)
+        started = last_activity = time.monotonic()
+        while True:
+            now = time.monotonic()
+            remaining_lifetime = MAX_LIFETIME_SECONDS - (now - started)
+            remaining_idle = IDLE_TIMEOUT_SECONDS - (now - last_activity)
+            if remaining_lifetime <= 0:
+                raise GatewayError("TUNNEL_LIFETIME")
+            if remaining_idle <= 0:
+                raise GatewayError("TUNNEL_IDLE")
+            readable, _writable, _exceptional = select.select(
+                [client, upstream], [], [], min(remaining_lifetime, remaining_idle)
+            )
+            if not readable:
+                continue
+            for source in readable:
+                destination = upstream if source is client else client
+                payload = source.recv(COPY_CHUNK_BYTES)
+                if not payload:
+                    return
+                transferred += len(payload)
+                if transferred > MAX_TUNNEL_BYTES:
+                    raise GatewayError("TUNNEL_LIMIT")
+                destination.sendall(payload)
+                last_activity = time.monotonic()
+    except GatewayError:
+        raise
+    except OSError as error:
+        raise GatewayError("TUNNEL_IO") from error
+
+
+def send_error_response(client: object, code: str) -> None:
+    response = RESPONSES.get(code, RESPONSES["HEADER_REJECTED"])
+    try:
+        client.sendall(response)
+    except OSError:
+        pass
+
+
+def serve_connection(
+    client: object,
+    *,
+    resolver: Callable[..., list[tuple[int, int, int, str, tuple[object, ...]]]] = socket.getaddrinfo,
+    socket_factory: Callable[[int, int, int], object] = socket.socket,
+    relay: Callable[[object, object, bytes], None] = relay_tunnel,
+) -> None:
+    """Serve exactly one CONNECT request and close both ends on every outcome."""
+    upstream: object | None = None
+    established = False
+    try:
+        client.settimeout(IDLE_TIMEOUT_SECONDS)
+        header, initial_client_bytes = read_header_block(client)
+        validate_connect_request(header)
+        upstream = connect_validated_address(resolve_public_addresses(resolver), socket_factory)
+        client.sendall(SUCCESS_RESPONSE)
+        established = True
+        relay(client, upstream, initial_client_bytes)
+    except GatewayError as error:
+        if not established:
+            send_error_response(client, error.code)
+        emit_error(error.code)
+    except OSError:
+        if not established:
+            send_error_response(client, "UPSTREAM_CONNECT_FAILED")
+        emit_error("UPSTREAM_CONNECT_FAILED")
+    except Exception:
+        if not established:
+            send_error_response(client, "GATEWAY_INTERNAL")
+        emit_error("GATEWAY_INTERNAL")
+    finally:
+        close_quietly(upstream)
+        close_quietly(client)
+
+
+def _assert_secure_socket_directory(socket_path: Path) -> None:
+    try:
+        directory_status = socket_path.parent.stat()
+    except OSError as error:
+        raise GatewayError("SOCKET_DIR_INSECURE") from error
+    mode = stat.S_IMODE(directory_status.st_mode)
+    if directory_status.st_uid != os.geteuid() or mode != 0o700:
+        raise GatewayError("SOCKET_DIR_INSECURE")
+
+    try:
+        path_status = socket_path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise GatewayError("SOCKET_PATH_OCCUPIED") from error
+    if not stat.S_ISSOCK(path_status.st_mode):
+        raise GatewayError("SOCKET_PATH_OCCUPIED")
+    try:
+        socket_path.unlink()
+    except OSError as error:
+        raise GatewayError("SOCKET_PATH_OCCUPIED") from error
+
+
+def run_gateway(socket_path: Path = GATEWAY_SOCKET, lifetime_seconds: int = MAX_LIFETIME_SECONDS) -> int:
+    """Listen only on the fixed Unix socket for no more than ten minutes."""
+    listener: socket.socket | None = None
+    workers = threading.BoundedSemaphore(MAX_WORKERS)
+    lifetime = max(0, min(lifetime_seconds, MAX_LIFETIME_SECONDS))
+    deadline = time.monotonic() + lifetime
+    try:
+        _assert_secure_socket_directory(socket_path)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(os.fspath(socket_path))
+        os.chmod(socket_path, 0o600)
+        listener.listen(MAX_WORKERS)
+        listener.settimeout(1.0)
+    except GatewayError as error:
+        emit_error(error.code)
+        return 1
+    except OSError:
+        emit_error("GATEWAY_BIND_FAILED")
+        return 1
+
+    try:
+        while time.monotonic() < deadline:
+            try:
+                client, _address = listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                emit_error("GATEWAY_ACCEPT_FAILED")
+                break
+            if not workers.acquire(blocking=False):
+                send_error_response(client, "WORKER_LIMIT")
+                close_quietly(client)
+                emit_error("WORKER_LIMIT")
+                continue
+
+            def worker(connection: socket.socket = client) -> None:
+                try:
+                    serve_connection(connection)
+                finally:
+                    workers.release()
+
+            threading.Thread(target=worker, daemon=True).start()
+    finally:
+        close_quietly(listener)
+        try:
+            if socket_path.exists() and stat.S_ISSOCK(socket_path.lstat().st_mode):
+                socket_path.unlink()
+        except OSError:
+            pass
+    return 0
+
+
+def main() -> int:
+    try:
+        return run_gateway()
+    except Exception:
+        emit_error("GATEWAY_INTERNAL")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+```
+
+## scripts/codex-container/auth-client.py
+
+```
+#!/usr/bin/env python3
+"""Client-side loopback bridge and bounded Codex auth transport checks."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import select
+import socket
+import ssl
+import stat
+import subprocess
+import sys
+import threading
+import time
+
+
+GATEWAY_SOCKET = Path("/run/ev-auth/gateway.sock")
+AUTH_HOME = Path("/home/ev-codex")
+ALLOWED_HOST = "auth.openai.com"
+ALLOWED_PORT = 443
+ALLOWED_AUTHORITY = f"{ALLOWED_HOST}:{ALLOWED_PORT}"
+LOOPBACK_HOST = "127.0.0.1"
+MAX_WORKERS = 8
+MAX_HEADER_BYTES = 8 * 1024
+MAX_TUNNEL_BYTES = 4 * 1024 * 1024
+CONNECT_TIMEOUT_SECONDS = 10
+IDLE_TIMEOUT_SECONDS = 30
+MAX_LIFETIME_SECONDS = 600
+COPY_CHUNK_BYTES = 64 * 1024
+
+
+class ClientError(Exception):
+    """A user-safe fixed-code error with no upstream or credential detail."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+
+
+def emit_error(code: str) -> None:
+    print(f"auth-client: {code}", file=sys.stderr)
+
+
+def close_quietly(sock: object | None) -> None:
+    if sock is not None:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def relay_tunnel(left: socket.socket, right: socket.socket) -> None:
+    """Forward a bounded byte stream between loopback and the Unix gateway."""
+    transferred = 0
+    started = last_activity = time.monotonic()
+    try:
+        while True:
+            now = time.monotonic()
+            remaining_lifetime = MAX_LIFETIME_SECONDS - (now - started)
+            remaining_idle = IDLE_TIMEOUT_SECONDS - (now - last_activity)
+            if remaining_lifetime <= 0 or remaining_idle <= 0:
+                return
+            readable, _writable, _exceptional = select.select(
+                [left, right], [], [], min(remaining_lifetime, remaining_idle)
+            )
+            if not readable:
+                continue
+            for source in readable:
+                destination = right if source is left else left
+                payload = source.recv(COPY_CHUNK_BYTES)
+                if not payload:
+                    return
+                transferred += len(payload)
+                if transferred > MAX_TUNNEL_BYTES:
+                    return
+                destination.sendall(payload)
+                last_activity = time.monotonic()
+    except OSError:
+        return
+
+
+class LoopbackUnixBridge:
+    """A short-lived, loopback-only TCP proxy into the read-only Unix socket mount."""
+
+    def __init__(self, socket_path: Path = GATEWAY_SOCKET) -> None:
+        self._socket_path = socket_path
+        self._listener: socket.socket | None = None
+        self._stop = threading.Event()
+        self._workers = threading.BoundedSemaphore(MAX_WORKERS)
+        self._thread: threading.Thread | None = None
+        self.port: int | None = None
+
+    def __enter__(self) -> "LoopbackUnixBridge":
+        self.start()
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        self.close()
+
+    def start(self) -> None:
+        if self._listener is not None:
+            raise ClientError("BRIDGE_ALREADY_STARTED")
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            listener.bind((LOOPBACK_HOST, 0))
+            listener.listen(MAX_WORKERS)
+            listener.settimeout(1.0)
+        except OSError:
+            close_quietly(listener)
+            raise ClientError("BRIDGE_BIND_FAILED")
+        self._listener = listener
+        self.port = int(listener.getsockname()[1])
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+
+    def close(self) -> None:
+        self._stop.set()
+        close_quietly(self._listener)
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        self._listener = None
+
+    def _accept_loop(self) -> None:
+        deadline = time.monotonic() + MAX_LIFETIME_SECONDS
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            listener = self._listener
+            if listener is None:
+                return
+            try:
+                client, _address = listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if not self._workers.acquire(blocking=False):
+                close_quietly(client)
+                continue
+
+            def worker(connection: socket.socket = client) -> None:
+                upstream: socket.socket | None = None
+                try:
+                    upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    upstream.settimeout(CONNECT_TIMEOUT_SECONDS)
+                    upstream.connect(os.fspath(self._socket_path))
+                    upstream.settimeout(IDLE_TIMEOUT_SECONDS)
+                    connection.settimeout(IDLE_TIMEOUT_SECONDS)
+                    relay_tunnel(connection, upstream)
+                except OSError:
+                    pass
+                finally:
+                    close_quietly(upstream)
+                    close_quietly(connection)
+                    self._workers.release()
+
+            threading.Thread(target=worker, daemon=True).start()
+
+
+def read_proxy_header(connection: socket.socket) -> bytes:
+    data = bytearray()
+    while True:
+        marker = data.find(b"\r\n\r\n")
+        if marker >= 0:
+            return bytes(data[: marker + 4])
+        if len(data) >= MAX_HEADER_BYTES:
+            raise ClientError("PROXY_HEADER_LIMIT")
+        try:
+            chunk = connection.recv(min(1024, MAX_HEADER_BYTES - len(data)))
+        except OSError as error:
+            raise ClientError("PROXY_CLOSED") from error
+        if not chunk:
+            raise ClientError("PROXY_CLOSED")
+        data.extend(chunk)
+
+
+def open_loopback_connection(bridge: LoopbackUnixBridge) -> socket.socket:
+    if bridge.port is None:
+        raise ClientError("BRIDGE_UNAVAILABLE")
+    connection: socket.socket | None = None
+    try:
+        connection = socket.create_connection((LOOPBACK_HOST, bridge.port), CONNECT_TIMEOUT_SECONDS)
+        connection.settimeout(IDLE_TIMEOUT_SECONDS)
+        return connection
+    except OSError as error:
+        close_quietly(connection)
+        raise ClientError("PROXY_CLOSED") from error
+
+
+def send_connect_request(connection: socket.socket, authority: str) -> bytes:
+    try:
+        request = f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n".encode("ascii")
+        connection.sendall(request)
+        return read_proxy_header(connection)
+    except (OSError, UnicodeEncodeError) as error:
+        raise ClientError("PROXY_CLOSED") from error
+
+
+def open_proxy_tunnel(bridge: LoopbackUnixBridge, authority: str) -> socket.socket:
+    connection = open_loopback_connection(bridge)
+    try:
+        header = send_connect_request(connection, authority)
+        if not header.startswith(b"HTTP/1.1 200 Connection Established\r\n"):
+            raise ClientError("PROXY_CONNECT_REJECTED")
+        return connection
+    except ClientError:
+        close_quietly(connection)
+        raise
+
+
+def verify_tls_via_gateway(bridge: LoopbackUnixBridge) -> None:
+    connection = open_proxy_tunnel(bridge, ALLOWED_AUTHORITY)
+    tls_connection: ssl.SSLSocket | None = None
+    try:
+        context = ssl.create_default_context()
+        if not context.check_hostname or context.verify_mode != ssl.CERT_REQUIRED:
+            raise ClientError("TLS_CONFIGURATION_REJECTED")
+        tls_connection = context.wrap_socket(
+            connection, server_hostname=ALLOWED_HOST, do_handshake_on_connect=False
+        )
+        tls_connection.do_handshake()
+    except ssl.SSLError as error:
+        raise ClientError("TLS_VERIFICATION_FAILED") from error
+    finally:
+        if tls_connection is not None:
+            close_quietly(tls_connection)
+        else:
+            close_quietly(connection)
+
+
+def verify_direct_egress_is_blocked() -> None:
+    connection: socket.socket | None = None
+    try:
+        connection = socket.create_connection((ALLOWED_HOST, ALLOWED_PORT), CONNECT_TIMEOUT_SECONDS)
+    except OSError:
+        return
+    finally:
+        close_quietly(connection)
+    raise ClientError("DIRECT_EGRESS_AVAILABLE")
+
+
+def verify_forbidden_authority_is_rejected(bridge: LoopbackUnixBridge) -> None:
+    connection = open_loopback_connection(bridge)
+    try:
+        header = send_connect_request(connection, "api.openai.com:443")
+    finally:
+        close_quietly(connection)
+    if not header.startswith(b"HTTP/1.1 403 Forbidden\r\n"):
+        raise ClientError("FORBIDDEN_AUTHORITY_ACCEPTED")
+
+
+def run_probe() -> None:
+    with LoopbackUnixBridge() as bridge:
+        verify_tls_via_gateway(bridge)
+        verify_direct_egress_is_blocked()
+        verify_forbidden_authority_is_rejected(bridge)
+
+
+def _gateway_socket_is_absent() -> bool:
+    try:
+        GATEWAY_SOCKET.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def run_probe_closed() -> None:
+    if not _gateway_socket_is_absent():
+        raise ClientError("CLOSED_GATEWAY_PRESENT")
+    with LoopbackUnixBridge() as bridge:
+        try:
+            connection = open_proxy_tunnel(bridge, ALLOWED_AUTHORITY)
+        except ClientError as error:
+            if error.code == "PROXY_CLOSED":
+                return
+            raise
+        close_quietly(connection)
+    raise ClientError("CLOSED_GATEWAY_ACCEPTED")
+
+
+def prepare_fresh_auth_home() -> None:
+    try:
+        home_status = AUTH_HOME.stat()
+        contents = list(AUTH_HOME.iterdir())
+    except OSError as error:
+        raise ClientError("AUTH_HOME_UNAVAILABLE") from error
+    if home_status.st_uid != os.geteuid() or stat.S_IMODE(home_status.st_mode) != 0o700:
+        raise ClientError("AUTH_HOME_INSECURE")
+    if contents:
+        raise ClientError("AUTH_HOME_NOT_FRESH")
+
+    config = AUTH_HOME / "config.toml"
+    try:
+        descriptor = os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(
+                b'forced_login_method = "chatgpt"\n'
+                b'cli_auth_credentials_store = "file"\n'
+                b'log_dir = "/tmp/ev-codex-logs"\n'
+            )
+    except OSError as error:
+        raise ClientError("AUTH_CONFIG_FAILED") from error
+
+
+def proxy_environment(port: int) -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    ):
+        environment.pop(name, None)
+    proxy = f"http://{LOOPBACK_HOST}:{port}"
+    environment.update(
+        {
+            "HOME": os.fspath(AUTH_HOME),
+            "CODEX_HOME": os.fspath(AUTH_HOME),
+            "HTTP_PROXY": proxy,
+            "HTTPS_PROXY": proxy,
+            "ALL_PROXY": proxy,
+            "http_proxy": proxy,
+            "https_proxy": proxy,
+            "all_proxy": proxy,
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
+        }
+    )
+    return environment
+
+
+def run_device_auth(bridge: LoopbackUnixBridge) -> None:
+    if bridge.port is None:
+        raise ClientError("BRIDGE_UNAVAILABLE")
+    try:
+        process = subprocess.Popen(
+            ["codex", "login", "--device-auth"],
+            env=proxy_environment(bridge.port),
+        )
+    except OSError as error:
+        raise ClientError("LOGIN_START_FAILED") from error
+    try:
+        result = process.wait(timeout=MAX_LIFETIME_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        process.terminate()
+        try:
+            process.wait(timeout=CONNECT_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        raise ClientError("LOGIN_TIMEOUT") from error
+    if result != 0:
+        raise ClientError("LOGIN_FAILED")
+
+
+def run_login() -> None:
+    if not GATEWAY_SOCKET.is_socket():
+        raise ClientError("GATEWAY_UNAVAILABLE")
+    prepare_fresh_auth_home()
+    with LoopbackUnixBridge() as bridge:
+        run_device_auth(bridge)
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if len(arguments) != 1 or arguments[0] not in {"--probe", "--probe-closed", "--login"}:
+        emit_error("USAGE")
+        return 2
+    try:
+        if arguments[0] == "--probe":
+            run_probe()
+            print("auth probe: PASS")
+        elif arguments[0] == "--probe-closed":
+            run_probe_closed()
+            print("auth probe closed: PASS")
+        else:
+            run_login()
+            print("Authentication completed.")
+        return 0
+    except ClientError as error:
+        emit_error(error.code)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+```
+
+## scripts/codex-container/test_auth_transport.py
+
+```
+#!/usr/bin/env python3
+"""Offline contract coverage for the auth-host-only CONNECT gateway."""
+
+from __future__ import annotations
+
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+import socket
+import unittest
+
+
+def load_gateway():
+    source = Path(__file__).with_name("auth-gateway.py")
+    spec = spec_from_file_location("auth_gateway", source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load auth-gateway.py")
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class FakeClientSocket:
+    def __init__(self, payload: bytes) -> None:
+        self._pending = bytearray(payload)
+        self.sent = bytearray()
+        self.closed = False
+
+    def recv(self, size: int) -> bytes:
+        if not self._pending:
+            return b""
+        chunk = bytes(self._pending[:size])
+        del self._pending[:size]
+        return chunk
+
+    def sendall(self, payload: bytes) -> None:
+        self.sent.extend(payload)
+
+    def settimeout(self, _seconds: float) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeUpstreamSocket:
+    def __init__(self) -> None:
+        self.connected_to: tuple[str, int] | None = None
+        self.closed = False
+
+    def connect(self, address: tuple[str, int]) -> None:
+        self.connected_to = address
+
+    def settimeout(self, _seconds: float) -> None:
+        return None
+
+    def sendall(self, _payload: bytes) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeUpstreamFactory:
+    def __init__(self) -> None:
+        self.created: list[FakeUpstreamSocket] = []
+
+    def __call__(
+        self, _family: socket.AddressFamily, _kind: socket.SocketKind, _protocol: int = 0
+    ) -> FakeUpstreamSocket:
+        upstream = FakeUpstreamSocket()
+        self.created.append(upstream)
+        return upstream
+
+
+def connect_request(method: str, authority: str) -> bytes:
+    return (
+        f"{method} {authority} HTTP/1.1\r\n"
+        f"Host: {authority}\r\n"
+        "Proxy-Connection: keep-alive\r\n"
+        "\r\n"
+    ).encode("ascii")
+
+
+class AuthTransportContractTest(unittest.TestCase):
+    def test_accepts_only_exact_connect_to_a_public_resolved_address(self) -> None:
+        """A wrong method, authority, or private DNS answer cannot open an upstream socket."""
+        gateway = load_gateway()
+        factory = FakeUpstreamFactory()
+
+        def public_resolver(host: str, port: int, **_kwargs: object):
+            self.assertEqual((host, port), ("auth.openai.com", 443))
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
+
+        def must_not_resolve(*_args: object, **_kwargs: object):
+            self.fail("invalid request reached DNS resolution")
+
+        accepted = FakeClientSocket(connect_request("CONNECT", "auth.openai.com:443"))
+        gateway.serve_connection(
+            accepted,
+            resolver=public_resolver,
+            socket_factory=factory,
+            relay=lambda _client, _upstream, _initial: None,
+        )
+
+        self.assertTrue(accepted.sent.startswith(b"HTTP/1.1 200 Connection Established\r\n"))
+        self.assertEqual(len(factory.created), 1)
+        self.assertEqual(factory.created[0].connected_to, ("8.8.8.8", 443))
+
+        invalid_authority = FakeClientSocket(connect_request("CONNECT", "api.openai.com:443"))
+        gateway.serve_connection(
+            invalid_authority,
+            resolver=must_not_resolve,
+            socket_factory=factory,
+            relay=lambda _client, _upstream, _initial: None,
+        )
+        self.assertTrue(invalid_authority.sent.startswith(b"HTTP/1.1 403 Forbidden\r\n"))
+
+        invalid_method = FakeClientSocket(connect_request("GET", "auth.openai.com:443"))
+        gateway.serve_connection(
+            invalid_method,
+            resolver=must_not_resolve,
+            socket_factory=factory,
+            relay=lambda _client, _upstream, _initial: None,
+        )
+        self.assertTrue(invalid_method.sent.startswith(b"HTTP/1.1 405 Method Not Allowed\r\n"))
+
+        def private_resolver(_host: str, _port: int, **_kwargs: object):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
+
+        private_resolution = FakeClientSocket(connect_request("CONNECT", "auth.openai.com:443"))
+        gateway.serve_connection(
+            private_resolution,
+            resolver=private_resolver,
+            socket_factory=factory,
+            relay=lambda _client, _upstream, _initial: None,
+        )
+        self.assertTrue(private_resolution.sent.startswith(b"HTTP/1.1 502 Bad Gateway\r\n"))
+        self.assertEqual(len(factory.created), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+```
+
+## scripts/codex-container/Dockerfile
+
+```
+FROM python@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
+
+COPY fetch-codex.py /usr/local/lib/ev-codex/fetch-codex.py
+COPY isolation-probe.py /usr/local/lib/ev-codex/isolation-probe.py
+
+ENV HOME=/home/ev-codex \
+    CODEX_HOME=/home/ev-codex
+
+RUN mkdir -p /home/ev-codex /work \
+    && python /usr/local/lib/ev-codex/fetch-codex.py \
+    && /usr/local/bin/codex --version \
+    && chown -R 65532:65532 /home/ev-codex /work \
+    && chmod 1777 /tmp
+
+RUN ev_auth_home=/home/ev-codex \
+    && ev_auth_tmp=/home/ev-codex/tmp \
+    && test "$ev_auth_home" = "$(readlink -f -- "$ev_auth_home")" \
+    && test "$ev_auth_tmp" = "$(readlink -f -- "$ev_auth_tmp")" \
+    && test -d "$ev_auth_home" \
+    && test ! -L "$ev_auth_home" \
+    && test -d "$ev_auth_tmp" \
+    && test ! -L "$ev_auth_tmp" \
+    && test "$(find "$ev_auth_home" -mindepth 1 -maxdepth 1 -printf '%f')" = "tmp" \
+    && rm -rf -- "$ev_auth_tmp" \
+    && test -z "$(find "$ev_auth_home" -mindepth 1 -maxdepth 1 -print -quit)" \
+    && install -d -o 65532 -g 65532 -m 0700 /run/ev-auth \
+    && chown 65532:65532 "$ev_auth_home" \
+    && chmod 0700 "$ev_auth_home"
+
+COPY auth-gateway.py /usr/local/lib/ev-codex/auth-gateway.py
+COPY auth-client.py /usr/local/lib/ev-codex/auth-client.py
+COPY test_auth_transport.py /usr/local/lib/ev-codex/test_auth_transport.py
+
+USER 65532:65532
+WORKDIR /work
+ENTRYPOINT ["codex"]
+
+
+```
+
+## scripts/codex-container/.dockerignore
+
+```
+*
+!Dockerfile
+!fetch-codex.py
+!isolation-probe.py
+!auth-gateway.py
+!auth-client.py
+!test_auth_transport.py
+
+
+```
+

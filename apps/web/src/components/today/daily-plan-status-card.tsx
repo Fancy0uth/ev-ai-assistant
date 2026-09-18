@@ -20,16 +20,16 @@ function contentFor(
   switch (status) {
     case 'NOT_CONFIGURED':
       return {
-        detail: '连接 DeepSeek 后，系统才能基于今天的日程和具体事项生成仅供审核的建议。',
-        href: '/settings/providers',
-        label: '配置 DeepSeek',
-        icon: Settings2,
+        detail: '外部 Provider 尚未配置；你仍可打开每日计划，使用不调用模型的本地静态规则协调今天的时间请求。',
+        href: `/daily-plan?date=${encodeURIComponent(date)}`,
+        label: '使用本地静态协调',
+        icon: Sparkles,
       };
     case 'READY_TO_GENERATE':
       return {
-        detail: '今天还没有计划草案。生成后，每一项仍需要你单独确认。',
+        detail: '今天还没有计划草案。可选择本地静态协调，或进入外部 Provider 的上下文审核流程；每一项仍需单独确认。',
         href: `/daily-plan?date=${encodeURIComponent(date)}`,
-        label: '生成今日计划',
+        label: '打开今日协调',
         icon: Sparkles,
       };
     case 'AWAITING_CONTEXT_APPROVAL':
@@ -102,6 +102,7 @@ export function DailyPlanStatusCard({ date, dailyPlan }: DailyPlanStatusCardProp
         <h2 id="daily-plan-status-heading">今日计划</h2>
       </div>
       <p>{content.detail}</p>
+      {'mode' in dailyPlan && dailyPlan.mode === 'LOCAL_RULES' ? <p>来源：LOCAL_RULES 静态协调（无模型）</p> : null}
       <Link aria-label={content.label} href={content.href}>
         <Icon aria-hidden="true" size={16} />
         {content.label}

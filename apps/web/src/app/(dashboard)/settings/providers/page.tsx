@@ -6,6 +6,7 @@ import {
   type DeepSeekCredentialMetadata,
 } from '@ev/contracts';
 import { useEffect, useRef, useState } from 'react';
+import { PROVIDER_CREDENTIAL_STATUS_CHANGED_EVENT } from '@/components/shell/provider-status';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 
 const failureMessages: Record<DeepSeekConnectionFailureCode, string> = {
@@ -28,6 +29,10 @@ function connectionTestMessage(metadata: DeepSeekCredentialMetadata): string {
 
 function configurationMessage(metadata: DeepSeekCredentialMetadata): string {
   return metadata.state === 'CONFIGURED' ? '已配置' : '未配置';
+}
+
+function notifyCredentialStatusChanged(): void {
+  window.dispatchEvent(new CustomEvent(PROVIDER_CREDENTIAL_STATUS_CHANGED_EVENT));
 }
 
 export default function ProviderSettingsPage() {
@@ -119,6 +124,7 @@ export default function ProviderSettingsPage() {
       setMetadata(deepSeekCredentialStatusResponseSchema.parse(payload).data);
       setConfirmDelete(false);
       setSuccess('密钥已保存。请按需手动测试连接。');
+      notifyCredentialStatusChanged();
     } catch (failure: unknown) {
       if (mountedRef.current && !controller.signal.aborted) setError(failureMessage(failure));
     } finally {
@@ -140,6 +146,7 @@ export default function ProviderSettingsPage() {
       if (!mountedRef.current) return;
       setMetadata(deepSeekCredentialStatusResponseSchema.parse(payload).data);
       setSuccess('连接测试已完成。');
+      notifyCredentialStatusChanged();
     } catch (failure: unknown) {
       if (mountedRef.current && !controller.signal.aborted) setError(failureMessage(failure));
     } finally {
@@ -167,6 +174,7 @@ export default function ProviderSettingsPage() {
       setApiKey('');
       setConfirmDelete(false);
       setSuccess('密钥已删除。');
+      notifyCredentialStatusChanged();
     } catch (failure: unknown) {
       if (mountedRef.current && !controller.signal.aborted) setError(failureMessage(failure));
     } finally {

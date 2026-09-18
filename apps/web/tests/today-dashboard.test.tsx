@@ -23,7 +23,7 @@ const emptySnapshot = {
     },
     tasks: [],
     yesterday: null,
-    agents: { deepSeek: 'NOT_CONFIGURED', codex: 'NOT_CONFIGURED' },
+    agents: { deepSeek: 'NOT_CONFIGURED' },
   },
 };
 
@@ -392,7 +392,7 @@ describe('TodayDashboard', () => {
     expect(screen.getByRole('link', { name: '打开学习模块' })).toHaveAttribute('href', '/learning');
     expect(screen.getByRole('link', { name: '打开训练恢复模块' })).toHaveAttribute('href', '/fitness');
     expect(screen.getByRole('link', { name: '打开饮食模块' })).toHaveAttribute('href', '/nutrition');
-    expect(screen.getByRole('link', { name: '打开项目模块' })).toHaveAttribute('href', '/projects');
+    expect(screen.queryByRole('link', { name: '打开项目模块' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '打开记忆模块' })).toHaveAttribute('href', '/memory');
   });
 

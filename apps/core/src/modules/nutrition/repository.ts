@@ -37,6 +37,13 @@ export class MealDraftStateConflictError extends Error {
   }
 }
 
+export class NutritionSourceDescriptorConflictError extends Error {
+  constructor() {
+    super('NUTRITION_SOURCE_DESCRIPTOR_CONFLICT');
+    this.name = 'NutritionSourceDescriptorConflictError';
+  }
+}
+
 export class MealConfirmationError extends Error {
   constructor(readonly code: 'MEAL_MATCH_INCOMPLETE' | 'UNIT_MISMATCH') {
     super(code);
@@ -179,7 +186,8 @@ export function createNutritionRepository(database: Database.Database): Nutritio
   const findFoodSnapshot = database.prepare(`select ${foodColumns} from nutrition_food_snapshots_v2 f
     join nutrition_source_snapshots_v2 s on s.id = f.source_snapshot_id and s.owner_id = f.owner_id
     where f.owner_id = ? and f.draft_id = ? and f.candidate_id = ? and f.id = ?`);
-  const findSourceSnapshot = database.prepare(`select id from nutrition_source_snapshots_v2 where owner_id = ?
+  const findSourceSnapshot = database.prepare(`select id, redistribution, license_decision_id, adapter_kind, evidence_kind
+    from nutrition_source_snapshots_v2 where owner_id = ?
     and source_kind = ? and source_id = ? and source_version = ? and dataset_hash = ?`);
   const insertDraft = database.prepare(`insert into meal_drafts_v2 (
     id, owner_id, local_date, mode, original_text, state, current_revision_id, confirmed_meal_id, version, created_at, updated_at
@@ -337,8 +345,20 @@ export function createNutritionRepository(database: Database.Database): Nutritio
           input.source.sourceVersion, input.source.datasetHash, input.source.redistribution ? 1 : 0,
           input.source.licenseDecisionId, input.adapterKind, input.evidenceKind, input.updatedAt);
         const sourceRow = findSourceSnapshot.get(input.ownerId, input.source.sourceKind, input.source.sourceId,
-          input.source.sourceVersion, input.source.datasetHash) as { id: string } | undefined;
+          input.source.sourceVersion, input.source.datasetHash) as {
+            id: string;
+            redistribution: number;
+            license_decision_id: string | null;
+            adapter_kind: string;
+            evidence_kind: string;
+          } | undefined;
         if (!sourceRow) throw new Error('NUTRITION_SOURCE_SNAPSHOT_MISSING');
+        if (sourceRow.redistribution !== (input.source.redistribution ? 1 : 0)
+          || sourceRow.license_decision_id !== input.source.licenseDecisionId
+          || sourceRow.adapter_kind !== input.adapterKind
+          || sourceRow.evidence_kind !== input.evidenceKind) {
+          throw new NutritionSourceDescriptorConflictError();
+        }
         let index = 0;
         for (const group of input.snapshots) {
           for (const record of group.records) {

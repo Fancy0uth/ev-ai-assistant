@@ -1,6 +1,6 @@
 'use client';
 
-import { BookOpenCheck, CalendarRange, Dumbbell, FolderSearch, NotebookText, Utensils } from 'lucide-react';
+import { BookOpenCheck, CalendarRange, Dumbbell, NotebookText, Utensils } from 'lucide-react';
 import Link from 'next/link';
 
 const modules = [
@@ -33,13 +33,6 @@ const modules = [
     icon: Utensils,
   },
   {
-    href: '/projects',
-    label: '打开项目模块',
-    title: '项目',
-    detail: '只读分析项目进度，不修改你的仓库。',
-    icon: FolderSearch,
-  },
-  {
     href: '/memory',
     label: '打开记忆模块',
     title: '记忆',
@@ -56,7 +49,7 @@ export function ModuleQuickLinks() {
           <p className="section-kicker">DOMAIN WORKSPACES</p>
           <h2 id="module-quick-links-heading">按领域处理今天</h2>
         </div>
-        <span>6 个模块</span>
+        <span>5 个模块</span>
       </div>
       <ul>
         {modules.map(({ href, label, title, detail, icon: Icon }) => (

@@ -1,5 +1,6 @@
 import {
   apiErrorSchema,
+  dailyPlanCoordinationInputSchema,
   dailyPlanDecisionBatchInputSchema,
   dailyPlanPreflightApproveInputSchema,
   dailyPlanPreflightGenerateInputSchema,
@@ -23,6 +24,7 @@ import type { AuthService } from '../modules/auth/service';
 import {
   DailyPlanBaseVersionStaleError,
 } from '../modules/daily-planning/repository';
+import type { DailyPlanCoordinationService } from '../modules/daily-planning/coordination-service';
 import {
   DailyPlanProposalNotFoundError,
   DailyPlanProposalVersionConflictError,
@@ -46,6 +48,7 @@ import {
 interface DailyPlanningRouteOptions {
   authService: AuthService;
   dailyPlanningService: DailyPlanningService;
+  dailyPlanCoordinationService: DailyPlanCoordinationService;
   dailyPlanPreflightService: Pick<DailyPlanPreflightService, 'prepare' | 'approve'>;
   dailyPlanReviewService: DailyPlanReviewService;
   idempotencyService: IdempotencyService;
@@ -81,7 +84,7 @@ function rethrowGenerationError(error: unknown): never {
 
   switch (error.code) {
     case 'DAILY_PLAN_PROVIDER_NOT_CONFIGURED':
-      throw new ApiError(409, error.code, '尚未配置每日计划 Provider 凭据');
+      throw new ApiError(503, error.code, '尚未配置每日计划 Provider 凭据');
     case 'DAILY_PLAN_PROVIDER_UNAVAILABLE':
       throw new ApiError(503, error.code, '每日计划 Provider 暂不可用');
     case 'DAILY_PLAN_PROVIDER_TIMEOUT':
@@ -223,6 +226,68 @@ export async function registerDailyPlanningRoutes(
     } catch (error) {
       return rethrowGenerationError(error);
     }
+  });
+
+  app.post('/v1/daily-plans/coordinate', { preHandler: authGuard }, (request, reply) => {
+    const ownerId = authenticatedOwnerId(request);
+    const input = parseRequestInput(
+      dailyPlanCoordinationInputSchema,
+      request.body,
+      '每日协调请求不符合要求',
+    );
+    const startedAt = Date.now();
+    if (input.mode === 'EXTERNAL') {
+      app.log.info({
+        module: 'daily-planning',
+        requestId: request.id,
+        mode: input.mode,
+        elapsedMs: Date.now() - startedAt,
+        status: 'PROVIDER_NOT_CONFIGURED',
+        proposalId: null,
+        skippedCount: 0,
+      }, 'daily plan coordination');
+      throw new ApiError(503, 'DAILY_PLAN_PROVIDER_NOT_CONFIGURED', '外部每日协调 Provider 尚未配置');
+    }
+
+    let result: ReturnType<IdempotencyService['executeLocal']>;
+    try {
+      result = options.idempotencyService.executeLocal(
+        {
+          ownerId,
+          key: idempotencyKey(request),
+          operation: 'daily_plan.generate',
+          resourceId: input.localDate,
+          body: input,
+        },
+        () => {
+          const proposal = options.dailyPlanCoordinationService.coordinateLocalRules(ownerId, input.localDate);
+          return {
+            status: 201,
+            body: dailyPlanProposalResponseSchema.parse({ data: proposal }),
+          };
+        },
+      );
+    } catch (error) {
+      if (error instanceof IdempotencyConflictError) {
+        throw new ApiError(409, error.code, 'Idempotency-Key 已用于不同语义的操作');
+      }
+      return rethrowGenerationError(error);
+    }
+    if ('kind' in result) return sendIdempotencyClaim(reply, result);
+
+    const response = dailyPlanProposalResponseSchema.parse(result.body);
+    app.log.info({
+      module: 'daily-planning',
+      requestId: request.id,
+      runId: response.data.runId,
+      mode: input.mode,
+      elapsedMs: Date.now() - startedAt,
+      status: result.replayed ? 'REPLAYED' : response.data.status,
+      proposalId: response.data.id,
+      skippedCount: response.data.items.filter((item) => item.operation === 'MARK_TIME_REQUEST_UNSCHEDULABLE').length,
+    }, 'daily plan coordination');
+    if (result.replayed) reply.header('Idempotency-Replayed', 'true');
+    return reply.status(result.status).send(response);
   });
 
   app.post('/v1/daily-plans/generate', { preHandler: authGuard }, async (request, reply) => {

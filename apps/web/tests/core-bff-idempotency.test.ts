@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/core/[...path]/route';
 
+const webOrigin = 'http://127.0.0.1:3217';
+const csrfToken = 'C'.repeat(43);
+
+function trustedMutationRequest(url: string, init: RequestInit): Request {
+  const headers = new Headers(init.headers);
+  headers.set('origin', webOrigin);
+  headers.set('x-ev-csrf-token', csrfToken);
+  const existingCookie = headers.get('cookie');
+  headers.set('cookie', existingCookie ? `${existingCookie}; ev_csrf=${csrfToken}` : `ev_csrf=${csrfToken}`);
+  return new Request(url, { ...init, headers });
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -9,11 +21,12 @@ afterEach(() => {
 describe('Core BFF idempotency headers', () => {
   it('rejects a raw upload stream over 5 MB before it calls Core', async () => {
     vi.stubEnv('EV_CORE_URL', 'http://127.0.0.1:4311');
+    vi.stubEnv('EV_WEB_ORIGIN', webOrigin);
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await POST(
-      new Request('http://localhost/api/core/course-artifacts', {
+      trustedMutationRequest('http://localhost/api/core/course-artifacts', {
         method: 'POST',
         headers: { 'content-type': 'image/png' },
         body: new Uint8Array(5_000_001),
@@ -30,6 +43,7 @@ describe('Core BFF idempotency headers', () => {
 
   it('forwards only the approved Idempotency request header and exposes the approved response headers', async () => {
     vi.stubEnv('EV_CORE_URL', 'http://127.0.0.1:4311');
+    vi.stubEnv('EV_WEB_ORIGIN', webOrigin);
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ data: { id: 'proposal' } }), {
         status: 201,
@@ -45,7 +59,7 @@ describe('Core BFF idempotency headers', () => {
     const key = 'web-v05-idempotency-0001';
 
     const response = await POST(
-      new Request('http://localhost/api/core/daily-plans/generate', {
+      trustedMutationRequest('http://localhost/api/core/daily-plans/generate', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

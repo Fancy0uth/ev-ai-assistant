@@ -103,12 +103,6 @@ export function createProviderService(
           availability: providerFor('DEEPSEEK') ? 'READY' : 'NOT_CONFIGURED',
           acceptsSecrets: false,
         },
-        {
-          key: 'CODEX_LOCAL',
-          label: '本地 Codex（只读项目分析）',
-          availability: providerFor('CODEX_LOCAL') ? 'READY' : 'NOT_CONFIGURED',
-          acceptsSecrets: false,
-        },
       ];
     },
 

@@ -6,6 +6,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import {
   healthTextProviderDescriptorSchema,
   nutritionDataProviderDescriptorSchema,
+  type BackupHealthSnapshot,
   type HealthTextProvider,
   type ProviderKey,
 } from '@ev/contracts';
@@ -35,9 +36,11 @@ import { createLearningService } from './modules/learning/service';
 import { createDeepSeekLearningAdviceCapability } from './modules/learning/deepseek-learning-advice';
 import { createPublicResourceFetcher, type PublicResourceFetcher } from './modules/learning/public-resource-fetcher';
 import { registerMemoryRoutes } from './modules/memory/routes';
+import { registerMemoryCompactionRoutes } from './modules/memory/compaction-routes';
+import { createMemoryCompactionService } from './modules/memory/compaction-service';
+import { registerEntityMemoryRoutes } from './modules/memory/entity-routes';
+import { createEntityMemoryService } from './modules/memory/entity-service';
 import { createMemoryService } from './modules/memory/service';
-import { registerProjectScopeRoutes } from './modules/projects/routes';
-import { createProjectScopeService } from './modules/projects/scope-service';
 import { createProposalRepository } from './modules/proposals/repository';
 import { registerProposalRoutes } from './modules/proposals/routes';
 import { createProposalService } from './modules/proposals/service';
@@ -68,6 +71,7 @@ import {
 } from './modules/providers/capabilities';
 import { createCapabilityRunRepository } from './modules/providers/capability-run-repository';
 import { createDailyPlanningContextService } from './modules/daily-planning/context-service';
+import { createDailyPlanCoordinationService } from './modules/daily-planning/coordination-service';
 import { createDailyPlanAutomationService } from './modules/daily-planning/automation-service';
 import { createDeepSeekDailyPlanningProvider } from './modules/daily-planning/deepseek-provider';
 import type { DailyPlanningProvider } from './modules/daily-planning/provider';
@@ -81,6 +85,7 @@ import {
 } from './modules/daily-planning/execution-unit-of-work';
 import { registerDailyPlanningRoutes } from './routes/daily-planning';
 import { isPathInsideRoot } from './filesystem/path-containment';
+import { createRuntimeLogger, safeRuntimeLogSerializers, type RuntimeLogger } from './observability/runtime-logger';
 
 export interface AppOptions {
   agentProvider?: AgentProvider;
@@ -104,6 +109,9 @@ export interface AppOptions {
   dailyPlanAutomationNow?: () => Date;
   providerReliabilityNow?: () => Date;
   logger?: boolean;
+  runtimeLogRoot?: string;
+  runtimeLogger?: RuntimeLogger;
+  readBackupHealthSnapshot?: () => BackupHealthSnapshot | undefined;
   secureCookies?: boolean;
   healthTextProvider?: HealthTextProvider;
   nutritionDataProvider?: NutritionDataProvider;
@@ -123,8 +131,16 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   } catch {
     throw new Error('V07_PROVIDER_DESCRIPTOR_REJECTED');
   }
+  const runtimeLogger = options.logger === false
+    ? undefined
+    : options.runtimeLogger ?? createRuntimeLogger({
+      ...(options.runtimeLogRoot !== undefined ? { logRoot: options.runtimeLogRoot } : {}),
+    });
   const app = Fastify({
-    logger: options.logger ?? true,
+    logger: runtimeLogger
+      ? { level: 'info', stream: runtimeLogger.stream, serializers: safeRuntimeLogSerializers }
+      : false,
+    genReqId: () => crypto.randomUUID(),
   });
   const databasePath = options.databasePath ?? ':memory:';
   const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
@@ -231,8 +247,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   }
   const providerService = createProviderService(database, {
     providers: {
-      ...(options.domainAgentProvider ? { [options.domainAgentProvider.key]: options.domainAgentProvider } : {}),
-      ...options.domainAgentProviders,
+      ...(options.domainAgentProvider?.key === 'DEEPSEEK'
+        ? { DEEPSEEK: options.domainAgentProvider }
+        : {}),
+      ...(options.domainAgentProviders?.DEEPSEEK
+        ? { DEEPSEEK: options.domainAgentProviders.DEEPSEEK }
+        : {}),
     },
   });
   const providerReliabilityRepository = createProviderReliabilityRepository(database);
@@ -260,6 +280,12 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   });
   const dailyPlanningContextService = createDailyPlanningContextService(dailyPlanRepository, {
     newId: () => crypto.randomUUID(),
+  });
+  const dailyPlanCoordinationService = createDailyPlanCoordinationService({
+    contextService: dailyPlanningContextService,
+    repository: dailyPlanRepository,
+    newId: () => crypto.randomUUID(),
+    ...(options.providerReliabilityNow ? { now: options.providerReliabilityNow } : {}),
   });
   const dailyPlanPreflightService = createDailyPlanPreflightService({
     contextService: dailyPlanningContextService,
@@ -296,17 +322,49 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}),
     ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}),
   });
-  const memoryService = createMemoryService(
+  const memoryProjectionRoot = options.memoryProjectionRoot
+    ?? (databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant-memory') : join(dirname(databasePath), 'memory'));
+  const memoryCompactionHook: { service?: ReturnType<typeof createMemoryCompactionService> } = {};
+  const memoryService = createMemoryService(database, memoryProjectionRoot, {
+    revisionHook: {
+      onRevisionAppended(event) {
+        memoryCompactionHook.service?.onLegacyRevisionAppended(event);
+      },
+    },
+  });
+  const entityMemoryService = createEntityMemoryService(
     database,
-    options.memoryProjectionRoot ?? (databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant-memory') : join(dirname(databasePath), 'memory')),
+    memoryProjectionRoot,
+    memoryService,
+    {
+      revisionHook: {
+        onRevisionAppended(event) {
+          memoryCompactionHook.service?.onEntityRevisionAppended(event);
+        },
+      },
+    },
   );
-  const projectScopeService = createProjectScopeService(database);
+  const memoryCompactionService = createMemoryCompactionService(database, entityMemoryService, {
+    onEvent(event) {
+      app.log.info(event, 'memory compaction');
+    },
+  });
+  memoryCompactionHook.service = memoryCompactionService;
   if (options.enableDailyPlanAutomation) dailyPlanAutomationService.scheduleNextRun();
   app.addHook('onClose', async () => {
     dailyPlanAutomationService.stop();
+    runtimeLogger?.close();
     if (database.open) database.close();
   });
-  await registerHealthRoutes(app, database);
+  await registerHealthRoutes(app, database, {
+    authService,
+    providerCredentialService,
+    ...(options.readBackupHealthSnapshot !== undefined
+      ? { readBackupHealthSnapshot: options.readBackupHealthSnapshot }
+      : {}),
+    ...(runtimeLogger !== undefined ? { runtimeLogger } : {}),
+    schedulerStatus: options.enableDailyPlanAutomation ? 'unknown' : 'not_run',
+  });
   await registerHealthLoopRoutes(app, { authService, ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}), ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}) });
   await registerAuthRoutes(app, {
     authService,
@@ -324,12 +382,14 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerNutritionRoutes(app, { authService, nutritionService });
   await registerLearningRoutes(app, { authService, learningService });
   await registerMemoryRoutes(app, { authService, memoryService });
-  await registerProjectScopeRoutes(app, { authService, projectScopeService });
+  await registerEntityMemoryRoutes(app, { authService, entityMemoryService });
+  await registerMemoryCompactionRoutes(app, { authService, memoryCompactionService });
   await registerProposalRoutes(app, { authService, proposalService, idempotencyService });
   await registerProviderRoutes(app, { authService, providerService, providerCredentialService, capabilityRegistry });
   await registerDailyPlanningRoutes(app, {
     authService,
     dailyPlanningService,
+    dailyPlanCoordinationService,
     dailyPlanPreflightService,
     dailyPlanReviewService,
     idempotencyService,
