@@ -1,5 +1,11 @@
 # 数据库：实际底座与 V8 增量边界
 
+## 营养数据凭据：migration 31
+
+`add_nutrition_provider_credentials` 在既有最大版本30之后追加，原迁移不改写。`nutrition_provider_credentials` 按Owner主键保存固定来源`USDA_FDC`、`protected_value`和更新时间；明文key不入库。沿用Windows当前运行用户的DPAPI保护，读取配置状态不解密，只有明确匹配请求才解密调用。Owner删除时级联删除，主动移除仅清除该营养来源凭据，不删除已确认食物快照/餐食。
+
+首次启动会依既有迁移机制追加该表；真实用户库的升级/备份权限不由合成测试替代。实际进度见[TASKS](../plans/TASKS.md)。
+
 ## 2026-09-16 项目功能退役的数据保留边界
 
 项目分析运行代码退出后，`project_scopes`、`project_briefs`、`project_conversations`、`project_conversation_messages` 等历史表及原迁移保持不变，不删表、不重编号、不清空 Owner 数据。下面对项目仓储/CLI 的说明仅解释历史设计，不代表仍有这些运行入口。PROJECT 类型与已有实体记忆、Action/TimeRequest/Event 引用保留兼容；数据库中存在这些表不代表项目分析可用。
@@ -58,6 +64,18 @@ legacy与entity文档删除触发器会使相关草案INVALIDATED，清除conten
 
 所有新持久化复用当前 SQLite 与服务，不建第二库、不迁业务目录。增量升级仅做任务内一个成功升级样本及必要一个阻断样本，不跑全历史迁移矩阵。真实数据迁移/备份恢复不由本文授权。
 
+## 外部健身动作目录（2026-09-18 增量）
+
+追加迁移28提供 `fitness_catalog_snapshots`、`fitness_catalog_items` 和 `fitness_catalog_reviews`。固定来源版本与内容hash绑定，同版本同内容可重放，不同内容返回冲突且整次导入不落库；动作事实和后续资格记录分别不可变、追加保存，不把上游未审核数据改写成已审核事实。查询按文本、器械、肌群参数化分页，计划候选在完整资格与范围过滤后最多读取5项。审核记录包含依据、适用范围和参数限制，撤销通过后续记录生效；资格不是医学认证。
+
+内部starter、旧训练及其引用保持原格式。目录导入/资格测试使用合成数据，不代表真实第三方目录已经下载、全库已获得资格，或用户日常数据库已升级。实际限定结果见 [TASKS](../plans/TASKS.md)；后续详细计划迁移以最后落盘版本为准，不在此预占编号。
+
+追加迁移29在事务内重建 `v07_capability_runs`，保留旧30列数据、索引及Owner关联触发器，扩展 `WORKOUT_DETAILED_PLANNING` 和 `HEALTH_DISCLOSURE_V2`。旧三能力接口及V1记录兼容；运行仓储按Owner/日期合并新旧训练调用额度。此迁移不包含详细训练revision或健康画像存储，不能据此宣称整条新训练链路完成。
+
+追加迁移30为既有 `workout_revisions_v2` 增加 `revision_schema`，旧行默认 `WORKOUT_PLAN_V1`，新详细修订为 `WORKOUT_PLAN_V2`。增加 `fitness_planning_profiles`（Owner唯一、CAS版本、有界JSON）、`fitness_planning_previews`（Owner/hash、有界选择与引用记录，服务层十分钟有效、每Owner最多二十份）及 `workout_planning_citations`（不可变技术候选快照、Owner/revision关联）。预览不复制完整健康、反馈或记忆正文；候选历史快照包含技术值、名称、说明和来源，不因当前资格变化抹去历史。
+
+记忆预览绑定当前revision UUID、版本与scope，删除后同版本重建也不沿用旧授权。新外发需要重新预览；既有草稿的本地接受校验独立于预览TTL，仍复核当前画像、风险与候选。旧V1引用表及既有revision/Owner/父版本约束保留。迁移30只在隔离29→30样本中验证，运行与限定复核结论见TASKS；日常库尚未执行升级。
+
 ## V9 备份与恢复增量边界
 
 V9起点实际max为26；上文22是V8初始历史值。V9无schema需求不加migration，必要追加前重新核对实际max，不改1～26，不制造升级矩阵。
@@ -65,3 +83,7 @@ V9起点实际max为26；上文22是V8初始历史值。V9无schema需求不加m
 备份使用SQLite backup API生成一致独立快照，manifest计数/schema/hash/quick_check从该快照取得。范围固定SQLite-only：库内业务事实和DPAPI密文包含，artifacts本体、memory侧车投影、日志、外部项目和DPAPI用户环境不包含，不能称完整应用备份或跨机可解密。manifest具体字段与失败语义仅见[TECH_SPEC §13.3](TECH_SPEC.md#133-v9-03sqlite-only-一致备份与隔离恢复)。hash不提供来源真实性签名。
 
 现有V9实现先用readonly/fileMustExist连接验证独立DELETE-journal快照，不调用会mkdir/migrate的openDatabase或buildApp。只复制到新隔离目标再验证，不自动升级恢复副本；拒绝活动目录、已有目标与链接逃逸。未进行真实日常库备份/恢复，真实替换与侧车/DPAPI完整恢复保留另授权门禁。新增private-directory工具只在新目标设置当前Windows用户受限DACL，已存在目录只核验；mode0600不是ACL证据，不修改真实Owner目录权限。V9没有新增迁移SQL，latestSchemaVersion只读取现有迁移列表。
+
+## DeepSeek 营养来源本地缓存（迁移32）
+
+`nutrition_web_cache_v32`保存按Owner、规范化食物查询、单位及适配器版本区分的营养记录，以及公开来源URL、抓取时间、原文hash和逐项引用。只缓存有完整来源依据且recordHash一致的正向结果；有效期30天，每Owner最多100条、总记录与引用不超过800000字节。命中不联网、不解密密钥、不占外部调用额度；过期或未命中才请求来源。历史确认餐食保留自己的不可变快照，不随缓存更新。迁移只新增缓存表、索引与约束，保留原有凭据、Owner和餐食。

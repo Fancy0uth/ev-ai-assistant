@@ -20,6 +20,6 @@
 
 Frontend = `apps/web`，backend = `apps/core`；共享契约 `packages/contracts`，纯领域规则 `packages/domain`。没有另建 frontend/backend 空壳或 compose。
 
-Windows / Node24；受管脚本另需PowerShell7，已有依赖无需重装。启动方式只维护在DEPLOYMENT，Core/Web默认分别为loopback 4311/3000；无默认账号。V9补充网页安全、启动脚本、SQLite-only备份及脱敏日志，实际验收状态见TASKS；真实私有HTTPS、物理iPhone、自启动与完整恢复仍须另授权验证，不是已部署服务。
+Windows / Node24；受管脚本另需PowerShell7，已有依赖无需重装。启动方式只维护在DEPLOYMENT，Core/Web默认分别为loopback 4311/3000；无默认账号。本轮MVP只交付服务器与电脑浏览器Web，手机及专为手机的私有访问退出范围，详见[MVP-SCOPE](docs/product/MVP-SCOPE.md)。V9网页安全、启动脚本、SQLite-only备份及脱敏日志实际验收见TASKS；真实自启动与完整恢复仍须另授权验证，不是已部署服务。
 
 当前门禁与修复证据只见 TASKS。历史 [阶段交接](docs/releases/2026-09-07-development-phase-handoff.md)、[v0.7 独立审查](docs/reviews/2026-08-31-v0.7-sol-rereview-2.md) 保留原结论，不以旧测试结果冒充本轮验证。

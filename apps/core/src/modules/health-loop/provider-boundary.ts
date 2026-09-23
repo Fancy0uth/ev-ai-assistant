@@ -30,7 +30,12 @@ export async function executeV07ProviderBoundary<TInput, TOutput>(options: {
   invoke: (input: TInput, signal: AbortSignal) => Promise<unknown>;
   parseOutput: (output: unknown) => TOutput;
   correlateOutput?: (output: TOutput, input: TInput) => void;
+  deadlineMs?: number;
 }): Promise<V07ProviderBoundaryResult<TOutput>> {
+  const deadlineMs = options.deadlineMs ?? V07_PROVIDER_DEADLINE_MS;
+  if (!Number.isInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 60_000) {
+    throw new V07ProviderBoundaryError('INVALID_RESPONSE');
+  }
   let inputBytes: number;
   try {
     inputBytes = canonicalUtf8Size(options.input);
@@ -53,7 +58,7 @@ export async function executeV07ProviderBoundary<TInput, TOutput>(options: {
     timeout = setTimeout(() => {
       controller.abort();
       reject(new V07ProviderBoundaryError('UNAVAILABLE', inputBytes));
-    }, V07_PROVIDER_DEADLINE_MS);
+    }, deadlineMs);
   });
 
   let rawOutput: unknown;

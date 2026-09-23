@@ -55,7 +55,9 @@ export interface NutritionServiceOptions {
   healthLoopRepository?: V07HealthLoopRepository;
   v07IdempotencyService?: V07IdempotencyService;
   healthTextProvider?: HealthTextProvider;
+  healthTextProviderForOwner?: (ownerId: string) => HealthTextProvider | undefined;
   nutritionDataProvider?: NutritionDataProvider;
+  nutritionDataProviderForOwner?: (ownerId: string) => NutritionDataProvider | undefined;
 }
 
 function pagination(page: number, pageSize: number, total: number) {
@@ -89,7 +91,7 @@ export function createNutritionService(database: Database.Database, options: Nut
   const newId = options.newId ?? randomUUID;
   const repository = options.repository ?? createNutritionRepository(database);
   const healthLoopRepository = options.healthLoopRepository ?? createV07HealthLoopRepository(database);
-  const v07IdempotencyService = options.v07IdempotencyService ?? createV07IdempotencyService({ database, repository: healthLoopRepository, now, newId });
+  const v07IdempotencyService = options.v07IdempotencyService ?? createV07IdempotencyService({ database, repository: healthLoopRepository, now, newId, nutritionMatchLeaseMs: 70_000 });
 
   function missingDraft(): never {
     throw new ApiError(404, 'MEAL_DRAFT_NOT_FOUND', '餐食草稿不存在');
@@ -129,6 +131,8 @@ export function createNutritionService(database: Database.Database, options: Nut
     descriptor: { providerId: string; providerLabel: string; adapterKind: 'TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'PRODUCTION_ADAPTER'; evidenceKind: 'AUTOMATED_TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'REAL_PROVIDER' };
     disclosure: unknown;
     nutritionSource?: NutritionSourceDescriptor;
+    deadlineMs?: number;
+    reservedCalls?: 0 | 1;
   }): { id: string; createdAt: string } {
     const createdAt = now().toISOString();
     const id = newId();
@@ -138,7 +142,8 @@ export function createNutritionService(database: Database.Database, options: Nut
       adapterKind: input.descriptor.adapterKind, disclosure: input.disclosure, localDate: input.localDate, appVersion: APP_VERSION,
       idempotencyKey: input.claim.key, requestHash: input.claim.requestHash,
       leaseToken: input.claim.leaseToken, leaseExpiresAt: input.claim.leaseExpiresAt,
-      deadlineAt: new Date(Date.parse(createdAt) + 8_000).toISOString(),
+      deadlineAt: new Date(Date.parse(createdAt) + (input.deadlineMs ?? 8_000)).toISOString(),
+      reservedCalls: input.reservedCalls ?? 1,
       createdAt, nutritionSourceVersion: input.nutritionSource?.sourceVersion ?? null,
       nutritionDatasetHash: input.nutritionSource?.datasetHash ?? null,
     });
@@ -165,7 +170,8 @@ export function createNutritionService(database: Database.Database, options: Nut
       const command = { ownerId, key: idempotencyKey, operation: 'nutrition.meal_draft.create' as const, resourceId: input.localDate, body: input };
       const started = v07IdempotencyService.beginExternal<{ draft: MealDraft; revision: MealRevision; disclosure: unknown }>(command);
       if (started.kind === 'REPLAY') return { ...started.response.body, replayed: started.response.replayed };
-      if (!options.healthTextProvider) {
+      const provider = options.healthTextProvider ?? options.healthTextProviderForOwner?.(ownerId);
+      if (!provider) {
         const error = new ApiError(503, 'HEALTH_TEXT_PROVIDER_NOT_CONFIGURED', '餐食文本能力尚未配置');
         v07IdempotencyService.failExternal(started.claim, error, () => {
           createBlockedRun(ownerId, 'MEAL_CANDIDATE_PARSE', command.operation, command.resourceId, input.localDate, { disclosureVersion: input.disclosureVersion }, error.code);
@@ -177,7 +183,6 @@ export function createNutritionService(database: Database.Database, options: Nut
         v07IdempotencyService.failExternal(started.claim, error);
         throw error;
       }
-      const provider = options.healthTextProvider;
       const run = createClaimedRun({ ownerId, capability: 'MEAL_CANDIDATE_PARSE', operation: command.operation, resourceId: command.resourceId, claim: started.claim, localDate: input.localDate, descriptor: provider.descriptor, disclosure: { disclosureVersion: input.disclosureVersion } });
       let parsed: Awaited<ReturnType<typeof executeMealCandidateParse>>;
       try {
@@ -261,30 +266,40 @@ export function createNutritionService(database: Database.Database, options: Nut
         if (error instanceof ApiError) v07IdempotencyService.failExternal(started.claim, error);
         throw error;
       }
-      if (!options.nutritionDataProvider) {
+      const provider = options.nutritionDataProvider ?? options.nutritionDataProviderForOwner?.(ownerId);
+      if (!provider) {
         const error = new ApiError(503, 'NUTRITION_DATA_PROVIDER_NOT_CONFIGURED', '营养数据能力尚未配置');
         v07IdempotencyService.failExternal(started.claim, error, () => {
           createBlockedRun(ownerId, 'NUTRITION_DATA_LOOKUP', command.operation, command.resourceId, current.draft.localDate, { disclosureVersion: 'HEALTH_DISCLOSURE_V1' }, error.code);
         });
         throw error;
       }
-      const provider = options.nutritionDataProvider;
-      if (healthLoopRepository.countReservedCalls(ownerId, current.draft.localDate, 'NUTRITION_DATA_LOOKUP') >= 5) {
+      const lookupInput = { queries: included.map((candidate) => ({ candidateId: candidate.candidateId, query: candidate.displayName, unit: candidate.unit, limit: 5 as const })) };
+      // Capture the cached result before reserving external quota; a cached-only
+      // invocation cannot fall back to the network if entries expire meanwhile.
+      let cachedOutput: unknown;
+      try { cachedOutput = provider.readCachedBatch?.(lookupInput); }
+      catch { cachedOutput = undefined; }
+      const actualCalls = cachedOutput === undefined ? 1 : 0;
+      if (actualCalls !== 0 && healthLoopRepository.countReservedCalls(ownerId, current.draft.localDate, 'NUTRITION_DATA_LOOKUP') >= 5) {
         const error = new V07DailyQuotaError('今日能力调用次数已达上限');
         v07IdempotencyService.failExternal(started.claim, error);
         throw error;
       }
-      const run = createClaimedRun({ ownerId, capability: 'NUTRITION_DATA_LOOKUP', operation: command.operation, resourceId: command.resourceId, claim: started.claim, localDate: current.draft.localDate, descriptor: provider.descriptor, disclosure: { disclosureVersion: 'HEALTH_DISCLOSURE_V1' }, nutritionSource: provider.descriptor.source });
+      const lookupProvider: NutritionDataProvider = actualCalls === 0
+        ? { descriptor: provider.descriptor, searchBatch: async () => cachedOutput }
+        : provider;
+      const run = createClaimedRun({ ownerId, capability: 'NUTRITION_DATA_LOOKUP', operation: command.operation, resourceId: command.resourceId, claim: started.claim, localDate: current.draft.localDate, descriptor: provider.descriptor, disclosure: { disclosureVersion: 'HEALTH_DISCLOSURE_V1', localCacheOnly: actualCalls === 0 }, nutritionSource: provider.descriptor.source, deadlineMs: lookupProvider.deadlineMs ?? 8_000, reservedCalls: actualCalls });
       let snapshots: Awaited<ReturnType<typeof executeNutritionSearchBatch>>;
       try {
-        snapshots = await executeNutritionSearchBatch({ queries: included.map((candidate) => ({ candidateId: candidate.candidateId, query: candidate.displayName, unit: candidate.unit, limit: 5 as const })) }, provider);
+        snapshots = await executeNutritionSearchBatch(lookupInput, lookupProvider);
       } catch (error) {
         const kind = error instanceof NutritionProviderError ? error.kind : 'UNAVAILABLE';
         const apiError = new ApiError(503, kind === 'INVALID_RESPONSE' ? 'NUTRITION_DATA_RESPONSE_INVALID' : 'NUTRITION_DATA_PROVIDER_UNAVAILABLE', '营养数据能力当前不可用');
         const inputBytes = error instanceof NutritionProviderError ? boundedFailureBytes(error.inputBytes, V07_PROVIDER_MAX_INPUT_BYTES) : 0;
         const outputBytes = error instanceof NutritionProviderError ? boundedFailureBytes(error.outputBytes, V07_PROVIDER_MAX_OUTPUT_BYTES) : 0;
         v07IdempotencyService.failExternal(started.claim, apiError, () => {
-          if (!healthLoopRepository.failCapabilityRun({ ownerId, id: run.id, leaseToken: started.claim.leaseToken, actualCalls: 1, inputBytes, outputBytes, failureCode: apiError.code, now: now().toISOString() })) throw new Error('NUTRITION_MATCH_RUN_FINALIZE_FAILED');
+          if (!healthLoopRepository.failCapabilityRun({ ownerId, id: run.id, leaseToken: started.claim.leaseToken, actualCalls, inputBytes, outputBytes, failureCode: apiError.code, now: now().toISOString() })) throw new Error('NUTRITION_MATCH_RUN_FINALIZE_FAILED');
         });
         throw apiError;
       }
@@ -296,7 +311,7 @@ export function createNutritionService(database: Database.Database, options: Nut
         const revision = createMealRevision({ id: newId(), draftId, parentRevisionId: latest.revision.id, revisionNo: latest.revision.revisionNo + 1, candidates, createdBy: 'DATA_PROVIDER', capabilityRunId: run.id, createdAt });
         try {
           const stored = repository.saveMatches({ ownerId, draftId, expectedVersion: input.expectedVersion, revisionId: latest.revision.id, source: provider.descriptor.source, adapterKind: provider.descriptor.adapterKind, evidenceKind: provider.descriptor.evidenceKind, capabilityRunId: run.id, revision, snapshots: snapshots.value, sourceSnapshotId: newId(), foodSnapshotIds: snapshots.value.flatMap((group) => group.records.map(() => newId())), updatedAt: createdAt });
-          if (!healthLoopRepository.completeCapabilityRun({ ownerId, id: run.id, leaseToken: started.claim.leaseToken, actualCalls: 1, inputBytes: snapshots.inputBytes, outputBytes: snapshots.outputBytes, evidenceKind: provider.descriptor.evidenceKind, now: createdAt })) throw new Error('NUTRITION_MATCH_RUN_FINALIZE_FAILED');
+          if (!healthLoopRepository.completeCapabilityRun({ ownerId, id: run.id, leaseToken: started.claim.leaseToken, actualCalls, inputBytes: snapshots.inputBytes, outputBytes: snapshots.outputBytes, evidenceKind: provider.descriptor.evidenceKind, now: createdAt })) throw new Error('NUTRITION_MATCH_RUN_FINALIZE_FAILED');
           healthLoopRepository.appendAudit({ id: newId(), ownerId, eventType: 'MEAL_MATCHES_SAVED', entityType: 'MEAL_DRAFT', entityId: draftId, entityVersion: stored.draft.version, metadata: { capabilityRunId: run.id, sourceKind: provider.descriptor.source.sourceKind, sourceVersion: provider.descriptor.source.sourceVersion }, createdAt });
           return { status: 202, body: { draft: stored.draft, revision: stored.revision, matches: stored.matches, source: provider.descriptor.source } };
         } catch (error) {
@@ -307,7 +322,7 @@ export function createNutritionService(database: Database.Database, options: Nut
           throw error;
         }
       }, () => {
-        if (!healthLoopRepository.failCapabilityRun({ ownerId, id: run.id, leaseToken: started.claim.leaseToken, actualCalls: 1, inputBytes: snapshots.inputBytes, outputBytes: snapshots.outputBytes, failureCode: 'NUTRITION_MATCH_FINALIZATION_REJECTED', now: now().toISOString() })) throw new Error('NUTRITION_MATCH_RUN_FINALIZE_FAILED');
+        if (!healthLoopRepository.failCapabilityRun({ ownerId, id: run.id, leaseToken: started.claim.leaseToken, actualCalls, inputBytes: snapshots.inputBytes, outputBytes: snapshots.outputBytes, failureCode: 'NUTRITION_MATCH_FINALIZATION_REJECTED', now: now().toISOString() })) throw new Error('NUTRITION_MATCH_RUN_FINALIZE_FAILED');
       });
       return { ...result.body, replayed: result.replayed };
     },

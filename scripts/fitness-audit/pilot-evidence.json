@@ -1,0 +1,429 @@
+{
+  "version": 1,
+  "scope": "Pilot primary-page comparison, not exhaustive web research or medical clearance.",
+  "sources": [
+    {
+      "id": "nhs-strength",
+      "url": "https://www.nhs.uk/live-well/exercise/strength-exercises/",
+      "publishedOrReviewedAt": "2024-02-28",
+      "accessedAt": "2026-09-20",
+      "summary": "NHS: floor calf raises with chair support, five repetitions; wall press-up uses chest-height hands and three sets of five to ten. Mini-squats use chair support, comfortable depth and five repetitions. Start gradually.",
+      "summaryHash": "67267f59d8520198f8494ab79b692ead425504890eedf8fe41b965da8fe86966"
+    },
+    {
+      "id": "mayo-pushup",
+      "url": "https://www.mayoclinic.org/healthy-lifestyle/fitness/multimedia/modified-pushup/vid-20084674",
+      "publishedOrReviewedAt": "2025-11-21",
+      "accessedAt": "2026-09-20",
+      "summary": "Mayo Clinic: modified pushup rests on hands and knees. Wall variant uses shoulder-height hands, slightly wider than shoulders. Keep trunk straight and move under control. No numeric dose is supplied.",
+      "summaryHash": "c0d21917e85d1ffe3e2b6765099a0fba6c7abbabe00c030db397b40285aac0a2"
+    },
+    {
+      "id": "ace-pushup",
+      "url": "https://www.acefitness.org/resources/everyone/exercise-library/41/push-up/",
+      "publishedOrReviewedAt": null,
+      "accessedAt": "2026-09-20",
+      "summary": "ACE lists floor push-up as intermediate and no equipment, with shoulder-width hands, straight body and controlled lowering/raising. Elbow variation is described; no numeric dose for pilot variants.",
+      "summaryHash": "f479f884d014ba40b0f90d08b040bbb1dfbb17b13af485be3814520b1426142e"
+    },
+    {
+      "id": "mayo-squat",
+      "url": "https://www.mayoclinic.org/healthy-lifestyle/fitness/multimedia/squat/vid-20084663",
+      "publishedOrReviewedAt": "2025-11-21",
+      "accessedAt": "2026-09-20",
+      "summary": "Controlled bilateral bodyweight squat, neutral spine, aligned knees and depth within capability. One set of twelve to fifteen suits most people; stop on fatigue or form deterioration. Not a pistol, twist or jump prescription.",
+      "summaryHash": "431528a272daa1552c3f182343da5e4a6c9c1a7f9c8f5bd0e7d0dcb4f00d59bf"
+    },
+    {
+      "id": "mayo-lunge",
+      "url": "https://www.mayoclinic.org/healthy-lifestyle/fitness/multimedia/lunge/vid-20084662",
+      "publishedOrReviewedAt": "2025-11-21",
+      "accessedAt": "2026-09-20",
+      "summary": "Stationary and traveling lunges, neutral spine, controlled knee alignment. Repetitions depend on fitness; stop on fatigue or form deterioration. No fixed numeric dose or rotating variant.",
+      "summaryHash": "2e90f41229b72f46d396077c6b1170ba410c96c744f348be8f2780c8133042d7"
+    },
+    {
+      "id": "mayo-bridge",
+      "url": "https://www.mayoclinic.org/healthy-lifestyle/adult-health/in-depth/back-pain/art-20546859",
+      "publishedOrReviewedAt": null,
+      "accessedAt": "2026-09-20",
+      "summary": "Floor bridge with bent knees, hips raised to shoulder-knee line and three-breath hold. Begin with five repetitions, progress to thirty. Different from unspecified brief pause.",
+      "summaryHash": "9b04280ef2f94a16ce676a50ff7163c06e5432673dd1a9b73ea49a4e18ba064b"
+    },
+    {
+      "id": "ace-phase1",
+      "url": "https://www.acefitness.org/resources/everyone/blog/6594/ace-s-kick-start-workout-a-week-by-week-3-month-exercise-program/",
+      "publishedOrReviewedAt": "2023-01-06",
+      "accessedAt": "2026-09-20",
+      "summary": "Introductory week one: one set eight to fifteen glute bridges; ten-second side-plank holds each side, thirty seconds between exercises. Linked technique variants need separate matching; compound or incline variants cannot inherit doses.",
+      "summaryHash": "9a0eb171b8405b8d6e6ec9521aa6943e330c578f1b01c10574fe8db9c5ce9b88"
+    },
+    {
+      "id": "ace-performance",
+      "url": "https://www.acefitness.org/continuing-education/certified/february-2021/7780/how-to-design-body-weight-training-workouts-using-the-ace-integrated-fitness-training-model/",
+      "publishedOrReviewedAt": null,
+      "accessedAt": "2026-09-20",
+      "summary": "ACE distinguishes explosive squat/split-squat jumps in performance circuits from lower-level training; performance programming is not an automatic LOW general-adult eligibility grant.",
+      "summaryHash": "99338b3a73d616ad50ea0cd9b6c19f349feba48d8c7afff97a077024e52b1463"
+    }
+  ],
+  "reviews": [
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0658",
+      "itemHash": "8eab407941d1d92ef3a0a42de80ea347477d39c63d0dc63468d1d0d093b1c7c7",
+      "inputHash": "b0143c0ed37048a4d821e30fbf0f9db7475a57d5721c0cf1638e79e389fe45c2",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "nhs-strength",
+        "mayo-pushup"
+      ],
+      "reason": "Shoulder-height wall technique supported by Mayo, which supplies no dose; NHS dose uses chest-height description.",
+      "missing": [
+        "same-variant dose linkage"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0659",
+      "itemHash": "478413832dc7c3b75f645050b79312874dfcb23ee789fd52f29207ef08e8ff29",
+      "inputHash": "88fed786fa9c599f156554d896268f6f32bb14c203f539fe52a72d802c0a9803",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "nhs-strength",
+        "mayo-pushup"
+      ],
+      "reason": "Mayo supports shoulder-height hands; catalog additionally steps back a few feet after starting at arm length.",
+      "missing": [
+        "distance clarification",
+        "same-variant dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0662",
+      "itemHash": "989d12dc80da7c8de45c225d5035115b93a36f02ac638068f3532296fe15e193",
+      "inputHash": "6f861b2c7f2866627c8e1c4f63eb33c940300ee3e74bf025e676b9e5eb9030a7",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "ace-pushup"
+      ],
+      "reason": "Floor technique broadly matches, but ACE marks intermediate with no numeric prescription.",
+      "missing": [
+        "dose",
+        "LOW scope mapping"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "1373",
+      "itemHash": "f87edd48dde8d1250d930d761be4ae4f8909f5c0ce737202499ad3f2df3a9292",
+      "inputHash": "57ca84803e290d2db6f139d5dbd250c602ba56e62c726850a69c7f440d45d8d1",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "nhs-strength"
+      ],
+      "reason": "Supported bilateral floor calf raise substantially matches NHS five repetitions. Wall/stable support to chair equivalence needs an independently verified mapping.",
+      "missing": [
+        "independent variant mapping",
+        "runtime grant"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "1490",
+      "itemHash": "dd31b28dd1947b8801dfa41d41e11632d972e70185719c39be2e990fe7b05c04",
+      "inputHash": "c00bce787020520774a2757ca071882da4275886b4e3b90313c8f236048c00a0",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "nhs-strength"
+      ],
+      "reason": "Heels off stair edge differ from cited flat-floor calf raise.",
+      "missing": [
+        "stair variant evidence"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "3013",
+      "itemHash": "a8e3a24bbd2982aab134507be0dfa08d11166b038600fd6754c14ab8d2c26b79",
+      "inputHash": "d6364fa144ecab24bb4711cce86c8c7ce40386e7d962485811361d090a59010f",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "mayo-bridge",
+        "ace-phase1"
+      ],
+      "reason": "Bridge general movement matches, but Mayo uses three breaths and catalog brief pause. ACE dose needs linked technique/context verification.",
+      "missing": [
+        "technique-dose linkage",
+        "scope mapping"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "3470",
+      "itemHash": "0686839240a5ecad17d215f1071fd54b28a8783e4b72cc7b6aabf925eba7ed2a",
+      "inputHash": "c63b7564d9cf4e95d84976a79527d7c9fb578ade9f3d7ad929fdffad31c10891",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "mayo-lunge"
+      ],
+      "reason": "Forward lunge aligns with source; repetition count remains capability-dependent.",
+      "missing": [
+        "bounded dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "3211",
+      "itemHash": "cffcf3c26c6a8fee1446265256a9207f298f8dd89c29ad11143629b10741a7b0",
+      "inputHash": "7ee98d6783df75042cbf2972c6ec60508a152ec75b51d652135268d182a68446",
+      "decision": "CONFLICTING_EVIDENCE",
+      "sourceIds": [
+        "mayo-pushup"
+      ],
+      "reason": "Kneeling title contradicts step two: balls of feet, body head-to-heels. Mayo modified pushup keeps knee support.",
+      "missing": [
+        "name/step contradiction"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0493",
+      "itemHash": "2157491483f86a7e645404ad5a86fbeac5c67f2102833887a13da6256df3faa8",
+      "inputHash": "95280c925c9cdb661f5e6f171e65d4cc2269f546c192325c5f6937da43fa777f",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "ace-pushup",
+        "mayo-pushup"
+      ],
+      "reason": "Bench/step incline differs from floor and wall variants.",
+      "missing": [
+        "support height",
+        "exact variant dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0259",
+      "itemHash": "ef0d940e4874234e36f8c496258807583147b5e1796df546e29b9a3a08044b03",
+      "inputHash": "d9e48c5463ef314f70c994deefe59b822968d375e8f56bcc86d0a357e92774a0",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "ace-pushup"
+      ],
+      "reason": "Close grip changes spacing; elbow alternative does not establish close-grip prescription.",
+      "missing": [
+        "close-grip variant",
+        "dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0283",
+      "itemHash": "816c7cfc8d0e500bd6b4787a86633bcbd1f2db0b3688fdbac023e9b7270a39af",
+      "inputHash": "a9bc12104d22d862cb0282af38ff01baec095def000cc3268d8c1185a4883a50",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "ace-pushup"
+      ],
+      "reason": "Diamond geometry not established by standard setup.",
+      "missing": [
+        "diamond variant",
+        "dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0514",
+      "itemHash": "71618eb922f05442f4e7cbe7e0c979939b4e43a0fee3b4a420b07379980148c3",
+      "inputHash": "fe87f49f401632ca331d81d0f77db210dfd3a0f049823004091df1244992f095",
+      "decision": "PROFESSIONAL_REVIEW_REQUIRED",
+      "sourceIds": [
+        "mayo-squat",
+        "ace-performance"
+      ],
+      "reason": "Explosive repeated jumps outside current LOW product scope; this is scope escalation, not universal danger.",
+      "missing": [
+        "performance readiness assessment"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "1759",
+      "itemHash": "7e03c232407eadec6bb097dceaed61042c67046d5fcf22061530508f6773e93d",
+      "inputHash": "7517702110057a52f10afde4b2223c32b496e74d71f8011e74ecb6e58f15202f",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "mayo-squat"
+      ],
+      "reason": "Single-leg pistol differs from bilateral squat balance/load.",
+      "missing": [
+        "pistol variant",
+        "dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "2368",
+      "itemHash": "d239dd484d61aabec1c8131ab8b676a02892d60a942cf266e864ba7c0a4a14f4",
+      "inputHash": "8ce58a7830902f794dcd08e5733bd49bda8bdda8728595d6094cfd13de3280aa",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "mayo-lunge"
+      ],
+      "reason": "The source includes stationary lunges, so a static stance alone is not a contradiction. Exact starting distance and return sequence need matching; the source also supplies no bounded numerical dose.",
+      "missing": [
+        "starting setup and return-sequence mapping",
+        "bounded dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "1460",
+      "itemHash": "cacf1df413852fbaf3c3d2a687a6dadb8d4dd21d07101401daa07e2788cb1aed",
+      "inputHash": "a95c54940fdbdbb1ec86420c6ac99a7920ca0f40b5f903fcfe796495f709d793",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "mayo-lunge"
+      ],
+      "reason": "Traveling lunge mentioned, but repetitions depend on capacity.",
+      "missing": [
+        "bounded dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "1688",
+      "itemHash": "4cfb43babad886bd2df33c24808a16680c5a8264b9baa59dde4c354a5660a52d",
+      "inputHash": "f780ce042aad376068078f891aad1adcd6258b55c812a05777a502688e64be2d",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "mayo-lunge"
+      ],
+      "reason": "Added torso rotation/elbow-to-knee not covered by source.",
+      "missing": [
+        "rotating variant",
+        "dose"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0705",
+      "itemHash": "e7f28409ef97843324ca4d76fb84bf42bd9153a030ddab3d3b1367cb20b00049",
+      "inputHash": "0d7b89142a111b4ebec1d5ae9f1644ba59a28b2c1f57a56dbd790bd1d3f352d9",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "ace-phase1"
+      ],
+      "reason": "Straight-leg forearm side bridge needs exact match to linked beginner/intermediate variant.",
+      "missing": [
+        "linked variant verification"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "0664",
+      "itemHash": "d8a43d0b7d0d35a25eb49f420b538aff8a2f259b8a2b6998a12f9b102bbd6994",
+      "inputHash": "2641b596229407873ac69cb7a341f5237aab01db1229e516b95b972e5aa35942",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "ace-pushup",
+        "ace-phase1"
+      ],
+      "reason": "Compound pushup-to-side-plank cannot inherit separate prescriptions.",
+      "missing": [
+        "compound sequence evidence"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "3132",
+      "itemHash": "1239e2ca32d5b7fbe080016ad64b3f12ae6ec00d73fc754165c90a3268746467",
+      "inputHash": "9e2c8eecc94d5f18b8da7eb06d9d1217c5bccc0f609fd17da95acb185c5c096b",
+      "decision": "MISSING_EVIDENCE",
+      "sourceIds": [
+        "nhs-strength",
+        "mayo-squat"
+      ],
+      "reason": "Supported potty squat depth unspecified; NHS mini-squat has comfortable partial depth.",
+      "missing": [
+        "range clarification"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    },
+    {
+      "sourceId": "hasaneyldrm/exercises-dataset",
+      "revision": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+      "upstreamId": "3544",
+      "itemHash": "2cd68496a58dfeaa0e69aa1db6c2a7b880ab5b80e5e108ec14ca3b1fa6e62c38",
+      "inputHash": "6d6c0f9ff0b87d161d6005076cd025782508f5bd75b50cbf8ceae98637512881",
+      "decision": "CONFLICTING_EVIDENCE",
+      "sourceIds": [
+        "ace-phase1"
+      ],
+      "reason": "Title incline side plank, but instructions place forearm on ground and specify no raised surface.",
+      "missing": [
+        "incline/title-step mismatch"
+      ],
+      "reviewer": "codex-primary",
+      "independentReview": null
+    }
+  ]
+}

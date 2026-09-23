@@ -85,15 +85,33 @@ export function CourseImportReview({ initial, onUpdated }: { initial: ImportData
   </section>;
   if (value.import.status === 'REVIEW_REQUIRED' && revision) return <section className="domain-card import-result" aria-live="polite">
     <h2>审阅课表候选</h2><p>高置信度只作提示；保存审阅后才能确认导入。</p>
-    <ul>{draftCandidates.map((candidate, index) => <li key={candidate.candidateId}>
-      <label><input aria-label={`包含课程：${candidate.title}`} type="checkbox" checked={candidate.included} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, included: event.target.checked } : item))} /> 包含</label>
-      <label>课程标题<input aria-label={`课程标题：${candidate.title}`} value={candidate.title} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} /></label>
-      <label>地点<input value={candidate.location ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, location: event.target.value || null } : item))} /></label>
-      <label>星期<input type="number" min="1" max="7" value={candidate.weekday} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weekday: Number(event.target.value) } : item))} /></label>
-      <label>开始<input type="time" value={candidate.startLocalTime} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, startLocalTime: event.target.value } : item))} /></label>
-      <label>结束<input type="time" value={candidate.endLocalTime} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, endLocalTime: event.target.value } : item))} /></label>
-      <p>总体置信度：{candidate.confidence.overall}</p><p>字段置信度：{Object.entries(candidate.confidence.fields).map(([field, confidence]) => `${field} ${confidence}`).join('；')}</p><p>溯源：{candidate.provenance.map((item) => `${item.kind}(${item.editedFields.join(',') || '原始'})`).join(' → ')}</p>
-    </li>)}</ul>
+    <ul>{draftCandidates.map((candidate, index) => {
+      const candidateLabel = candidate.title ?? `候选 ${index + 1}`;
+      const incompleteFields = [
+        candidate.title === null ? '课程标题' : null,
+        candidate.weekday === null ? '星期' : null,
+        candidate.startLocalTime === null ? '开始时间' : null,
+        candidate.endLocalTime === null ? '结束时间' : null,
+        candidate.weekStart === null ? '起始周' : null,
+        candidate.weekEnd === null ? '结束周' : null,
+        candidate.weekPattern === null ? '单双周' : null,
+      ].filter((field): field is string => field !== null);
+      return <li key={candidate.candidateId}>
+        <label><input aria-label={`包含课程：${candidateLabel}`} type="checkbox" checked={candidate.included} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, included: event.target.checked } : item))} /> 包含</label>
+        {incompleteFields.length ? <p role="status">待补全：{incompleteFields.join('、')}</p> : <p>排程字段已完整</p>}
+        <label>课程标题<input aria-label={`课程标题：${candidateLabel}`} value={candidate.title ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value || null } : item))} /></label>
+        <label>地点<input aria-label={`地点：${candidateLabel}`} value={candidate.location ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, location: event.target.value || null } : item))} /></label>
+        <label>星期<input aria-label={`星期：${candidateLabel}`} type="number" min="1" max="7" value={candidate.weekday ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weekday: event.target.value === '' ? null : Number(event.target.value) } : item))} /></label>
+        <label>开始<input aria-label={`开始：${candidateLabel}`} type="time" value={candidate.startLocalTime ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, startLocalTime: event.target.value || null } : item))} /></label>
+        <label>结束<input aria-label={`结束：${candidateLabel}`} type="time" value={candidate.endLocalTime ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, endLocalTime: event.target.value || null } : item))} /></label>
+        <label>起始周<input aria-label={`起始周：${candidateLabel}`} type="number" min="1" max="53" value={candidate.weekStart ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weekStart: event.target.value === '' ? null : Number(event.target.value) } : item))} /></label>
+        <label>结束周<input aria-label={`结束周：${candidateLabel}`} type="number" min="1" max="53" value={candidate.weekEnd ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weekEnd: event.target.value === '' ? null : Number(event.target.value) } : item))} /></label>
+        <label>单双周<select aria-label={`单双周：${candidateLabel}`} value={candidate.weekPattern ?? ''} onChange={(event) => setDraftCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weekPattern: event.target.value === '' ? null : event.target.value as NonNullable<typeof item.weekPattern> } : item))}>
+          <option value="">待补全</option><option value="EVERY_WEEK">每周</option><option value="ODD_WEEKS">单周</option><option value="EVEN_WEEKS">双周</option>
+        </select></label>
+        <p>总体置信度：{candidate.confidence.overall}</p><p>字段置信度：{Object.entries(candidate.confidence.fields).map(([field, confidence]) => `${field} ${confidence}`).join('；')}</p><p>溯源：{candidate.provenance.map((item) => `${item.kind}(${item.editedFields.join(',') || '原始'})`).join(' → ')}</p>
+      </li>;
+    })}</ul>
     <button type="button" disabled={busy} onClick={() => void saveReview()}>保存审阅版本</button>
     {savedReview ? <button type="button" disabled={busy} onClick={() => void confirm()}>确认导入课程</button> : null}{failure ? <p role="alert">{failure}</p> : null}
   </section>;

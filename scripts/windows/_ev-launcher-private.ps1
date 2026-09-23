@@ -1098,6 +1098,7 @@ function New-EvAutostartTaskDefinition {
     $launcherArguments = @(
         '-NoProfile',
         '-NonInteractive',
+        '-WindowStyle', 'Hidden',
         '-File', $launcherPath,
         '-RepoRoot', $Configuration.RepoRoot,
         '-DataDir', $Configuration.DataDir,
@@ -1149,7 +1150,7 @@ function Get-EvScheduledTask {
         return Get-ScheduledTask -TaskName $Definition.Name -TaskPath $Definition.TaskPath -ErrorAction Stop
     }
     catch {
-        if ($_.Exception.Message -match 'cannot find|not found|No MSFT_ScheduledTask') {
+        if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*' -or $_.Exception.Message -match 'cannot find|not found|No (matching )?MSFT_ScheduledTask') {
             return $null
         }
         throw
@@ -1223,7 +1224,8 @@ function Register-EvScheduledTask {
     $action = New-ScheduledTaskAction -Execute $Definition.Execute -Argument $Definition.Arguments -WorkingDirectory $Definition.WorkingDirectory
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $Definition.UserId
     $principal = New-ScheduledTaskPrincipal -UserId $Definition.UserId -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName $Definition.Name -TaskPath $Definition.TaskPath -Action $action -Trigger $trigger -Principal $principal -Description $Definition.Description -ErrorAction Stop | Out-Null
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-ScheduledTask -TaskName $Definition.Name -TaskPath $Definition.TaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $Definition.Description -ErrorAction Stop | Out-Null
 }
 
 function Remove-EvScheduledTask {

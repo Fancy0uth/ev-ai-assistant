@@ -327,7 +327,7 @@ describe('Today snapshot API', () => {
     expect(today.learningActions).toEqual([expect.objectContaining({ courseId, courseTitle: '机器学习', citationCount: 1, action: expect.objectContaining({ id: ids.action, kind: 'STUDY' }) })]);
   });
 
-  it('prepares one post-07:00 local recovery run without calling the Provider or SecretStore', async () => {
+  it('creates one post-07:00 local proposal without applying events or calling the Provider or SecretStore', async () => {
     const date = '2026-08-18';
     testDirectory = mkdtempSync(join(tmpdir(), 'ev-today-automation-'));
     const databasePath = join(testDirectory, 'app.sqlite');
@@ -371,8 +371,9 @@ describe('Today snapshot API', () => {
     });
     expect(awaiting.statusCode).toBe(200);
     expect(todaySnapshotSchema.parse(awaiting.json()).data.dailyPlan).toEqual({
-      status: 'AWAITING_CONTEXT_APPROVAL',
-      proposalId: null,
+      status: 'PENDING_REVIEW',
+      mode: 'LOCAL_RULES',
+      proposalId: expect.any(String),
       pendingItemCount: 0,
     });
     const repeated = await app.inject({
@@ -382,7 +383,7 @@ describe('Today snapshot API', () => {
     });
     expect(repeated.statusCode).toBe(200);
     expect(todaySnapshotSchema.parse(repeated.json()).data.dailyPlan.status).toBe(
-      'AWAITING_CONTEXT_APPROVAL',
+      'PENDING_REVIEW',
     );
     expect(providerCalls).toBe(0);
     expect(secretStore.unprotectCalls).toBe(unprotectCallsBeforeAutomation);
@@ -401,14 +402,16 @@ describe('Today snapshot API', () => {
         Number(
           database
             .prepare(
-              `select count(*) from daily_plan_preflights
-               join daily_plan_runs on daily_plan_runs.id = daily_plan_preflights.run_id
+              `select count(*) from daily_plan_proposals
+               join daily_plan_runs on daily_plan_runs.id = daily_plan_proposals.run_id
                where daily_plan_runs.owner_id = ? and daily_plan_runs.local_date = ?`,
             )
             .pluck()
             .get(ownerId, date),
         ),
       ).toBe(1);
+      expect(Number(database.prepare('select count(*) from events where owner_id = ?').pluck().get(ownerId))).toBe(0);
+      expect(database.prepare('select trigger from daily_plan_runs where owner_id = ? and local_date = ?').get(ownerId, date)).toEqual({ trigger: 'FIRST_VISIT_RECOVERY' });
     } finally {
       database.close();
     }

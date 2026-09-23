@@ -4,6 +4,8 @@ EV AI Assistant 是 Windows 本机运行、单 Owner 的个人每日控制台。
 
 ## 入口分工
 
+本轮仅交付服务器Core/Web与电脑浏览器操作，手机端退出MVP；正式范围以[PRD](PRD.md)和[MVP-SCOPE](product/MVP-SCOPE.md)最新修订为准。旧手机设计与V9历史记录不构成本轮手机交付要求。
+
 先读 [README](../README.md) 导航和 [AGENTS](../AGENTS.md) 边界，再读 [TECH_SPEC](TECH_SPEC.md)、[ARCHITECTURE](ARCHITECTURE.md)。数据库事实见 [DATABASE](DATABASE.md)，可调用接口见 [API](API.md)，启动及运维缺口见 [DEPLOYMENT](DEPLOYMENT.md)。[ROADMAP](../plans/ROADMAP.md) 管顺序，[TASKS](../plans/TASKS.md) 独占进度、小契约、证据和下一步。
 
 ## 基线与边界

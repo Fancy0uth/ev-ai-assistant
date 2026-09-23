@@ -112,6 +112,7 @@ export interface V07IdempotencyServiceOptions {
   newId?: () => string;
   newLeaseToken?: () => string;
   leaseMs?: number;
+  nutritionMatchLeaseMs?: number;
 }
 
 export function hashV07IdempotencyCommand(command: V07IdempotencyCommand): string {
@@ -232,7 +233,9 @@ export function createV07IdempotencyService(options: V07IdempotencyServiceOption
 
       const recordId = newId();
       const leaseToken = newLeaseToken();
-      const leaseExpiresAt = new Date(at.getTime() + leaseMs).toISOString();
+      const operationLeaseMs = command.operation === 'nutrition.meal_draft.match'
+        ? (options.nutritionMatchLeaseMs ?? leaseMs) : leaseMs;
+      const leaseExpiresAt = new Date(at.getTime() + operationLeaseMs).toISOString();
       insert.run(
         recordId,
         command.ownerId,

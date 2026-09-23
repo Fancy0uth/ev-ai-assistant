@@ -2388,6 +2388,340 @@ const migrations: readonly Migration[] = [
       end;
     `,
   },
+  {
+    version: 28,
+    name: 'add_immutable_fitness_catalog_storage',
+    sql: `
+      create table fitness_catalog_snapshots (
+        source_id text not null check (source_id = 'hasaneyldrm/exercises-dataset'),
+        revision text not null check (
+          length(revision) = 40
+          and revision = lower(revision)
+          and revision not glob '*[^0-9a-f]*'
+        ),
+        license_id text not null check (license_id = 'MIT'),
+        notice_ref text not null check (notice_ref = 'UPSTREAM_NOTICE_MEDIA_NOT_IMPORTED'),
+        catalog_hash text not null check (length(catalog_hash) = 64 and catalog_hash not glob '*[^0-9a-f]*'),
+        item_count integer not null check (item_count between 1 and 2000),
+        created_at text not null,
+        primary key (source_id, revision)
+      );
+
+      create table fitness_catalog_items (
+        source_id text not null,
+        revision text not null,
+        upstream_id text not null check (length(upstream_id) = 4 and upstream_id not glob '*[^0-9]*'),
+        name text not null check (length(name) between 1 and 240),
+        body_part text not null check (length(body_part) between 1 and 240),
+        equipment text not null check (length(equipment) between 1 and 240),
+        target text not null check (length(target) between 1 and 240),
+        secondary_muscles_json text not null check (json_valid(secondary_muscles_json)),
+        instructions_json text not null check (json_valid(instructions_json)),
+        safety_review text not null check (safety_review = 'UNREVIEWED'),
+        item_hash text not null check (length(item_hash) = 64 and item_hash not glob '*[^0-9a-f]*'),
+        created_at text not null,
+        primary key (source_id, revision, upstream_id),
+        foreign key (source_id, revision)
+          references fitness_catalog_snapshots(source_id, revision) on delete restrict
+      );
+
+      create index fitness_catalog_items_equipment_idx
+        on fitness_catalog_items(equipment, source_id, revision, upstream_id);
+      create index fitness_catalog_items_target_idx
+        on fitness_catalog_items(target, source_id, revision, upstream_id);
+      create index fitness_catalog_items_body_part_idx
+        on fitness_catalog_items(body_part, source_id, revision, upstream_id);
+
+      create table fitness_catalog_reviews (
+        review_id text primary key,
+        source_id text not null,
+        revision text not null,
+        upstream_id text not null,
+        item_hash text not null check (length(item_hash) = 64 and item_hash not glob '*[^0-9a-f]*'),
+        decision text not null check (decision in ('ELIGIBLE', 'REJECTED', 'REVOKED')),
+        reviewer_id text not null check (length(reviewer_id) between 1 and 120),
+        qualification_ref text not null check (length(qualification_ref) between 1 and 240),
+        evidence_ref text not null check (length(evidence_ref) between 1 and 240),
+        reviewed_at text not null,
+        impact text not null check (impact in ('UNKNOWN', 'LOW')),
+        scope_json text not null check (json_valid(scope_json)),
+        parameter_limits_json text not null check (json_valid(parameter_limits_json)),
+        supersedes_review_id text references fitness_catalog_reviews(review_id) on delete restrict,
+        created_at text not null,
+        foreign key (source_id, revision, upstream_id)
+          references fitness_catalog_items(source_id, revision, upstream_id) on delete restrict
+      );
+
+      create index fitness_catalog_reviews_item_active_idx
+        on fitness_catalog_reviews(source_id, revision, upstream_id, decision, reviewed_at desc, review_id desc);
+      create unique index fitness_catalog_reviews_supersedes_uidx
+        on fitness_catalog_reviews(supersedes_review_id)
+        where supersedes_review_id is not null;
+
+      create trigger fitness_catalog_reviews_v28_validate_item_before_insert
+      before insert on fitness_catalog_reviews
+      when not exists (
+        select 1 from fitness_catalog_items
+        where source_id = new.source_id
+          and revision = new.revision
+          and upstream_id = new.upstream_id
+          and item_hash = new.item_hash
+      )
+      begin
+        select raise(abort, 'fitness catalog review item hash mismatch');
+      end;
+
+      create trigger fitness_catalog_snapshots_v28_immutable_update
+      before update on fitness_catalog_snapshots
+      begin
+        select raise(abort, 'fitness catalog snapshots are immutable');
+      end;
+      create trigger fitness_catalog_snapshots_v28_immutable_delete
+      before delete on fitness_catalog_snapshots
+      begin
+        select raise(abort, 'fitness catalog snapshots are immutable');
+      end;
+      create trigger fitness_catalog_items_v28_immutable_update
+      before update on fitness_catalog_items
+      begin
+        select raise(abort, 'fitness catalog items are immutable');
+      end;
+      create trigger fitness_catalog_items_v28_immutable_delete
+      before delete on fitness_catalog_items
+      begin
+        select raise(abort, 'fitness catalog items are immutable');
+      end;
+      create trigger fitness_catalog_reviews_v28_immutable_update
+      before update on fitness_catalog_reviews
+      begin
+        select raise(abort, 'fitness catalog reviews are immutable');
+      end;
+      create trigger fitness_catalog_reviews_v28_immutable_delete
+      before delete on fitness_catalog_reviews
+      begin
+        select raise(abort, 'fitness catalog reviews are immutable');
+      end;
+    `,
+  },
+  {
+    version: 29,
+    name: 'add_v2_workout_capability_runs',
+    sql: `
+      create table v07_capability_runs_v29 (
+        id text primary key,
+        owner_id text not null references owners(id) on delete cascade,
+        capability text not null check (capability in ('WORKOUT_TEXT_SELECTION', 'MEAL_CANDIDATE_PARSE', 'NUTRITION_DATA_LOOKUP', 'WORKOUT_DETAILED_PLANNING')),
+        operation text not null check (length(operation) between 1 and 120),
+        resource_id text not null,
+        provider_id text,
+        provider_label text not null check (length(provider_label) between 1 and 120),
+        adapter_kind text not null check (adapter_kind in ('NONE', 'TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'PRODUCTION_ADAPTER')),
+        evidence_kind text not null check (evidence_kind in ('NONE', 'AUTOMATED_TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'REAL_PROVIDER')),
+        disclosure_json text not null check (json_valid(disclosure_json)),
+        disclosure_version text not null check (disclosure_version in ('HEALTH_DISCLOSURE_V1', 'HEALTH_DISCLOSURE_V2')),
+        idempotency_key text,
+        request_hash text check (request_hash is null or length(request_hash) = 64),
+        state text not null check (state in ('BLOCKED_PROVIDER', 'AWAITING_DISCLOSURE', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+        lease_token text,
+        lease_expires_at text,
+        deadline_at text,
+        policy_version text not null check (policy_version = 'HEALTH_CAPABILITY_POLICY_V1'),
+        local_date text not null,
+        reserved_calls integer not null default 0 check (reserved_calls between 0 and 5),
+        actual_calls integer not null default 0 check (actual_calls between 0 and 5),
+        input_bytes integer not null default 0 check (input_bytes between 0 and 24000),
+        output_bytes integer not null default 0 check (output_bytes between 0 and 12000),
+        failure_code text,
+        nutrition_source_version text,
+        nutrition_dataset_hash text check (nutrition_dataset_hash is null or length(nutrition_dataset_hash) = 64),
+        app_version text not null check (length(app_version) between 5 and 64),
+        created_at text not null,
+        updated_at text not null,
+        version integer not null check (version >= 1)
+      );
+
+      insert into v07_capability_runs_v29 (
+        id, owner_id, capability, operation, resource_id, provider_id, provider_label, adapter_kind,
+        evidence_kind, disclosure_json, disclosure_version, idempotency_key, request_hash, state,
+        lease_token, lease_expires_at, deadline_at, policy_version, local_date, reserved_calls,
+        actual_calls, input_bytes, output_bytes, failure_code, nutrition_source_version,
+        nutrition_dataset_hash, app_version, created_at, updated_at, version
+      ) select
+        id, owner_id, capability, operation, resource_id, provider_id, provider_label, adapter_kind,
+        evidence_kind, disclosure_json, disclosure_version, idempotency_key, request_hash, state,
+        lease_token, lease_expires_at, deadline_at, policy_version, local_date, reserved_calls,
+        actual_calls, input_bytes, output_bytes, failure_code, nutrition_source_version,
+        nutrition_dataset_hash, app_version, created_at, updated_at, version
+      from v07_capability_runs;
+
+      drop trigger workout_revisions_v2_v21_owner_insert;
+      drop trigger meal_revisions_v2_v21_owner_insert;
+      drop trigger nutrition_food_snapshots_v2_v21_owner_insert;
+      drop table v07_capability_runs;
+      alter table v07_capability_runs_v29 rename to v07_capability_runs;
+
+      create unique index v07_capability_runs_owner_idempotency_idx
+        on v07_capability_runs(owner_id, idempotency_key) where idempotency_key is not null;
+      create index v07_capability_runs_owner_date_capability_idx
+        on v07_capability_runs(owner_id, local_date, capability, state, created_at);
+      create unique index v07_capability_runs_v21_id_owner_uidx
+        on v07_capability_runs(id, owner_id);
+
+      create trigger v07_capability_runs_v21_owner_immutable
+      before update of owner_id on v07_capability_runs
+      when new.owner_id <> old.owner_id
+      begin
+        select raise(abort, 'v0.7 owner lineage violation');
+      end;
+
+      create trigger workout_revisions_v2_v21_owner_insert
+      before insert on workout_revisions_v2
+      begin
+        select case when not exists (
+          select 1 from workouts_v2 where id = new.workout_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.parent_revision_id is not null and not exists (
+          select 1 from workout_revisions_v2
+          where id = new.parent_revision_id and owner_id = new.owner_id and workout_id = new.workout_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.capability_run_id is not null and not exists (
+          select 1 from v07_capability_runs where id = new.capability_run_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger meal_revisions_v2_v21_owner_insert
+      before insert on meal_revisions_v2
+      begin
+        select case when not exists (
+          select 1 from meal_drafts_v2 where id = new.draft_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.parent_revision_id is not null and not exists (
+          select 1 from meal_revisions_v2
+          where id = new.parent_revision_id and owner_id = new.owner_id and draft_id = new.draft_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.capability_run_id is not null and not exists (
+          select 1 from v07_capability_runs where id = new.capability_run_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+
+      create trigger nutrition_food_snapshots_v2_v21_owner_insert
+      before insert on nutrition_food_snapshots_v2
+      begin
+        select case when not exists (
+          select 1 from meal_drafts_v2 where id = new.draft_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when not exists (
+          select 1 from nutrition_source_snapshots_v2
+          where id = new.source_snapshot_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+        select case when new.capability_run_id is not null and not exists (
+          select 1 from v07_capability_runs where id = new.capability_run_id and owner_id = new.owner_id
+        ) then raise(abort, 'v0.7 owner lineage violation') end;
+      end;
+    `,
+  },
+  {
+    version: 30,
+    name: 'add_workout_planning_context_and_v2_citations',
+    sql: `
+      alter table workout_revisions_v2 add column revision_schema text not null default 'WORKOUT_PLAN_V1'
+        check (revision_schema in ('WORKOUT_PLAN_V1', 'WORKOUT_PLAN_V2'));
+      create table fitness_planning_profiles (
+        owner_id text primary key references owners(id),
+        version integer not null check (version >= 1),
+        profile_json text not null check (json_valid(profile_json) and length(cast(profile_json as blob)) <= 12000),
+        updated_at text not null
+      );
+      create table fitness_planning_previews (
+        owner_id text not null references owners(id),
+        context_hash text not null check (length(context_hash) = 64),
+        selection_json text not null check (json_valid(selection_json) and length(cast(selection_json as blob)) <= 8000),
+        created_at text not null,
+        expires_at text not null,
+        primary key (owner_id, context_hash)
+      );
+      create index fitness_planning_previews_owner_expiry on fitness_planning_previews(owner_id, expires_at);
+      create trigger fitness_planning_previews_bound before insert on fitness_planning_previews
+      when not exists (select 1 from fitness_planning_previews where owner_id = new.owner_id and context_hash = new.context_hash)
+        and (select count(*) from fitness_planning_previews where owner_id = new.owner_id) >= 20
+      begin select raise(abort, 'fitness preview capacity exceeded'); end;
+      create table workout_planning_citations (
+        owner_id text not null references owners(id),
+        revision_id text not null,
+        citation_id text not null check (length(citation_id) = 64),
+        position integer not null check (position between 0 and 4),
+        snapshot_json text not null check (json_valid(snapshot_json) and length(cast(snapshot_json as blob)) <= 24000),
+        primary key (revision_id, citation_id),
+        unique (revision_id, position),
+        foreign key (revision_id, owner_id) references workout_revisions_v2(id, owner_id)
+      );
+      create trigger workout_planning_citations_bound before insert on workout_planning_citations
+      begin
+        select case when not exists (select 1 from workout_revisions_v2 where id = new.revision_id
+          and owner_id = new.owner_id and revision_schema = 'WORKOUT_PLAN_V2')
+          then raise(abort, 'V2 citation revision mismatch') end;
+        select case when coalesce((select sum(length(cast(snapshot_json as blob))) from workout_planning_citations
+          where revision_id = new.revision_id), 0) + length(cast(new.snapshot_json as blob)) > 24000
+          then raise(abort, 'V2 citation bytes exceeded') end;
+      end;
+      create trigger workout_planning_citations_immutable_update before update on workout_planning_citations
+      begin select raise(abort, 'V2 citations are immutable'); end;
+      create trigger workout_planning_citations_immutable_delete before delete on workout_planning_citations
+      begin select raise(abort, 'V2 citations are immutable'); end;
+    `,
+  },
+  {
+    version: 31,
+    name: 'add_nutrition_provider_credentials',
+    sql: `
+      create table nutrition_provider_credentials (
+        owner_id text primary key references owners(id) on delete cascade,
+        provider_key text not null check (provider_key = 'USDA_FDC'),
+        protected_value text not null,
+        updated_at text not null
+      );
+    `,
+  },
+  {
+    version: 32,
+    name: 'add_owner_scoped_nutrition_web_cache',
+    sql: `
+      create table nutrition_web_cache_v32 (
+        owner_id text not null references owners(id) on delete cascade,
+        cache_key text not null check (length(cache_key) = 64 and cache_key not glob '*[^0-9a-f]*'),
+        normalized_query text not null check (length(normalized_query) between 1 and 500),
+        serving_unit text not null check (serving_unit in ('GRAM', 'MILLILITER', 'ITEM')),
+        adapter_version text not null check (length(adapter_version) between 1 and 120),
+        record_json text not null check (json_valid(record_json) and length(cast(record_json as blob)) between 1 and 4000),
+        evidence_json text not null check (json_valid(evidence_json) and length(cast(evidence_json as blob)) between 1 and 6000),
+        created_at text not null,
+        expires_at text not null,
+        primary key (owner_id, cache_key)
+      );
+      create index nutrition_web_cache_v32_owner_expiry
+        on nutrition_web_cache_v32(owner_id, expires_at, created_at);
+      create trigger nutrition_web_cache_v32_insert_entry_bound
+      before insert on nutrition_web_cache_v32
+      when (select count(*) from nutrition_web_cache_v32 where owner_id = new.owner_id) >= 100
+      begin select raise(abort, 'nutrition web cache entry capacity exceeded'); end;
+      create trigger nutrition_web_cache_v32_insert_bytes_bound
+      before insert on nutrition_web_cache_v32
+      when coalesce((select sum(length(cast(record_json as blob)) + length(cast(evidence_json as blob)))
+        from nutrition_web_cache_v32 where owner_id = new.owner_id), 0)
+        + length(cast(new.record_json as blob)) + length(cast(new.evidence_json as blob)) > 800000
+      begin select raise(abort, 'nutrition web cache byte capacity exceeded'); end;
+      create trigger nutrition_web_cache_v32_owner_immutable
+      before update of owner_id on nutrition_web_cache_v32
+      when new.owner_id <> old.owner_id
+      begin select raise(abort, 'nutrition web cache owner is immutable'); end;
+      create trigger nutrition_web_cache_v32_update_bytes_bound
+      before update of record_json, evidence_json on nutrition_web_cache_v32
+      when coalesce((select sum(length(cast(record_json as blob)) + length(cast(evidence_json as blob)))
+        from nutrition_web_cache_v32 where owner_id = new.owner_id and cache_key <> old.cache_key), 0)
+        + length(cast(new.record_json as blob)) + length(cast(new.evidence_json as blob)) > 800000
+      begin select raise(abort, 'nutrition web cache byte capacity exceeded'); end;
+    `,
+  },
 ];
 
 export function runMigrations(

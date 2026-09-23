@@ -16,6 +16,39 @@ import {
   workoutSchema,
 } from '@ev/contracts';
 import type Database from 'better-sqlite3';
+import * as z from 'zod';
+import { workoutPlanningCandidateV2Schema, workoutPlanningProfileV2Schema, workoutRevisionV2Schema,
+  type WorkoutPlanningProfileV2, type WorkoutPlanningFeedbackContextV2, type WorkoutRevisionV2 } from '@ev/contracts';
+import { ApiError } from '../../http/api-error';
+
+// Strict technical snapshots deliberately exclude health context and memory/feedback text.
+export const workoutCandidateSnapshotSchema = z.object({
+  candidate: workoutPlanningCandidateV2Schema,
+  name: z.string().trim().min(1).max(240),
+  instructions: z.array(z.string().trim().min(1).max(600)).min(1).max(10),
+}).strict();
+export type WorkoutCandidateSnapshot = z.infer<typeof workoutCandidateSnapshotSchema>;
+export interface WorkoutRevisionDetailV2 { revision: WorkoutRevisionV2; citations: WorkoutCandidateSnapshot[] }
+export interface FitnessMemoryMetadata {
+  id: string; version: number; scopeType: 'FITNESS' | 'DOMAIN'; scopeId: string; characters: number;
+}
+export interface WorkoutRevisionWriteV2 {
+  ownerId: string; revision: WorkoutRevisionV2; citations: WorkoutCandidateSnapshot[];
+}
+export interface FitnessPlanningRepository {
+  readProfile(ownerId: string): WorkoutPlanningProfileV2 | undefined;
+  saveProfile(ownerId: string, input: { expectedVersion: number | null; profile: Omit<WorkoutPlanningProfileV2, 'version'> }, now: string): WorkoutPlanningProfileV2;
+  listRecentFeedback(ownerId: string, now: string): WorkoutPlanningFeedbackContextV2[];
+  hasRecentPain(ownerId: string, now: string): boolean;
+  listSelectableCurrentFitnessMemory(ownerId: string): FitnessMemoryMetadata[];
+  readCurrentFitnessMemory(ownerId: string, id: string): (FitnessMemoryMetadata & { content: string }) | undefined;
+  savePreview(ownerId: string, hash: string, selection: unknown, now: string, expiresAt: string): void;
+  readPreview(ownerId: string, hash: string, now: string): unknown | undefined;
+  createWorkoutWithRevisionV2(input: WorkoutRevisionWriteV2 & { workout: Workout }): { workout: Workout; revision: WorkoutRevisionV2 };
+  appendWorkoutRevisionV2(input: WorkoutRevisionWriteV2 & { workoutId: string; expectedVersion: number; updatedAt: string }): { workout: Workout; revision: WorkoutRevisionV2 } | undefined;
+  findWorkoutRevisionV2(ownerId: string, id: string): WorkoutRevisionDetailV2 | undefined;
+  currentRevisionSchema(ownerId: string, workoutId: string): 'WORKOUT_PLAN_V1' | 'WORKOUT_PLAN_V2' | undefined;
+}
 
 export class WorkoutProposalStateConflictError extends Error {
   constructor() {
@@ -123,14 +156,15 @@ function toRevision(row: RevisionRow): WorkoutRevision {
   });
 }
 
-export interface FitnessRepository {
+export interface FitnessRepository extends FitnessPlanningRepository {
   transaction<T>(operation: () => T): T;
   createCheckIn(input: { ownerId: string; checkIn: FitnessCheckIn; raw: CreateFitnessCheckInInput }): FitnessCheckIn;
   listCheckIns(ownerId: string, query: { localDate?: string; eligibility?: 'BLOCKED' | 'ELIGIBLE'; page: number; pageSize: number }): { items: FitnessCheckIn[]; total: number };
   findCheckIn(ownerId: string, id: string): FitnessCheckIn | undefined;
+  findLatestEffectiveCheckIn(ownerId: string, at: string): FitnessCheckIn | undefined;
   createWorkoutWithRevision(input: { ownerId: string; workout: Workout; revision: WorkoutRevision; catalog: { id: string; version: string; hash: string } }): { workout: Workout; revision: WorkoutRevision };
   appendWorkoutRevision(input: { ownerId: string; workoutId: string; expectedVersion: number; revision: WorkoutRevision; catalog: { id: string; version: string; hash: string }; updatedAt: string }): { workout: Workout; revision: WorkoutRevision } | undefined;
-  listWorkouts(ownerId: string, query: { state?: Workout['state']; localDate?: string; page: number; pageSize: number }): { items: Workout[]; total: number };
+  listWorkouts(ownerId: string, query: { state?: Workout['state']; localDate?: string; page: number; pageSize: number; revisionSchema?: 'WORKOUT_PLAN_V1' | 'WORKOUT_PLAN_V2' }): { items: Workout[]; total: number };
   findWorkout(ownerId: string, id: string): Workout | undefined;
   findWorkoutRevision(ownerId: string, id: string): WorkoutRevision | undefined;
   createWorkoutProposal(input: { ownerId: string; workoutId: string; expectedVersion: number; revisionId: string; proposal: Proposal; updatedAt: string }): Workout;
@@ -151,6 +185,169 @@ export interface FitnessRepository {
     activitySessionId: string;
     now: string;
   }): { workout: Workout; feedback: Record<string, unknown>; action: Action; activitySession: ActivitySession | null } | undefined;
+}
+
+function planningConflict(): never {
+  throw new ApiError(409, 'WORKOUT_CONTEXT_CHANGED', '训练依据已变化，请重新预览');
+}
+
+function createPlanningRepository(db: Database.Database): FitnessPlanningRepository {
+  const readProfile = (ownerId: string): WorkoutPlanningProfileV2 | undefined => {
+    const row = db.prepare('select profile_json from fitness_planning_profiles where owner_id = ?').get(ownerId) as { profile_json: string } | undefined;
+    return row ? workoutPlanningProfileV2Schema.parse(JSON.parse(row.profile_json)) : undefined;
+  };
+  // Join only the current document to its exact revision. Deletion never falls back to history.
+  const memorySql = `
+    select r.id, d.version, 'FITNESS' as scopeType, d.scope_id as scopeId, length(d.content) as characters
+    from entity_memory_documents d join entity_memory_revisions r
+      on r.document_id = d.id and r.owner_id = d.owner_id and r.version = d.version
+      and r.scope_type = d.scope_type and r.scope_id = d.scope_id and r.content = d.content
+    where d.owner_id = ? and d.scope_type = 'FITNESS' and d.scope_id = ?
+    union all
+    select r.id, d.version, 'DOMAIN' as scopeType, 'FITNESS' as scopeId, length(d.content) as characters
+    from memory_documents d join memory_revisions r
+      on r.owner_id = d.owner_id and r.scope = d.scope and r.version = d.version and r.content = d.content
+    where d.owner_id = ? and d.scope = 'FITNESS'
+    limit 2`;
+  const listMemory = (ownerId: string) => db.prepare(memorySql).all(ownerId, ownerId, ownerId) as FitnessMemoryMetadata[];
+  const writeRevision = (input: WorkoutRevisionWriteV2) => {
+    const revision = workoutRevisionV2Schema.parse(input.revision);
+    const citations = z.array(workoutCandidateSnapshotSchema).min(1).max(5).parse(input.citations);
+    if (Buffer.byteLength(JSON.stringify(citations)) > 24000) throw new ApiError(413, 'WORKOUT_CITATIONS_TOO_LARGE', '候选快照超限');
+    const ids = citations.map((snapshot) => snapshot.candidate.citationId);
+    const used = [...revision.items, ...revision.alternatives.map((entry) => entry.item)].map((item) => item.citationId);
+    const references = revision.contextReceipt.candidateReferences;
+    if (new Set(ids).size !== ids.length || used.some((id) => !ids.includes(id))
+      || references.length !== citations.length
+      || references.some((ref) => !citations.some(({ candidate }) =>
+        ref.citationId === candidate.citationId && ref.sourceKind === candidate.sourceKind &&
+        ref.source === candidate.source && ref.version === candidate.version &&
+        ref.hash === candidate.hash && ref.itemHash === candidate.itemHash))) {
+      throw new ApiError(422, 'WORKOUT_CITATION_MISMATCH', '计划引用不完整');
+    }
+    const origin = revision.provenance.at(-1)!;
+    db.prepare(`insert into workout_revisions_v2 (
+      id, owner_id, workout_id, parent_revision_id, revision_no, title, rationale, plan_json,
+      catalog_id, catalog_version, catalog_hash, content_hash, created_by, capability_run_id, created_at, revision_schema
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, 'WORKOUT_PLANNING_V2', ?, ?, ?, ?, ?, ?, 'WORKOUT_PLAN_V2')`).run(
+      revision.id, input.ownerId, revision.workoutId, revision.parentRevisionId, revision.revisionNo,
+      revision.title, revision.rationale, JSON.stringify(revision), revision.policyVersion,
+      revision.contextReceipt.contextHash, revision.contentHash,
+      origin.kind === 'MODEL_SELECTION' ? 'MODEL' : origin.kind === 'OWNER_EDIT' ? 'OWNER' : 'RULES',
+      origin.capabilityRunId, revision.createdAt,
+    );
+    const insert = db.prepare('insert into workout_planning_citations (owner_id, revision_id, citation_id, position, snapshot_json) values (?, ?, ?, ?, ?)');
+    citations.forEach((snapshot, position) => insert.run(input.ownerId, revision.id, snapshot.candidate.citationId, position, JSON.stringify(snapshot)));
+    return revision;
+  };
+  return {
+    readProfile,
+    saveProfile(ownerId, input, now) {
+      return db.transaction(() => {
+        const current = readProfile(ownerId);
+        if (input.expectedVersion !== (current?.version ?? null)) planningConflict();
+        const profile = workoutPlanningProfileV2Schema.parse({ ...input.profile, version: (current?.version ?? 0) + 1 });
+        if (current) {
+          if (db.prepare('update fitness_planning_profiles set version = ?, profile_json = ?, updated_at = ? where owner_id = ? and version = ?')
+            .run(profile.version, JSON.stringify(profile), now, ownerId, input.expectedVersion).changes !== 1) planningConflict();
+        } else db.prepare('insert into fitness_planning_profiles (owner_id, version, profile_json, updated_at) values (?, ?, ?, ?)')
+          .run(ownerId, profile.version, JSON.stringify(profile), now);
+        return profile;
+      })();
+    },
+    listRecentFeedback(ownerId, now) {
+      const rows = db.prepare(`select f.id, f.workout_id, w.current_revision_id, f.outcome, f.perceived_effort,
+        f.had_pain, f.note, f.started_at, f.ended_at from workout_feedback_v2 f
+        join workouts_v2 w on w.id = f.workout_id and w.owner_id = f.owner_id
+        where f.owner_id = ? and f.created_at >= ? and f.created_at <= ?
+        order by f.created_at desc, f.id desc limit 5`).all(ownerId, new Date(Date.parse(now) - 14 * 86400000).toISOString(), now) as Array<{
+          id: string; workout_id: string; current_revision_id: string; outcome: 'COMPLETED' | 'SKIPPED';
+          perceived_effort: number | null; had_pain: number; note: string | null; started_at: string | null; ended_at: string | null;
+        }>;
+      return rows.map((row) => ({
+        workoutId: row.workout_id, revisionId: row.current_revision_id, feedbackId: row.id, outcome: row.outcome,
+        perceivedEffort: row.perceived_effort, hadPain: row.had_pain === 1, note: row.note,
+        actualDurationSeconds: row.started_at && row.ended_at ? (Date.parse(row.ended_at) - Date.parse(row.started_at)) / 1000 : null,
+      }));
+    },
+    hasRecentPain(ownerId, now) {
+      return !!db.prepare(`select 1 from workout_feedback_v2 where owner_id = ? and had_pain = 1
+        and created_at >= ? and created_at <= ? limit 1`)
+        .get(ownerId, new Date(Date.parse(now) - 14 * 86400000).toISOString(), now);
+    },
+    listSelectableCurrentFitnessMemory: listMemory,
+    readCurrentFitnessMemory(ownerId, id) {
+      const metadata = listMemory(ownerId).find((entry) => entry.id === id);
+      if (!metadata) return undefined;
+      if (metadata.characters > 2000) throw new ApiError(413, 'WORKOUT_MEMORY_TOO_LARGE', '记忆超过上下文上限');
+      const row = metadata.scopeType === 'FITNESS'
+        ? db.prepare(`select d.content from entity_memory_documents d join entity_memory_revisions r
+          on r.document_id = d.id and r.version = d.version and r.owner_id = d.owner_id
+          where d.owner_id = ? and d.scope_type = 'FITNESS' and d.scope_id = ? and r.id = ?`).get(ownerId, ownerId, id)
+        : db.prepare(`select d.content from memory_documents d join memory_revisions r
+          on r.owner_id = d.owner_id and r.scope = d.scope and r.version = d.version
+          where d.owner_id = ? and d.scope = 'FITNESS' and r.id = ?`).get(ownerId, id);
+      return row ? { ...metadata, content: (row as { content: string }).content } : undefined;
+    },
+    savePreview(ownerId, hash, selection, now, expiresAt) {
+      db.transaction(() => {
+        db.prepare('delete from fitness_planning_previews where owner_id = ? and expires_at <= ?').run(ownerId, now);
+        db.prepare(`delete from fitness_planning_previews where owner_id = ? and context_hash in (
+          select context_hash from fitness_planning_previews where owner_id = ? order by created_at desc, context_hash desc limit -1 offset 19)`).run(ownerId, ownerId);
+        db.prepare(`insert into fitness_planning_previews (owner_id, context_hash, selection_json, created_at, expires_at)
+          values (?, ?, ?, ?, ?) on conflict(owner_id, context_hash) do update
+          set selection_json = excluded.selection_json, created_at = excluded.created_at, expires_at = excluded.expires_at`)
+          .run(ownerId, hash, JSON.stringify(selection), now, expiresAt);
+      })();
+    },
+    readPreview(ownerId, hash, now) {
+      const row = db.prepare('select selection_json from fitness_planning_previews where owner_id = ? and context_hash = ? and expires_at > ?')
+        .get(ownerId, hash, now) as { selection_json: string } | undefined;
+      return row ? JSON.parse(row.selection_json) as unknown : undefined;
+    },
+    createWorkoutWithRevisionV2(input) {
+      return db.transaction(() => {
+        const workout = workoutSchema.parse(input.workout);
+        if (input.revision.workoutId !== workout.id || workout.currentRevisionId !== input.revision.id ||
+          input.revision.parentRevisionId !== null || input.revision.revisionNo !== 1 || workout.state !== 'DRAFT') planningConflict();
+        db.prepare(`insert into workouts_v2 (id, owner_id, check_in_id, signal_id, generation_mode, state,
+          current_revision_id, proposal_id, action_id, time_request_id, feedback_id, version, created_at, updated_at)
+          values (?, ?, ?, ?, ?, 'DRAFT', null, null, null, null, null, ?, ?, ?)`).run(
+            workout.id, input.ownerId, workout.checkInId, workout.signalId, workout.generationMode, workout.version, workout.createdAt, workout.updatedAt);
+        const revision = writeRevision(input);
+        db.prepare('update workouts_v2 set current_revision_id = ? where id = ? and owner_id = ?').run(revision.id, workout.id, input.ownerId);
+        return { workout, revision };
+      })();
+    },
+    appendWorkoutRevisionV2(input) {
+      return db.transaction(() => {
+        const row = db.prepare('select * from workouts_v2 where owner_id = ? and id = ?').get(input.ownerId, input.workoutId) as WorkoutRow | undefined;
+        if (!row || row.version !== input.expectedVersion || row.state !== 'DRAFT') return undefined;
+        const parent = db.prepare('select revision_no from workout_revisions_v2 where owner_id = ? and id = ? and workout_id = ?')
+          .get(input.ownerId, row.current_revision_id, row.id) as { revision_no: number } | undefined;
+        if (!parent || input.revision.workoutId !== row.id || input.revision.parentRevisionId !== row.current_revision_id ||
+          input.revision.revisionNo !== parent.revision_no + 1) planningConflict();
+        const revision = writeRevision(input);
+        if (db.prepare(`update workouts_v2 set current_revision_id = ?, updated_at = ?, version = version + 1
+          where owner_id = ? and id = ? and version = ? and state = 'DRAFT'`).run(revision.id, input.updatedAt, input.ownerId, row.id, input.expectedVersion).changes !== 1) planningConflict();
+        return { workout: toWorkout({ ...row, current_revision_id: revision.id, updated_at: input.updatedAt, version: row.version + 1 }), revision };
+      })();
+    },
+    findWorkoutRevisionV2(ownerId, id) {
+      const row = db.prepare("select plan_json from workout_revisions_v2 where owner_id = ? and id = ? and revision_schema = 'WORKOUT_PLAN_V2'")
+        .get(ownerId, id) as { plan_json: string } | undefined;
+      if (!row) return undefined;
+      const citations = db.prepare('select snapshot_json from workout_planning_citations where owner_id = ? and revision_id = ? order by position limit 5')
+        .all(ownerId, id) as Array<{ snapshot_json: string }>;
+      return { revision: workoutRevisionV2Schema.parse(JSON.parse(row.plan_json)), citations: citations.map((entry) => workoutCandidateSnapshotSchema.parse(JSON.parse(entry.snapshot_json))) };
+    },
+    currentRevisionSchema(ownerId, workoutId) {
+      const row = db.prepare(`select r.revision_schema from workouts_v2 w join workout_revisions_v2 r
+        on r.id = w.current_revision_id and r.owner_id = w.owner_id and r.workout_id = w.id
+        where w.owner_id = ? and w.id = ?`).get(ownerId, workoutId) as { revision_schema: 'WORKOUT_PLAN_V1' | 'WORKOUT_PLAN_V2' } | undefined;
+      return row?.revision_schema;
+    },
+  };
 }
 
 export function createFitnessRepository(database: Database.Database): FitnessRepository {
@@ -265,6 +462,7 @@ export function createFitnessRepository(database: Database.Database): FitnessRep
   };
 
   return {
+    ...createPlanningRepository(database),
     transaction(operation) {
       return database.transaction(operation)();
     },
@@ -302,6 +500,13 @@ export function createFitnessRepository(database: Database.Database): FitnessRep
       const row = findCheckIn.get(ownerId, id) as CheckInRow | undefined;
       return row ? toCheckIn(row) : undefined;
     },
+    findLatestEffectiveCheckIn(ownerId, at) {
+      // Check-ins are append-only. Equal server timestamps use insertion order, never random UUID order.
+      const row = database.prepare(`select ${checkInColumns} from fitness_check_ins_v2
+        where owner_id = ? and created_at <= ?
+        order by created_at desc, rowid desc limit 1`).get(ownerId, at) as CheckInRow | undefined;
+      return row ? toCheckIn(row) : undefined;
+    },
     createWorkoutWithRevision(input) {
       return database.transaction(() => {
         insertWorkout.run(
@@ -335,6 +540,10 @@ export function createFitnessRepository(database: Database.Database): FitnessRep
       const params: Array<string | number> = [ownerId];
       if (query.state) { filters.push('w.state = ?'); params.push(query.state); }
       if (query.localDate) { filters.push('c.local_date = ?'); params.push(query.localDate); }
+      if (query.revisionSchema) {
+        filters.push('exists (select 1 from workout_revisions_v2 r where r.owner_id = w.owner_id and r.workout_id = w.id and r.id = w.current_revision_id and r.revision_schema = ?)');
+        params.push(query.revisionSchema);
+      }
       const where = filters.join(' and ');
       const total = (database.prepare(`select count(*) as count from workouts_v2 w join fitness_check_ins_v2 c on c.id = w.check_in_id and c.owner_id = w.owner_id where ${where}`).get(...params) as { count: number }).count;
       const rows = database.prepare(`select ${workoutColumns.split(', ').map((column) => `w.${column}`).join(', ')} from workouts_v2 w join fitness_check_ins_v2 c on c.id = w.check_in_id and c.owner_id = w.owner_id where ${where} order by w.updated_at desc, w.id asc limit ? offset ?`)

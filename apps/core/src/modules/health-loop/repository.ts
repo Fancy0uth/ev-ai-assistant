@@ -3,7 +3,10 @@ import type Database from 'better-sqlite3';
 export type V07Capability =
   | 'WORKOUT_TEXT_SELECTION'
   | 'MEAL_CANDIDATE_PARSE'
-  | 'NUTRITION_DATA_LOOKUP';
+  | 'NUTRITION_DATA_LOOKUP'
+  | 'WORKOUT_DETAILED_PLANNING';
+
+export type V07DisclosureVersion = 'HEALTH_DISCLOSURE_V1' | 'HEALTH_DISCLOSURE_V2';
 
 export type V07CapabilityRunState =
   | 'BLOCKED_PROVIDER'
@@ -20,6 +23,7 @@ export interface V07CapabilityRun {
   resourceId: string;
   idempotencyKey: string | null;
   requestHash: string | null;
+  disclosureVersion: V07DisclosureVersion;
   state: V07CapabilityRunState;
   leaseToken: string | null;
   leaseExpiresAt: string | null;
@@ -51,6 +55,7 @@ export interface V07HealthLoopRepository {
     adapterKind: 'NONE' | 'TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'PRODUCTION_ADAPTER';
     evidenceKind: 'NONE' | 'AUTOMATED_TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'REAL_PROVIDER';
     disclosure: unknown;
+    disclosureVersion?: V07DisclosureVersion;
     status: 'BLOCKED_PROVIDER' | 'AWAITING_DISCLOSURE';
     localDate: string;
     appVersion: string;
@@ -68,6 +73,7 @@ export interface V07HealthLoopRepository {
     providerLabel: string;
     adapterKind: 'TEST_FIXTURE' | 'APPROVED_LOCAL_DATASET' | 'PRODUCTION_ADAPTER';
     disclosure: unknown;
+    disclosureVersion?: V07DisclosureVersion;
     localDate: string;
     appVersion: string;
     idempotencyKey: string;
@@ -75,6 +81,7 @@ export interface V07HealthLoopRepository {
     leaseToken: string;
     leaseExpiresAt: string;
     deadlineAt: string;
+    reservedCalls?: 0 | 1;
     createdAt: string;
     nutritionSourceVersion?: string | null;
     nutritionDatasetHash?: string | null;
@@ -115,6 +122,7 @@ export interface V07HealthLoopRepository {
   failExpiredCapabilityRunByIdempotencyKey(ownerId: string, key: string, now: string): boolean;
   sweepExpiredCapabilityRuns(now: string): number;
   countReservedCalls(ownerId: string, localDate: string, capability: V07Capability): number;
+  countReservedWorkoutCalls(ownerId: string, localDate: string): number;
   appendAudit(input: {
     id: string;
     ownerId: string;
@@ -158,6 +166,7 @@ function toRun(row: {
   resource_id: string;
   idempotency_key: string | null;
   request_hash: string | null;
+  disclosure_version: V07DisclosureVersion;
   state: V07CapabilityRunState;
   lease_token: string | null;
   lease_expires_at: string | null;
@@ -184,6 +193,7 @@ function toRun(row: {
     resourceId: row.resource_id,
     idempotencyKey: row.idempotency_key,
     requestHash: row.request_hash,
+    disclosureVersion: row.disclosure_version,
     state: row.state,
     leaseToken: row.lease_token,
     leaseExpiresAt: row.lease_expires_at,
@@ -206,7 +216,7 @@ function toRun(row: {
 
 export function createV07HealthLoopRepository(database: Database.Database): V07HealthLoopRepository {
   const runColumns = `id, owner_id, capability, operation, resource_id, idempotency_key,
-    request_hash, state, lease_token, lease_expires_at, reserved_calls, actual_calls, provider_id,
+    request_hash, disclosure_version, state, lease_token, lease_expires_at, reserved_calls, actual_calls, provider_id,
     provider_label, adapter_kind, evidence_kind, input_bytes, output_bytes, failure_code, local_date,
     nutrition_source_version, nutrition_dataset_hash, app_version, version`;
   const findCapabilityRun = database.prepare(
@@ -221,7 +231,7 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
     lease_token, lease_expires_at, deadline_at, policy_version, local_date, reserved_calls,
     actual_calls, input_bytes, output_bytes, failure_code, nutrition_source_version,
     nutrition_dataset_hash, app_version, created_at, updated_at, version
-  ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'HEALTH_DISCLOSURE_V1', null, null, ?, null, null,
+  ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, ?, null, null,
     null, 'HEALTH_CAPABILITY_POLICY_V1', ?, 0, 0, 0, 0, null, ?, ?, ?, ?, ?, 1)`);
   const createClaimedCapabilityRun = database.prepare(`insert into v07_capability_runs (
     id, owner_id, capability, operation, resource_id, provider_id, provider_label, adapter_kind,
@@ -229,8 +239,8 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
     lease_token, lease_expires_at, deadline_at, policy_version, local_date, reserved_calls,
     actual_calls, input_bytes, output_bytes, failure_code, nutrition_source_version,
     nutrition_dataset_hash, app_version, created_at, updated_at, version
-  ) values (?, ?, ?, ?, ?, ?, ?, ?, 'NONE', ?, 'HEALTH_DISCLOSURE_V1', ?, ?, 'RUNNING', ?, ?, ?,
-    'HEALTH_CAPABILITY_POLICY_V1', ?, 1, 0, 0, 0, null, ?, ?, ?, ?, ?, 1)`);
+  ) values (?, ?, ?, ?, ?, ?, ?, ?, 'NONE', ?, ?, ?, ?, 'RUNNING', ?, ?, ?,
+    'HEALTH_CAPABILITY_POLICY_V1', ?, ?, 0, 0, 0, null, ?, ?, ?, ?, ?, 1)`);
   const claimCapabilityRun = database.prepare(`update v07_capability_runs
     set idempotency_key = ?, request_hash = ?, state = 'RUNNING', lease_token = ?,
         lease_expires_at = ?, deadline_at = ?, reserved_calls = ?, actual_calls = 0,
@@ -259,6 +269,11 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
   const countReservedCalls = database.prepare(`select coalesce(sum(
     case when state = 'RUNNING' then reserved_calls else actual_calls end
   ), 0) as calls from v07_capability_runs where owner_id = ? and local_date = ? and capability = ?`);
+  const countReservedWorkoutCalls = database.prepare(`select coalesce(sum(
+    case when state = 'RUNNING' then reserved_calls else actual_calls end
+  ), 0) as calls from v07_capability_runs
+    where owner_id = ? and local_date = ?
+      and capability in ('WORKOUT_TEXT_SELECTION', 'WORKOUT_DETAILED_PLANNING')`);
   const appendAudit = database.prepare(`insert into v07_audit_events (
     id, owner_id, event_type, entity_type, entity_id, entity_version, metadata_json, created_at
   ) values (?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -276,6 +291,7 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
         input.adapterKind,
         input.evidenceKind,
         canonicalJson(input.disclosure),
+        input.disclosureVersion ?? 'HEALTH_DISCLOSURE_V1',
         input.status,
         input.localDate,
         input.nutritionSourceVersion ?? null,
@@ -296,12 +312,14 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
         input.providerLabel,
         input.adapterKind,
         canonicalJson(input.disclosure),
+        input.disclosureVersion ?? 'HEALTH_DISCLOSURE_V1',
         input.idempotencyKey,
         input.requestHash,
         input.leaseToken,
         input.leaseExpiresAt,
         input.deadlineAt,
         input.localDate,
+        input.reservedCalls ?? 1,
         input.nutritionSourceVersion ?? null,
         input.nutritionDatasetHash ?? null,
         input.appVersion,
@@ -366,6 +384,9 @@ export function createV07HealthLoopRepository(database: Database.Database): V07H
     },
     countReservedCalls(ownerId, localDate, capability) {
       return (countReservedCalls.get(ownerId, localDate, capability) as { calls: number }).calls;
+    },
+    countReservedWorkoutCalls(ownerId, localDate) {
+      return (countReservedWorkoutCalls.get(ownerId, localDate) as { calls: number }).calls;
     },
     appendAudit(input) {
       appendAudit.run(

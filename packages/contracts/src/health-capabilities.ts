@@ -1,11 +1,18 @@
 import * as z from 'zod';
 import { positiveCanonicalDecimalSchema, servingUnitSchema } from './nutrition';
 
-export const healthCapabilityKindSchema = z.enum(['WORKOUT_TEXT_SELECTION', 'MEAL_CANDIDATE_PARSE', 'NUTRITION_DATA_LOOKUP']);
+const legacyHealthCapabilityKindSchema = z.enum(['WORKOUT_TEXT_SELECTION', 'MEAL_CANDIDATE_PARSE', 'NUTRITION_DATA_LOOKUP']);
+export const healthCapabilityKindSchema = z.enum([
+  'WORKOUT_TEXT_SELECTION',
+  'MEAL_CANDIDATE_PARSE',
+  'NUTRITION_DATA_LOOKUP',
+  'WORKOUT_DETAILED_PLANNING',
+]);
 export const healthAdapterKindSchema = z.enum(['NONE', 'TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'PRODUCTION_ADAPTER']);
 export const healthEvidenceKindSchema = z.enum(['NONE', 'AUTOMATED_TEST_FIXTURE', 'APPROVED_LOCAL_DATASET', 'REAL_PROVIDER']);
 export const healthCapabilityAvailabilitySchema = z.enum(['READY', 'NOT_CONFIGURED']);
-export const healthDisclosureVersionSchema = z.literal('HEALTH_DISCLOSURE_V1');
+const legacyHealthDisclosureVersionSchema = z.literal('HEALTH_DISCLOSURE_V1');
+export const healthDisclosureVersionSchema = z.enum(['HEALTH_DISCLOSURE_V1', 'HEALTH_DISCLOSURE_V2']);
 export const healthCapabilityPolicyVersionSchema = z.literal('HEALTH_CAPABILITY_POLICY_V1');
 export const realEvidenceStatusSchema = z.enum(['NOT_RUN_APPROVAL_REQUIRED', 'AVAILABLE']);
 
@@ -33,9 +40,9 @@ export const healthTextProviderDescriptorSchema = z.discriminatedUnion('adapterK
 ]);
 
 export const healthCapabilityDescriptorSchema = providerDescriptorSchema.extend({
-  capability: healthCapabilityKindSchema,
+  capability: legacyHealthCapabilityKindSchema,
   availability: healthCapabilityAvailabilitySchema,
-  disclosureVersion: healthDisclosureVersionSchema,
+  disclosureVersion: legacyHealthDisclosureVersionSchema,
   policyVersion: healthCapabilityPolicyVersionSchema,
   realEvidenceStatus: realEvidenceStatusSchema,
 }).strict().superRefine((descriptor, context) => {
@@ -48,7 +55,23 @@ export const healthCapabilityDescriptorSchema = providerDescriptorSchema.extend(
   }
 });
 
-const capabilityFor = (capability: z.infer<typeof healthCapabilityKindSchema>) => healthCapabilityDescriptorSchema.refine(
+export const workoutDetailedPlanningCapabilityDescriptorSchema = providerDescriptorSchema.extend({
+  capability: z.literal('WORKOUT_DETAILED_PLANNING'),
+  availability: healthCapabilityAvailabilitySchema,
+  disclosureVersion: z.literal('HEALTH_DISCLOSURE_V2'),
+  policyVersion: healthCapabilityPolicyVersionSchema,
+  realEvidenceStatus: realEvidenceStatusSchema,
+}).strict().superRefine((descriptor, context) => {
+  if (descriptor.availability === 'NOT_CONFIGURED'
+    && (descriptor.providerId !== null || descriptor.adapterKind !== 'NONE' || descriptor.evidenceKind !== 'NONE')) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: '未配置能力不能声明 Provider 或证据' });
+  }
+  if (descriptor.availability === 'READY' && descriptor.providerId === null) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['providerId'], message: '可用能力必须声明 Provider' });
+  }
+});
+
+const capabilityFor = (capability: z.infer<typeof legacyHealthCapabilityKindSchema>) => healthCapabilityDescriptorSchema.refine(
   (descriptor) => descriptor.capability === capability,
   `能力必须是 ${capability}`,
 );
@@ -111,7 +134,9 @@ export interface HealthTextProvider {
 export type HealthCapabilityKind = z.infer<typeof healthCapabilityKindSchema>;
 export type HealthAdapterKind = z.infer<typeof healthAdapterKindSchema>;
 export type HealthEvidenceKind = z.infer<typeof healthEvidenceKindSchema>;
+export type HealthDisclosureVersion = z.infer<typeof healthDisclosureVersionSchema>;
 export type HealthCapabilityDescriptor = z.infer<typeof healthCapabilityDescriptorSchema>;
+export type WorkoutDetailedPlanningCapabilityDescriptor = z.infer<typeof workoutDetailedPlanningCapabilityDescriptorSchema>;
 export type HealthTextProviderDescriptor = z.infer<typeof healthTextProviderDescriptorSchema>;
 export type WorkoutTextSelectionInput = z.infer<typeof workoutTextSelectionInputSchema>;
 export type WorkoutTextSelectionOutput = z.infer<typeof workoutTextSelectionOutputSchema>;

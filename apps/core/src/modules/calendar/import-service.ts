@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type Database from 'better-sqlite3';
-import { APP_VERSION, courseImportRevisionSchema, visionCourseScheduleExtractionSchema, type CourseImport, type CourseImportRevision, type CreateCourseImportInput, type ExternalDisclosure, type LocalArtifact } from '@ev/contracts';
+import { APP_VERSION, completeCourseScheduleCandidateSchema, courseImportRevisionSchema, visionCourseScheduleExtractionSchema, type CourseImport, type CourseImportRevision, type CreateCourseImportInput, type ExternalDisclosure, type LocalArtifact } from '@ev/contracts';
 import { ApiError } from '../../http/api-error';
-import { terminalEvidenceKind, type CapabilityRegistry } from '../providers/capabilities';
+import { terminalEvidenceKind, type CapabilityRegistry, type VisionCapability } from '../providers/capabilities';
 import { createCapabilityRunRepository } from '../providers/capability-run-repository';
 import { CAPABILITY_POLICY, CapabilityExecutionError, executeCapabilityAdapter } from '../providers/provider-policy';
 import { createArtifactStore, type ArtifactStore } from './artifact-store';
@@ -16,6 +16,15 @@ export interface CourseImportResult { import: CourseImport; disclosure: External
 export interface ArtifactDeleteRecoveryResult {
   recovered: number;
   failures: Array<{ artifactId: string; ownerId: string; error: unknown }>;
+}
+export interface CourseImportServiceOptions {
+  now?: () => Date;
+  newId?: () => string;
+  repository?: CourseImportRepository;
+  store?: ArtifactStore;
+  onExternalOperation?: (inTransaction: boolean) => void;
+  /** Resolved per Owner from credential metadata; it must not decrypt during disclosure/status reads. */
+  visionCapabilityForOwner?: (ownerId: string) => VisionCapability | undefined;
 }
 export interface CourseImportService {
   uploadArtifact(ownerId: string, mediaType: LocalArtifact['mediaType'], bytes: Uint8Array): Promise<{ artifact: LocalArtifact; deduplicated: boolean }>;
@@ -33,7 +42,7 @@ export function createCourseImportService(
   calendarRepository: CalendarRepository,
   artifactRoot: string,
   capabilities: CapabilityRegistry,
-  options: { now?: () => Date; newId?: () => string; repository?: CourseImportRepository; store?: ArtifactStore; onExternalOperation?: (inTransaction: boolean) => void } = {},
+  options: CourseImportServiceOptions = {},
 ): CourseImportService {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? randomUUID;
@@ -45,12 +54,22 @@ export function createCourseImportService(
   function hash(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
   function ownedResult(ownerId: string, imported: CourseImport, revision?: CourseImportRevision | null): CourseImportResult {
     const stored = database.prepare('select disclosure_json from external_capability_runs where id = ? and owner_id = ?').get(imported.capabilityRunId, ownerId) as { disclosure_json: string } | undefined;
-    const base = { import: imported, disclosure: importDisclosures.get(imported.id) ?? (stored ? JSON.parse(stored.disclosure_json) : disclosure()) };
+    const base = { import: imported, disclosure: importDisclosures.get(imported.id) ?? (stored ? JSON.parse(stored.disclosure_json) : disclosure(visionForOwner(ownerId))) };
     return revision === undefined ? base : { ...base, revision };
   }
 
-  function disclosure(): ExternalDisclosure {
-    const capability = capabilities.visionDisclosure();
+  function visionForOwner(ownerId: string): VisionCapability | undefined {
+    return capabilities.vision ?? options.visionCapabilityForOwner?.(ownerId);
+  }
+  function disclosure(vision: VisionCapability | undefined): ExternalDisclosure {
+    const capability = vision
+      ? {
+          providerId: vision.descriptor.providerId,
+          providerLabel: vision.descriptor.providerLabel,
+          adapterKind: vision.descriptor.adapterKind,
+          evidenceKind: vision.descriptor.adapterKind === 'TEST_FAKE' ? 'AUTOMATED_FAKE' as const : 'NONE' as const,
+        }
+      : capabilities.visionDisclosure();
     return {
       version: 'CAPABILITY_DISCLOSURE_V1', purpose: '提取课表候选',
       selectedData: ['课表图片', '学期时区', '第一教学周周一'],
@@ -127,11 +146,12 @@ export function createCourseImportService(
       const artifact = repository.findArtifact(ownerId, input.artifactId);
       if (!artifact) throw new ApiError(404, 'ARTIFACT_NOT_FOUND', '课表图片不存在');
       if (artifact.state !== 'ACTIVE') throw new ApiError(409, 'ARTIFACT_NOT_ACTIVE', '课表图片当前不可用于导入');
-      const disclosureValue = disclosure();
+      const vision = visionForOwner(ownerId);
+      const disclosureValue = disclosure(vision);
       const timestamp = now().toISOString();
       const importId = newId();
       const capabilityRunId = newId();
-      const status: CourseImport['status'] = capabilities.vision ? 'AWAITING_DISCLOSURE' : 'BLOCKED_PROVIDER';
+      const status: CourseImport['status'] = vision ? 'AWAITING_DISCLOSURE' : 'BLOCKED_PROVIDER';
       const imported = database.transaction(() => {
         repository.insertCapabilityRun({
           id: capabilityRunId, ownerId, resourceId: importId,
@@ -155,6 +175,7 @@ export function createCourseImportService(
     },
     async extract(ownerId, importId, input, idempotencyKey) {
       if (!repository.findImport(ownerId, importId)) throw new ApiError(404, 'COURSE_IMPORT_NOT_FOUND', '课表导入记录不存在');
+      const vision = visionForOwner(ownerId);
       const requestHash = hash({ importId, ...input });
       const claimResult = database.transaction(() => {
         const existing = capabilityRuns.findByOwnerAndIdempotencyKey(ownerId, idempotencyKey);
@@ -176,7 +197,7 @@ export function createCourseImportService(
         if (!imported) throw new ApiError(404, 'COURSE_IMPORT_NOT_FOUND', '课表导入记录不存在');
         if (input.disclosureVersion !== 'CAPABILITY_DISCLOSURE_V1') throw new ApiError(409, 'VERSION_CONFLICT', '外发披露版本已变化');
         if (imported.status !== 'AWAITING_DISCLOSURE' || imported.version !== input.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
-        if (!capabilities.vision) throw new ApiError(503, 'VISION_PROVIDER_NOT_CONFIGURED', 'Vision Provider 未配置');
+        if (!vision) throw new ApiError(503, 'VISION_PROVIDER_NOT_CONFIGURED', 'Vision Provider 未配置');
         const artifact = repository.findArtifact(ownerId, imported.artifactId);
         const storageKey = repository.findArtifactStorageKey(ownerId, imported.artifactId);
         if (!artifact || !storageKey || artifact.state !== 'ACTIVE') throw new ApiError(410, 'ARTIFACT_DELETED', '课表图片已删除');
@@ -196,6 +217,8 @@ export function createCourseImportService(
         return { imported, claimed, artifact, storageKey, leaseToken: capabilityRun.leaseToken };
       }).immediate();
       if ('replay' in claimResult) return claimResult.replay;
+      // The claim transaction rejects an unavailable resolver before changing state.
+      if (!vision) throw new Error('Vision capability disappeared before extraction');
       const { imported, claimed, artifact, storageKey, leaseToken } = claimResult;
       let parsed: import('@ev/contracts').VisionCourseScheduleExtraction;
       let outputChars = 0;
@@ -209,7 +232,7 @@ export function createCourseImportService(
           maxInputSize: CAPABILITY_POLICY.vision.maxInputBytes,
           maxOutputChars: CAPABILITY_POLICY.vision.maxOutputChars,
           timeoutMs: CAPABILITY_POLICY.vision.totalTimeoutMs,
-          invoke: () => capabilities.vision!.extractCourseSchedule({
+          invoke: () => vision.extractCourseSchedule({
             schemaVersion: 'COURSE_SCHEDULE_EXTRACTION_V1', image, mediaType: artifact.mediaType,
             term: { timezone: term.timezone, weekOneMonday: term.weekOneMonday },
           }),
@@ -233,7 +256,7 @@ export function createCourseImportService(
         throw new ApiError(failureCode === 'VISION_PROVIDER_UNAVAILABLE' ? 503 : 422, failureCode, failureCode === 'VISION_PROVIDER_UNAVAILABLE' ? 'Vision Provider 暂时不可用' : 'Vision 输出不符合严格课表契约');
       }
       const capturedAt = now().toISOString();
-      const candidates = parsed.candidates.map((candidate) => ({ ...candidate, candidateId: newId(), included: true, provenance: [{ kind: 'VISION_OUTPUT' as const, providerId: capabilities.vision!.descriptor.providerId, capabilityRunId: imported.capabilityRunId, editedFields: [], capturedAt }] }));
+      const candidates = parsed.candidates.map((candidate) => ({ ...candidate, candidateId: newId(), included: true, provenance: [{ kind: 'VISION_OUTPUT' as const, providerId: vision.descriptor.providerId, capabilityRunId: imported.capabilityRunId, editedFields: [], capturedAt }] }));
       const revision = courseImportRevisionSchema.parse({ id: newId(), importId, parentRevisionId: null, revisionNo: 1, candidates, contentHash: hash(candidates), createdBy: 'VISION', createdAt: capturedAt });
       const finalized = database.transaction(() => {
         repository.insertRevision({ ...revision, ownerId });
@@ -241,7 +264,7 @@ export function createCourseImportService(
         if (!updated) throw new ApiError(409, 'VERSION_CONFLICT', '课表导入状态已变化');
         if (!capabilityRuns.complete(ownerId, imported.capabilityRunId, {
           leaseToken, status: 'SUCCEEDED', actualCalls: 1, inputChars: 0, outputChars,
-          failureCode: null, evidenceKind: terminalEvidenceKind(capabilities.vision!.descriptor.adapterKind), now: capturedAt,
+          failureCode: null, evidenceKind: terminalEvidenceKind(vision.descriptor.adapterKind), now: capturedAt,
         })) throw new Error('Vision success terminalization could not be committed');
         return updated;
       }).immediate();
@@ -285,9 +308,16 @@ export function createCourseImportService(
         if (!revision) throw new ApiError(422, 'REVISION_INCOMPLETE', '候选版本不存在');
         const included = revision.candidates.filter((candidate) => candidate.included);
         if (!included.length) throw new ApiError(422, 'NO_INCLUDED_CANDIDATES', '至少保留一个课程候选');
+        const completeCandidates = included.map((candidate) => {
+          const parsed = completeCourseScheduleCandidateSchema.safeParse(candidate);
+          if (!parsed.success) {
+            throw new ApiError(422, 'CANDIDATE_INCOMPLETE', '请补全已包含课程的标题、星期、时间和教学周后再确认');
+          }
+          return parsed.data;
+        });
         const proposalId = newId();
         const changes: Array<{ operation: 'EXPAND_CALENDAR_RULE'; calendarRuleId: string; expectedRuleVersion: number }> = [];
-        for (const candidate of included) {
+        for (const candidate of completeCandidates) {
           const courseId = newId(); const ruleId = newId();
           database.prepare(`insert into courses (id, owner_id, term_id, title, course_code, official_url, version, created_at, updated_at) values (?, ?, ?, ?, null, null, 1, ?, ?)`).run(courseId, ownerId, imported.termId, candidate.title, timestamp, timestamp);
           database.prepare(`insert into calendar_rules (id, owner_id, term_id, course_id, title, weekday, start_local_time, end_local_time, week_start, week_end, week_pattern, is_hard, version) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`).run(ruleId, ownerId, imported.termId, courseId, candidate.title, candidate.weekday, candidate.startLocalTime, candidate.endLocalTime, candidate.weekStart, candidate.weekEnd, candidate.weekPattern);

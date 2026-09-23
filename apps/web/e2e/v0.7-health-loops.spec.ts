@@ -148,7 +148,8 @@ async function runHealthLoop(page: Page, name: string, localDate: string): Promi
 
   await page.goto('/nutrition');
   await page.getByLabel('本地日期').fill(localDate);
-  await page.getByLabel('餐食文本').fill('Fixture Food Alpha 150 g');
+  await page.getByLabel('餐食文本', { exact: true }).fill('Fixture Food Alpha 150 g');
+  await page.getByLabel('我理解解析会向已配置的 DeepSeek 发送餐食文本。', { exact: true }).check();
   const draftResponse = page.waitForResponse((response) => response.request().method() === 'POST' && responsePath(response) === '/api/core/nutrition/meal-drafts');
   await page.getByRole('button', { name: '解析候选食物' }).click();
   const draft = mealDraftCreateResponseSchema.parse(await (await draftResponse).json()).data;

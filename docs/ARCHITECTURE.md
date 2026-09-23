@@ -1,5 +1,7 @@
 # EV AI Dashboard 系统架构（ARCHITECTURE）
 
+> 本轮范围更新：按[PRD](PRD.md)最新修订，手机端退出MVP，现有Core/Web/SQLite与电脑浏览器入口保留；下文手机/物理Safari/手机私网设计为历史范围，不再作为本轮交付门禁。
+
 > 2026-09-16 用户批准退役项目分析、项目会话和专属 Codex 接入。当前目标保留普通工作待办、学习/生活领域及共享记忆/协调。下文 V8 项目落点及 §5.3 是历史架构，不再是运行或开发入口；历史迁移/数据兼容不等于保留分析功能。范围见 [PRD](PRD.md)，退役技术契约见 [TECH_SPEC](TECH_SPEC.md) 顶部。
 
 > 权威正文迁移（2026-09-08）：原批准/审核记录与目标蓝图保留，不代表当前实现或发布通过。唯一进度见 [TASKS](../plans/TASKS.md)，现有接口见 [API](API.md)，运行见 [DEPLOYMENT](DEPLOYMENT.md)。V8 增量以 [TECH_SPEC 第 12 节](TECH_SPEC.md#12-v8-增量设计冻结) 为准；旧蓝图中的未实现命令、端点与目录均为设计待核验，不能作为可调用说明。
@@ -288,3 +290,16 @@ C:\Users\asus\AppData\Local\code-intel\artifacts\product-prd\1786905497646-3624-
 保持Next Web/BFF → loopback Fastify Core → SQLite分层；私有认证HTTPS仅代理Web，不把Core/SQLite/本机项目授权暴露远程。复用已有Owner/Proposal/version/幂等，补显式可信Origin与CSRF，不引入第二认证栈。launcher管理既有Core源码启动与Web build，不假设存在Core dist或migration CLI。
 
 备份是SQLite-only snapshot+manifest与隔离演练，不包括artifacts/投影/DPAPI用户环境，不替代完整恢复。logger覆盖既有Fastify通道，health纯读不外部探测、不调度修复。V9新增共用Windows私有目录工具，DPAPI不等于目录保护；只对新目标设验DACL，不改已有Owner目录权限。技术细节唯一正文为[TECH_SPEC §13](TECH_SPEC.md#13-v9-私有运维增量设计冻结)，任务/证据唯一入口为[TASKS](../plans/TASKS.md)。本地实现与物理部署分别验收，缺物理/真实环境证据overall PARTIAL，不完整PASS。
+
+## 15. 详细健身规划的组件边界
+
+本节描述已批准增量的职责划分，不代表默认服务、真实DeepSeek或浏览器已验收；具体完成状态只见[TASKS](../plans/TASKS.md)，字段和失败规则见[TECH_SPEC §16](TECH_SPEC.md)。项目分析退役，不因本增量恢复上文的历史项目蓝图。
+
+- `catalog-service/repository`保存不可变动作来源和独立资格记录；目录存在不等于可自动用于训练。
+- `planning-context`从当前画像、最新有效身体状态、合格候选、限量反馈及用户选定记忆构造可审阅上下文。预览与确认重新核对版本/hash，危险新状态不能被旧预览绕过。
+- `planning-service`承担详细训练业务编排，复用既有幂等、额度、Proposal及事务；`domain`验证模型结构、引用、参数与时间预算，不直接访问SQLite。
+- `WorkoutPlanningProvider`只接收过滤后的值，无数据库或日程写权限；DeepSeek适配器负责凭据、有限请求/响应和取消。测试Provider由隔离门禁显式注入，不作为生产失败的替代回复。
+- 训练提案确认形成Action和TimeRequest，不直接创建Event；日程协调另经用户确认才写入Event。V1手动训练与V2详细训练保持显式格式边界。
+- 实际训练反馈先作为事实保存；`feedback-memory`再通过现有实体记忆服务尝试限量更新。记忆失败独立降级，不能回滚反馈、覆盖人工编辑或从旧反馈复活用户已删除的内容。下一轮模型调用仍须重新预览并同意。
+
+Web只通过同源BFF访问已认证Core；页面展示上下文、训练依据、提案与反馈各阶段，不把按钮成功、Mock测试或配置检测当作真实模型与完整闭环证据。

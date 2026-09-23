@@ -20,13 +20,14 @@ import {
 } from './credential-service';
 import { SecretStoreUnavailableError } from './secret-store';
 import type { ProviderService } from './service';
-import type { CapabilityRegistry } from './capabilities';
+import type { CapabilityRegistry, VisionCapability } from './capabilities';
 
 interface ProviderRouteOptions {
   authService: AuthService;
   providerService: ProviderService;
   providerCredentialService: ProviderCredentialService;
   capabilityRegistry: CapabilityRegistry;
+  visionCapabilityForOwner?: (ownerId: string) => VisionCapability | undefined;
 }
 
 function rethrowCredentialError(error: unknown): never {
@@ -63,8 +64,14 @@ export async function registerProviderRoutes(
   app.get('/v1/providers', { preHandler: authGuard }, async () => {
     return providerListResponseSchema.parse({ data: options.providerService.listProfiles() });
   });
-  app.get('/v1/provider-capabilities', { preHandler: authGuard }, async () => {
-    return capabilityMatrixResponseSchema.parse({ data: options.capabilityRegistry.list() });
+  app.get('/v1/provider-capabilities', { preHandler: authGuard }, async (request) => {
+    const vision = options.capabilityRegistry.vision
+      ?? options.visionCapabilityForOwner?.(authenticatedOwnerId(request));
+    const data = options.capabilityRegistry.list().map((entry) =>
+      entry.capability === 'COURSE_SCHEDULE_VISION' && vision && !options.capabilityRegistry.vision
+        ? { ...entry, ...vision.descriptor, availability: 'READY' as const, evidenceKind: 'NONE' as const }
+        : entry);
+    return capabilityMatrixResponseSchema.parse({ data });
   });
   app.get('/v1/providers/deepseek/credential', credentialRouteOptions, async (request) => {
     return deepSeekCredentialStatusResponseSchema.parse({

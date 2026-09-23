@@ -1,5 +1,15 @@
 # API：已核对入口与待设计边界
 
+## 服务器MVP：营养数据凭据
+
+`GET /v1/providers/usda/credential` 只返回`providerKey: USDA_FDC`、`state: CONFIGURED | NOT_CONFIGURED`和`updatedAt`，不解密、不联网、不返回密钥。`PUT`接收`{apiKey}`，加密保存，拒绝公共`DEMO_KEY`；保存不等于连接验证。`DELETE`接收`{confirm:true}`移除配置。均要求Owner会话；格式错误422、存储不可用503。Web经现有同源BFF/CSRF访问，不增加跨域直连。
+
+`GET /v1/health-capabilities`按Owner本地配置解析文本及营养能力。现有`meal-drafts`解析和`matches`匹配路径分别使用DeepSeek和营养数据来源，外发确认、版本与幂等约束不变。配置可用不等于真实调用已通过；证据见[TASKS](../plans/TASKS.md)。
+
+## 自然语言事项
+
+`POST /v1/event-language/parse`要求Owner会话、最多30次/分钟；输入`{text,referenceDate,timezone:"Asia/Shanghai",externalProcessingConfirmed:true}`，text最多1000字符。缺明确确认422、无配置或调用不可用503。返回可含null字段的`candidate`、`missingFields`和与已确认Event重叠的`conflicts`，只发送这条描述及参考日期/时区，不把本地日程外发。此端点不创建Event或Proposal；补全候选后仍使用`event-proposals`及原确认接口。冲突说明针对解析时的候选，修改后需重新核对当日日程，不能视作实时无冲突保证。
+
 > 2026-09-16 退役决策：项目列表、快照、Brief、外发预览/授权及本机项目授权入口退出产品；项目独立会话此前未注册 HTTP 接口，也不再继续接线。下文不再提供这些功能的调用说明。具体退役检查与响应证据见 TASKS，不将文档变更当作代码已通过验证。
 
 浏览器经同源 `/api/core/*` 访问固定 loopback Core；下列是 Core 路径，不是浏览器直连地址。现有受保护接口使用 Owner 会话。本文仅列本次核对的三链相关接口，不声称穷尽所有路由。
@@ -66,6 +76,50 @@ create/restore需已有app.sqlite；新目录不能与活动数据目录、源�
 - 显式 LOCAL_RULES 是静态规则建议；外部 Provider 模式未配置必须 503，不能悄悄退为规则成功。行为定义见 [TECH_SPEC](TECH_SPEC.md#12-v8-增量设计冻结)。
 - 原 TECH_SPEC 的 API 表为批准目标蓝图，不保证端点存在；只有经源码与实施证据核验后才能收入本节“已存在”。
 
+## 详细健身计划接口（2026-09-19源码核验）
+
+`WORKOUT_PLANNING_V2` / `WORKOUT_PLAN_V2` 的App装配与下方HTTP路由已经实现，并完成一个隔离inject用例及限定复核。网页到Core的完整闭环与真实Provider证据仍以[TASKS](../plans/TASKS.md)为准；接口可调用不等于真实DeepSeek已验证。
+
+外部动作目录目前具备程序内导入、参数化分页检索与限定候选查询。未审核记录保持只读查阅用途；没有浏览器任意本机路径导入或让模型自行批准动作安全性的接口。真实 DeepSeek 适配器实施状态只见 [TASKS](../plans/TASKS.md)，未运行真实外部数据或付费调用。
+
+本机离线 CLI 已实现并用合成文件验证（这不是对日常数据库的操作授权）：
+
+```powershell
+node --import tsx apps/core/src/cli/fitness-catalog.ts import --data-dir "<已有绝对数据目录>" --json-file "<已有绝对JSON文件>" --revision "<40位小写commit SHA>"
+```
+
+要求已有 `app.sqlite`、迁移28及目录表，不自动创建数据库/Owner或运行迁移；JSON为上游动作数组，最大32MiB，无网络下载/媒体读取。成功输出受控code、版本、数量、hash；同版同内容重放不重复导入，同版不同内容为冲突并非零退出。不会新增动作审核资格。
+
+V2预览使用 `previewReceipt.previewedAt`，没有同意外发语义；用户明确创建后才形成 `consentedAt` 确认记录。预览与发送应绑定实际字段、候选、版本及内容hash，变化要求重新审阅。它与旧 `HEALTH_DISCLOSURE_V1` 动作选择声明分离；旧三能力查询不因新契约存在而自动声明详细训练或饮食可用。
+
+### 已接线的详细计划接口
+
+下表已对照`apps/core/src/modules/fitness/planning-routes.ts`核验。统一前缀 `/v1/fitness/planning`，全部需要Owner会话；命令沿用Idempotency-Key（画像使用expectedVersion CAS、预览仅生成短期引用记录）。单routes用例覆盖鉴权、配置、Fake生成/读取与重放，不声称逐路由完整矩阵。
+
+| 方法与后缀 | 输入/响应约定 |
+| --- | --- |
+| GET /profile；PUT /profile | GET data.profile可为null；PUT为expectedVersion（首次null）和不含version的profile，服务端递增版本 |
+| GET /capability | data为独立WORKOUT_DETAILED_PLANNING descriptor；配置状态不等于真实效果验证 |
+| GET /candidates | checkInId、goal；data.items为最多5个有限候选，未审核外部动作不在此自动放行 |
+| GET /memory | data.items只含当前有效revision的id/version/scopeType/scopeId/characters，不先读取全部正文 |
+| POST /context/preview | PreviewWorkoutContextV2；data为payload/hash/previewReceipt/fieldCounts；不调用模型 |
+| POST /workouts | CreateDetailedWorkoutV2；data包含workout/revision/totalDurationSeconds/capabilityRunId，确认后才允许调用 |
+| GET /workouts | 有界page/pageSize及可选日期/状态；data.items中每项为workout与revisionSchema，另有pagination |
+| GET /workouts/:id | data包含workout/revision/citations/proposal/action/timeRequest/feedback；候选快照提供名称和说明 |
+| POST /workouts/:id/revisions | ReviseDetailedWorkoutV2；返回workout/revision，重新校验当前依据 |
+| POST /workouts/:id/proposal | expectedVersion/revisionId；返回workout/proposal，不自动确认 |
+| POST /workouts/:id/feedback | 沿用WorkoutFeedbackInput；返回事实结果，另有memoryStatus，区分摘要成功、跳过、重放和降级 |
+
+训练Proposal决定仍使用全局 `/v1/proposals/:id/decision`；只创建Action和TimeRequest。Event由日程审核另行确认生成。旧V1接口不假装能解码V2，版本不适用需受控提示；旧手动训练与历史记录兼容。
+
+接线状态码约定（2026-09-19）：GET、画像PUT、上下文预览和全局决定成功为200；训练创建、修订、提案及反馈创建为201，幂等重放保留同一成功状态并返回重放响应头。身体状态沿用已有201。反馈不是200：创建训练反馈记录与其派生事实，和旧训练接口保持一致。测试应使用此明确约定，不因先前草稿中的假设修改服务状态码。
+
+默认App装配现有DeepSeek详细训练适配器，能力查询仅检查Owner凭据配置，不解密、不外探；未配置的创建为503 `HEALTH_TEXT_PROVIDER_NOT_CONFIGURED`。适配器直接调用层还保留其自身未配置错误；不要以设置页面连接测试成功推断每次生成必然成功。无有效会话401，格式/分页校验422，旧入口读取V2为409 `WORKOUT_SCHEMA_MISMATCH`，上下文版本变化409，最新风险状态422。TEST_FIXTURE仅在既有测试环境与隔离目录门禁下允许，不是生产降级分支。
+
 ## 历史项目外发设计
 
 M1/PC/Codex 试验的原始设计和失败/成功证据保留在历史计划及 [TASKS](../plans/TASKS.md) 引用的 evidence 中。本页不再将这些端点列为可调用 API；未完成的真实 Codex 接线被取消，而不是验证通过。
+
+## DeepSeek 默认营养查询（2026-09-20 修订）
+
+仅配置DeepSeek即可使用现有营养匹配接口；USDA凭据接口保留为可选来源，已有USDA配置优先。未配置USDA时，Owner的DeepSeek配置装配联网工具与本地缓存；公开来源首版限中/英文Wikipedia，不能保证所有食物匹配。接口形状及选择/确认步骤不变。完整缓存命中的批次不占外部调用额度；未命中批次最多两次DeepSeek请求，来源/数值证据不完整返回未匹配，不编造营养数据。`actualCalls`记录逻辑外部批次，不作为供应商计费明细。

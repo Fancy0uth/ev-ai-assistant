@@ -146,12 +146,17 @@ export function createFitnessService(
   calendarRepository: CalendarRepository,
   healthLoopRepository: V07HealthLoopRepository,
   v07IdempotencyService: V07IdempotencyService,
-  options: { now?: () => Date; newId?: () => string; catalog?: LoadedInternalExerciseCatalog; healthTextProvider?: HealthTextProvider } = {},
+  options: { now?: () => Date; newId?: () => string; catalog?: LoadedInternalExerciseCatalog; healthTextProvider?: HealthTextProvider; healthTextProviderForOwner?: (ownerId: string) => HealthTextProvider | undefined } = {},
 ): FitnessService {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? randomUUID;
   const catalog = options.catalog ?? loadInternalExerciseCatalog();
   const catalogRef = { id: catalog.manifest.catalogId, version: catalog.manifest.catalogVersion, hash: catalog.manifest.contentSha256 };
+  const assertV1 = (ownerId: string, workoutId: string): void => {
+    if (fitnessRepository.currentRevisionSchema(ownerId, workoutId) === 'WORKOUT_PLAN_V2') {
+      throw new ApiError(409, 'WORKOUT_SCHEMA_MISMATCH', '详细训练请使用规划入口');
+    }
+  };
 
   const createRevision = (input: {
     workoutId: string; parentRevisionId: string | null; revisionNo: number; title: string; rationale: string;
@@ -251,7 +256,8 @@ export function createFitnessService(
         }
 
         const capabilityRunId = newId();
-        if (!options.healthTextProvider) {
+        const provider = options.healthTextProvider ?? options.healthTextProviderForOwner?.(ownerId);
+        if (!provider) {
           const error = new ApiError(503, 'HEALTH_TEXT_PROVIDER_NOT_CONFIGURED', '训练文本能力尚未配置');
           v07IdempotencyService.failExternal(started.claim, error, () => {
             healthLoopRepository.createCapabilityRun({ id: capabilityRunId, ownerId, capability: 'WORKOUT_TEXT_SELECTION', operation: command.operation, resourceId: command.resourceId, providerId: null, providerLabel: 'Not configured', adapterKind: 'NONE', evidenceKind: 'NONE', disclosure: { disclosureVersion: input.disclosureVersion }, status: 'BLOCKED_PROVIDER', localDate: checkIn.localDate, appVersion: APP_VERSION, createdAt: timestamp });
@@ -259,12 +265,11 @@ export function createFitnessService(
           });
           throw error;
         }
-        if (healthLoopRepository.countReservedCalls(ownerId, checkIn.localDate, 'WORKOUT_TEXT_SELECTION') >= 5) {
+        if (healthLoopRepository.countReservedWorkoutCalls(ownerId, checkIn.localDate) >= 5) {
           const error = new V07DailyQuotaError('今日训练文本能力调用次数已达上限');
           v07IdempotencyService.failExternal(started.claim, error);
           throw error;
         }
-        const provider = options.healthTextProvider;
         const candidates = this.listExercises(ownerId, { checkInId: input.checkInId, goal: input.goal, equipment: input.availableEquipment, page: 1, pageSize: 5 }).items;
         if (candidates.length === 0) {
           const error = new ApiError(422, 'CITATION_INVALID', '没有满足当前约束的训练动作');
@@ -326,6 +331,7 @@ export function createFitnessService(
       }
     },
     reviseWorkout(ownerId, workoutId, input, idempotencyKey) {
+      assertV1(ownerId, workoutId);
       const result = v07IdempotencyService.executeLocal({ ownerId, key: idempotencyKey, operation: 'fitness.workout.revise', resourceId: workoutId, body: input }, () => {
         const workout = fitnessRepository.findWorkout(ownerId, workoutId);
         if (!workout) throw new ApiError(404, 'WORKOUT_NOT_FOUND', '训练草稿不存在');
@@ -345,6 +351,7 @@ export function createFitnessService(
       return { ...(result.body as { workout: Workout; revision: WorkoutRevision }), replayed: result.replayed };
     },
     createWorkoutProposal(ownerId, workoutId, input, idempotencyKey) {
+      assertV1(ownerId, workoutId);
       const result = v07IdempotencyService.executeLocal({ ownerId, key: idempotencyKey, operation: 'fitness.workout.propose', resourceId: workoutId, body: input }, () => {
         const workout = fitnessRepository.findWorkout(ownerId, workoutId);
         if (!workout) throw new ApiError(404, 'WORKOUT_NOT_FOUND', '训练草稿不存在');
@@ -402,10 +409,11 @@ export function createFitnessService(
       return { ...(result.body as Omit<ReturnType<FitnessService['recordWorkoutFeedback']>, 'replayed'>), replayed: result.replayed };
     },
     listWorkouts(ownerId, query) {
-      const result = fitnessRepository.listWorkouts(ownerId, query);
+      const result = fitnessRepository.listWorkouts(ownerId, { ...query, revisionSchema: 'WORKOUT_PLAN_V1' });
       return { items: result.items, pagination: pagination(query.page, query.pageSize, result.total) };
     },
     getWorkout(ownerId, workoutId) {
+      assertV1(ownerId, workoutId);
       const workout = fitnessRepository.findWorkout(ownerId, workoutId);
       if (!workout) throw new ApiError(404, 'WORKOUT_NOT_FOUND', '训练草稿不存在');
       const checkIn = fitnessRepository.findCheckIn(ownerId, workout.checkInId);

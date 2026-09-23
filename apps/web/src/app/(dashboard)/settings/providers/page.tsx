@@ -8,6 +8,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { PROVIDER_CREDENTIAL_STATUS_CHANGED_EVENT } from '@/components/shell/provider-status';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { NutritionProviderSettings } from '@/components/nutrition/nutrition-provider-settings';
 
 const failureMessages: Record<DeepSeekConnectionFailureCode, string> = {
   AUTHENTICATION_FAILED: '认证失败，请检查密钥。',
@@ -201,10 +202,11 @@ export default function ProviderSettingsPage() {
       <section className="provider-credential-card" aria-label="学习能力状态">
         <h2>课程学习能力</h2>
         <p>课表视觉识别、匿名公开检索和文本学习建议未配置时均显示 BLOCKED_PROVIDER；系统不会上传图片、抓取网页或伪造结果。</p>
-        <p>保存 DeepSeek 凭据后，课程详情仍会先要求确认文本学习建议的外发披露；视觉识别和匿名公开检索不会使用 DeepSeek。</p>
+        <p>DeepSeek 用于文本学习建议和课表图片识别，每次外发前均需确认。公开检索使用维基百科，属于公开参考资料，不代表课程官方资料。</p>
         <p>自动测试 Fake 证据，不代表真实 Provider（仅在受控自动测试运行中出现）。</p>
       </section>
 
+      <NutritionProviderSettings />
       {error ? <p className="dashboard-alert" role="alert">{error}</p> : null}
       <p className="provider-credential-live" aria-live="polite" aria-busy={isLoading}>
         {isLoading ? '正在读取本地凭据状态…' : success}

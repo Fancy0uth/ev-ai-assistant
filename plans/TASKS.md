@@ -4,6 +4,309 @@
 
 ## 当前进度
 
+### 2026-09-20 最新指令：取消逐条审核，改按训练部位分类（已完成）
+
+用户取消1324条逐项审核，旧审核计划不再继续。已通过应用工具将自动任务ev设为PAUSED，停止后续查证；保留历史证据，不伪造审核通过记录。使用正式库现有body_part/target标签只读分类，10个主部位、1324个唯一动作，遗漏/重复均0。保留目标肌群、辅助肌群、器械、原说明及来源版本。无网络/模型调用，无生产写入。
+
+交付：[完整分类目录](../data/fitness-catalog/按训练部位分类.md)、[机器可读分类](../data/fitness-catalog/by-body-part.json)、[数量核对](evidence/2026-09-20-fitness-classification.json)。本次为动作资料分类，不改现有训练生成和日程确认逻辑。下方自动审核ACTIVE及待查计划均为历史，已由本条取消。
+
+
+### 2026-09-20 执行1324条动作公开依据自动核验（进行中）
+
+用户批准五阶段计划并要求执行。采用既有隔离worktree，唯一进度仍在本文件；不重开MVP、不改原专业审核资格字段。范围为现有固定版本1324条，允许为核验查找公开权威依据，不扩充动作目录。
+
+实施顺序：① scripts/fitness-audit/建立版本化证据与逐项结论契约，原始目录只读导出；② tests/fitness-audit.test.mjs最小失败→通过验证来源/变式/hash/断点续跑门禁；③20条试审记录真实检索与原文；④每20条分批处理，复用证据但不按名称相近继承结论；⑤符合依据和用户范围才接入推荐，否则保留缺口。受影响定点测试和一次独立复核后更新交付证据。
+
+Ruling：未知不能补造；“当前证据库无匹配”只能作为初筛缺口，不能声称已穷尽网络或完成逐条深入审核。AI核验不写专业review记录；只用公开动作资料，无Owner健康数据外发。用户已批准计划，常规实现选择不再逐步确认。
+
+已只读导出1324条目录至data/fitness-audit/catalog.json（固定revision 7455efae41b330c265e7cd4b78dfa848e7ce5ebd），未读写账号凭据。尚无新增放行动作。
+
+执行记录：已建立scripts/fitness-audit/engine.mjs、run.mjs及续跑说明，单case先RED后GREEN；聚焦复核发现跨revision/同hash内容变更复用和空内容完整结论两项P2，新增失败断言并修复GREEN，复核确认关闭。全部1324条完成离线队列初始化，只有20条实际对照本轮已打开权威原文：17缺依据、2名称/步骤矛盾、1超出LOW范围，1304仍PENDING_RESEARCH。没有条目放行、没有专业review或生产写入。源摘要hash不是整页hash；独立复核只核对代码及证据内部一致性，未冒称独立重新联网查证。2368静态站姿表述已澄清，保留确实缺少的数值剂量。
+
+已创建当前任务自动续跑“EV 动作公开依据分批核验”（id=ev，ACTIVE，每30分钟触发、每轮最多20条），处理真实查证与后续满足条件的推荐接入；普通批次静默，仅有意义结果/阻塞/完成时通知。任务依赖Codex本机调度可运行，不承诺关机离线执行。首次创建缺destination参数失败，补destination=thread后创建成功，无重复任务。最终审核尚未完成，不能将自动任务已创建写成1324条已审完。启动证据见[evidence](evidence/2026-09-20-fitness-audit-start.json)。
+
+
+
+### 2026-09-20 最终交付：本轮限定 MVP 主线达标
+
+**结论：按本轮服务器与电脑浏览器、至少一套有依据动作的验收范围，可以提前交付。** 用户授权的公开权威依据路径已落实；下文“等待依据/调用授权/完整未完成”均为历史时点，不再代表当前状态。未声称所有1324条动作可用或具备个人医学审核。
+
+| 验收项 | 结果与可核对证据 |
+| --- | --- |
+| 首道依据检查 | 前30分钟已暴露并记录适用依据缺口；随后按用户选择，以NHS/AHA公开指南接入现有3动作，未取消适用声明、风险、来源和参数校验。 |
+| 有来源训练闭环 | [真实模型PASS](evidence/2026-09-20-live-fit-guidance-r2.json)：画像/状态/候选→855秒三阶段建议→确认训练→9月21日17:00–17:30日程→完成反馈与memory；确认前Action/TimeRequest/Event均0。 |
+| 截图课表 | [PASS](evidence/2026-09-20-live-course-loop.json)：真实模型识别合成截图、修正教室、确认课程/规则、排入两周日程；确认前课程/规则/事件均0。 |
+| 自然语言日程 | [PASS](evidence/2026-09-20-live-event-loop.json)：真实模型解析、显示既有课程冲突、改为15:30–16:30、确认后新增事件；此前仅存在原有课程。 |
+| 学习与来源 | [真实建议原始记录](evidence/2026-09-20-live-learning-extra1.json)保留脚本排程失败；建议本身已成功，修复脚本后[零模型恢复排程PASS](evidence/2026-09-20-live-learning-schedule-resume.json)，19:00–19:25事件可读。[浏览器来源与日程读回](evidence/2026-09-20-learning-browser-readback.json)通过。 |
+| 饮食联网与缓存 | 复用[既有PASS](evidence/2026-09-20-live-web-nutrition.json)，本轮未触及，不重复调用或测试。 |
+| 构建与更新 | Core/Web类型检查、受影响定点用例、正式Web构建通过；[正式运行](evidence/2026-09-20-guidance-update-runtime.json)HTTPS/CSRF/Core ready均200且Secure cookie，不绕过TLS。更新前后10表数量/hash一致，Owner/DeepSeek配置各1、动作1324保留。 |
+| 电脑浏览器 | 复用之前跨模块抽查，补充[当前训练来源/参数/反馈读回](evidence/2026-09-20-guidance-browser-readback.json)。隔离合成账号密码登录成功；正式HTTPS登录入口可见，当前为退出状态，未冒称最后更新后重输过真实Owner密码。 |
+| 恢复与说明 | [使用说明](../docs/DEPLOYMENT.md)已明确现有合成重开/SQLite新目录恢复及侧车hash证据；真实附件完整恢复、DPAPI跨用户/跨主机、整机重启/灾难恢复未验证。 |
+
+交付边界：详细训练当前仅力量目标，候选为慢走、椅子坐站和靠墙俯卧撑；限如实确认适用的健康、日常运动、19–64岁一般成人。其他详细目标及1324条未审核动作继续阻断。公开依据不是个人专业审核，组合不是覆盖全身肌群的长期训练处方；模型标题/文字需人工审阅，结构化来源、次数、阶段、总时长仍严格校验。模型与检索真实验收使用隔离合成数据，未给正式Owner写入合成事项。
+
+收尾：正式Core/Web仍监听4341/3041，HTTPS3443；临时4327/3217已无监听，Next生成类型恢复正式构建路径。临时错误标签页清理受到浏览器URL策略阻止，未绕过，不影响正式服务。没有新付费调用、没有全仓测试、没有提交或推送。最后格式核对仅发现既有MVP-SCOPE.md末尾空行，不是本轮代码阻断，未作无关清理。
+
+### 2026-09-20 实施记录：公开依据接入与部署验收
+
+- 用户明确要求自主继续，不再让其逐步决定。沿已授权公开依据方案直接实施：不新增动作，复用easy-walk、chair-sit-to-stand、wall-push-up；仅本轮一般力量组合，其他详细目标明确缺完整依据而不自动生成。外部1324条仍未审核，不填造临床资格或review记录。
+- 新政策PUBLIC_GUIDANCE_GENERAL_ADULT_V1：版本化一般成人适用自述（19–64岁、健康、日常运动、无相关健康事件/疑虑、非孕期/近期产后），未确认/不确定阻断。声明与公开指南摘要、URL、审核/核验日期、摘要hash及参数共同绑定来源citation与预览hash；变更后旧预览/修订确认失效。公开指南不是个人专业审核；3秒/次、60秒组间、30秒转换是排程估计，未冒称医学上限。
+- 服务端新增阶段/剂量规则：慢走仅热身/放松各300–600秒；椅子坐站仅主训练1轮5次；墙推仅主训练3组5–10次；要求所选候选覆盖三个阶段。来源变化、旧政策、无声明、错误阶段/剂量、时间超限仍拒绝。旧记录schema兼容读取，旧草稿不能绕过新依据继续确认。
+- 定点证据：来源映射case RED→GREEN；适用声明/阶段/剂量/时间预算/撤回声明组合case通过；adapter组合case通过。三个受影响旧测试仅把合成画像及模型输出升级至新指南后3/3通过，保留原重放、确认、反馈、来源篡改拒绝、V1兼容断言；不跑全仓。日志public-guidance-checks、guidance-affected-regression。
+- 真实验收：最初脚本合成用户名超32字符在本地失败，零外发；缩短后第1次模型把热身写30秒，被新剂量校验拒绝（[FAIL](evidence/2026-09-20-live-fit-guidance.json)）。删除旧30秒算术示例冲突并明确5–10分钟约束后，第2次模型完整闭环PASS：[来源/草稿/确认/排程/反馈](evidence/2026-09-20-live-fit-guidance-r2.json)。新增真实模型2次、零自动重试，全部隔离合成数据，无正式Owner健康数据外发。通过后不再重复模型链路。
+- 已完成一次Astra medium只读聚焦复核：未发现本次变更实质阻断；未跑网络/测试、未全面复审。限制：来源变更保护针对保存的版本/摘要，不自动监测远端网页；无临床认证结论。随后受影响构建、服务器更新和浏览器来源展示均已完成，最终结论见本文件顶部。
+
+### 2026-09-20 用户选择公开权威依据：可行性核查结果
+
+- 用户选择“第二条”，授权先查找公开权威适用依据；覆盖此前不扩充依据来源的限制，仅补现有少量动作依据，不扩大动作库。已实际读取下列官方正文，非搜索摘要推断。先前“只能等待个人专业审核材料”的判断过窄：公开指南可支持限定范围的一般健身指导，但不能记作专业人员已审核当前Owner，亦不能满足疾病康复或个体医疗处方。
+- NHS [Strength exercises](https://www.nhs.uk/live-well/exercise/strength-exercises/)（页面审核2024-02-28，检索2026-09-20）：椅子坐站目标5次；靠墙俯卧撑3组、每组5–10次；椅子要求稳固、不滑动、无轮，动作逐步增加。可对应现有chair-sit-to-stand与wall-push-up。未给出的精确秒/次、组间休息、安全最大量不能伪称NHS结论。现有坐站2×6/3×8是工程默认值，不能原样加链接后声称受此指南支持。
+- AHA [Warm Up, Cool Down](https://www.heart.org/en/healthy-living/exercise-and-physical-activity/fitness-basics/warm-up-cool-down)（页面审核2024-01-16，检索2026-09-20）：低速活动热身5–10分钟，降低步行速度放松5–10分钟。可对应现有easy-walk；指南不证明将鸟狗式/死虫式任意标为热身或放松有效。仅选5分钟属于指南范围内的产品选择，不代表个体处方；整个组合是产品编排，并非AHA/NHS联合发布的成套计划。
+- NHS [19–64岁成人活动指南](https://www.nhs.uk/live-well/exercise/physical-activity-guidelines-for-adults-aged-19-to-64/)（页面审核2024-05-22，检索2026-09-20）：长期未运动、有疾病或健康担忧应先咨询GP，活动强度应匹配能力。NHS [热身页](https://www.nhs.uk/live-well/exercise/how-to-warm-up-before-exercising/)的运动视频安全说明另列受伤/症状/近期健康事件/孕期或近期分娩等需先咨询情形；这些不能由“limitations=[]且无痛”推断不存在。产品若限定健康19–64岁成年人，是保守的产品适用范围，不是宣称官方指南排除其他所有人群。
+- 接入缺口已落实到代码：`planning-context.ts`当前无Owner适用声明，只检查limitations与疼痛；`easy-walk`仅ENDURANCE/RECOVERY，力量目标筛选会排除它；`validateWorkoutPlanV2`按所有阶段强制目标一致且缺阶段专属依据，模型可错配阶段。现有external review契约要求qualificationRef/impact与全量数值上限，不能把公开页面填成个人审核或将缺失上限补造为医学事实。
+- 建议的有限修复范围：复用3个现有动作（easy-walk、chair-sit-to-stand、wall-push-up），为一般成人指导单独记录PUBLIC_GUIDANCE性质、来源/审核日期/摘录摘要hash、适用声明及版本；不改1324条外部动作的UNREVIEWED状态。步行仅用于热身/放松；坐站/墙推用于主训练；参数按来源约束，工程排程估计与来源建议分开标注；未知/不符合适用条件继续阻断。来源、适用声明和阶段/参数依据必须绑定预览hash，并在生成/修订/确认时重验，保留现有总时长/安全/用户确认校验。这是尚未实施的接入方案，不是通过证据。
+- 研究结论：已找到可核验的公开依据，后续具备有限接入路径；“专业材料只能外部提供”的绝对阻塞判断已撤回，但完整MVP仍未完成。未新增模型调用、未修改生产数据、未将公开指南写成临床审核。
+
+### 最新授权：继续完成 MVP
+
+- 用户已明确授权不限次数的真实 API 调用，但不得无理由过度调用；这覆盖下文历史每类一次及等待追加授权的限制。每次仅为验证具体修复或定位实际失败，保留尝试证据，不盲目重试。先复用既有学习检索结果验证修复后的学习/训练输出契约，再完成确认、日程及反馈链路。
+- 专业动作适用依据仍为独立缺口；调用授权不替代适用审核，不取消现有校验。已通过的饮食联网/缓存和其余无影响链路不重复测试。
+- 13:18学习追加真实调用1次：带引用建议成功，接受后Action/TimeRequest=1/1且Event=0。验收脚本随后漏传生产装配已有的newId回调导致Crypto绑定错误；仅修脚本与生产装配一致，复用保存结果、零网络恢复排程，Event=1（9月21日19:00–19:25）。证据[模型与建议确认](evidence/2026-09-20-live-learning-extra1.json)、[零调用恢复排程PASS](evidence/2026-09-20-live-learning-schedule-resume.json)。首份FAIL保留，不重跑已成功模型/检索。
+- 13:19–13:21训练追加4次有依据诊断/验证，每次1模型、无自动重试：extra1漏totalDurationSeconds；extra2替代动作在同阶段重复且572秒误报1253；extra3结构正确但总时长不符。依次补明确必填提示、替代引用/逐项算术示例、逐项计算过程要求；没有修改Schema或时长/来源/安全校验。extra4结构化总时长144秒通过严格校验，草案确认前Action/TimeRequest/Event=0/0/0，确认训练1/1/0，确认排程后出现9月21日17:00–17:30的WORKOUT，合成反馈COMPLETED及memory已记录。证据[extra1](evidence/2026-09-20-live-fitness-extra1.json)、[extra2](evidence/2026-09-20-live-fitness-extra2.json)、[extra3](evidence/2026-09-20-live-fitness-extra3.json)、[完整技术闭环PASS](evidence/2026-09-20-live-fitness-extra4.json)。实际结构化动作耗时144秒与预留30分钟是不同概念；模型自由文字仍错误写178秒和30-Minute标题，不能把自由文字当确定性核算或专业指导，此语义限制未掩盖。
+- 本次新授权后共5个模型HTTP（学习1、训练4），Wikipedia只重新核验所选来源1次；没有重复饮食/课表/NLP成功路径。全部合成隔离库，未向正式Owner写合成事项。
+- 13:22最终受影响训练adapter组合case 1/1与Core typecheck通过，diff格式检查通过；Web未改，不重建。已更新Core正式服务；账号/凭据/1324条目录与业务表保留核验继续记录下方证据。
+- **当前结论：学习和内部starter真实服务技术闭环已补齐；完整MVP仍不达标。** 唯一外部前置缺口仍为可核验的动作专业适用依据及对当前Owner范围的接线；现有外部1324条零审核，内部starter非专业认证。浏览器旧主路径与正式页抽查属于已有证据，本轮真实模型闭环经服务执行，未冒称浏览器真实API表单全过程已验收。继续保留目标，不按时间/调用次数宣布完成。
+- 正式更新证据：[运行健康、HTTPS/CSRF及保留核验](evidence/2026-09-20-final-update-runtime.json)，[更新前](evidence/2026-09-20-final-before-update.json)/[更新后](evidence/2026-09-20-final-after-update.json)10表数量/hash一致。
+- 补充一次隔离电脑浏览器读回：[证据](evidence/2026-09-20-learning-browser-readback.json)。复用真实学习结果的SQLite副本、独立合成登录；课程显示1项行动、Wikipedia来源URL/日期/hash可见，9月21日每日计划显示已全部采用19:00–19:25。零模型/公开请求、没有重跑学习确认、未修改正式数据，浏览器错误日志为空。临时页面已关；清理时会话句柄已不存在，并核实3217/4327无监听、正式3041/4341仍在；恢复本次Next生成的类型路径。
+- 恢复目标后的第2轮：上一轮为实际progress（5次有因调用完成两条真实服务闭环及更新），本轮完成浏览器证据落盘/隔离环境收尾。仍未收到动作审核资料答复；不会用内部工程政策或API授权替代外部适用依据。目标保持active，完整验收未通过。
+- 恢复目标后的第3轮阻塞审计：直接只读查询正式库仍为catalog=1324、reviews=0，当前代码仍要求专业适用确认，内部starter仍明确非医学认证；未收到新的审核资料或路径。前两轮已完成所有不依赖该材料的本轮收尾，本轮没有可推进的外部依据，属于阻塞复核而非新的实现进展。未重试API、未重测通过链路。相同外部条件已跨恢复后的三轮持续存在，goal标blocked；完整MVP未完成，保留现有服务器和全部证据。继续所需输入为至少一套动作可核验的适用审核材料（出处/审核身份依据、适用人群、限制、参数范围），之后才能落实Owner适用范围接线及验证，不能填造审核记录。
+
+### 2026-09-20 12:43起：4小时主线 / 最多8小时验收执行
+
+- 本轮以北京时间12:43为起点，16:43判断能否提前交付，20:43前交付可核对结果。沿用当前隔离worktree及所有未提交工作；范围仅服务器和电脑浏览器，不新增功能、手机、数据源。唯一进度仍为本文件。
+- 首道检查已发现明确阻塞：外部1324条动作reviews=0；`planning-context.ts`对EXTERNAL_DATASET明确拒绝；内部8条starter仅有自有文字/hash和`STARTER_TECHNICAL_V1_NOT_MEDICALLY_CERTIFIED`工程政策，没有专业适用依据。目录许可/hash不等于适用性证明，不能删校验或自编reviewer/qualificationRef。已询问是否存在现成专业审核记录，未收到前外部有依据动作闭环为BLOCKED，继续其他模块。
+- 剩余清单及处理：①健身专业适用依据为外部依赖，保留阻塞；内部starter真实模型链路只能作为技术证据单独记录。②课表真实截图→修改→确认；③自然语言事项→冲突说明→确认；④课程资料+既有Wikipedia公开检索→真实模型学习建议→确认/日程；⑤集中受影响构建、服务器账号/配置/记录保留及恢复边界；⑥最终跨模块抽查及使用说明。
+- 真实API沿既有五类各最多一次授权；已消耗餐食解析1次，营养另行已批准的1逻辑批次（2个模型HTTP）已通过，均不重复。其他类别调用前建立持久尝试记录，无自动重试；失败先定位，仅复测不付费的受影响部分，需要新增付费调用时明确列出而不擅自重发。
+- 复用已通过饮食联网/缓存、FIT04c本地浏览器和合成恢复证据，不跑全仓或全面重审。新验收合成资料和隔离数据，正式库仅按既有授权使用凭据与核对元数据，不写合成日程到用户账号。
+- 12:46课表真实服务闭环PASS：合成截图→DeepSeek实际识别1次→修改教室→确认课程→独立接受排程，确认前course/rule/event=0/0/0，课程确认后1/1/0，排程后两周各1事件。证据[course](evidence/2026-09-20-live-course-loop.json)。未重复真实调用；浏览器展示待最终抽查。
+- 12:47自然语言日程真实服务闭环PASS：1次DeepSeek识别明确日期/时间→实际固定课冲突说明→改至15:30→提案确认，正式Event只在ACCEPT后由1增2。未同意外发零调用。证据[event](evidence/2026-09-20-live-event-loop.json)。
+- 12:49学习真实链路初次FAIL、模型0次：检索API可达但正文全部被DNS安全策略阻断。12:50定点诊断证实en.wikipedia.org解析为198.18.0.80，PUBLIC_RESOURCE_DNS_UNSAFE发生在连接前；证据[初次](evidence/2026-09-20-live-learning-loop.json)、[根因](evidence/2026-09-20-learning-source-diagnosis.json)。修复限定为既有Wikipedia数字pageId走固定MediaWiki正文API；任意链接仍原DNS-pinning，禁重定向/限制大小及时间/校验页面身份及内容hash，不放开198.18段。新增单组合case RED 1失败→GREEN 1通过，日志wiki-resource-red/green。未涉及饮食实现，不重复其验收。学习模型额度仍0/1，后续只恢复失败部分。
+- 12:53学习恢复失败部分：R1验收脚本误重用旧幂等键，零外发被正确拒绝；R2使用新检索请求键，真实保存5条Wikipedia引用并重新校验选中正文hash，随后唯一学习模型调用失败，code=LEARNING_PROVIDER_UNAVAILABLE。没有保留该次响应原文，不能断言是网络或输出格式；模型额度现1/1、未重试。证据[恢复R1](evidence/2026-09-20-live-learning-loop-r1.json)、[恢复R2](evidence/2026-09-20-live-learning-loop-r2.json)。公开来源读取阻断已关闭，学习建议确认/入日程尚未实证。
+- 12:54内部starter训练真实调用FAIL（1/1）：外部动作拒绝仍成立；内部候选与画像/恢复状态预览后实际HTTP200，但模型输出id/name/block等不兼容字段、缺phase/reason且reps与duration同时非null，严格校验拒绝，无训练草稿/Action/Event生成。合成原响应留隔离目录供诊断；证据[fitness](evidence/2026-09-20-live-fitness-loop.json)。这与外部适用依据缺失是两个独立问题。
+- 12:56定点修复：训练提示加入实际契约JSON Schema、三阶段、引用、参数上限、互斥计数/计时、精确时长公式；学习提示补JSON Schema和枚举，后者仅为发现的契约遗漏修复，不冒称已精确查明真实失败根因。两个选定旧case RED 2失败→GREEN 2通过，其余11跳过；Core tsc首次只新测试mock签名类型失败，补正确参数后PASS。见model-contract-red/green及mainline-core-typecheck-r1日志。未修改输出校验、未接受不合法原响应。
+- 独立Astra medium一次聚焦只读复核：仅Wiki新适配器/单测试、app包装、两处输出提示，无实质阻断发现；未重跑测试/网络/全仓。复核限制保留。已提出学习/训练各追加最多1次合成模型调用请求，待用户回复；未把时间或无回复视为授权。
+- 12:58～13:00正式服务更新：本轮仅Core源码修改，Web/契约未变，复用上一轮已通过生产Web构建而不重复构建。核对准确任务及进程归属后重开Dashboard任务，Caddy/旧数据保留。10张业务/账号/凭据/动作表前后数量与内容hash完全一致；Owner1、DeepSeek凭据1、动作1324。HTTPS setup/CSRF和Core ready均200、Secure cookie、needsSetup=false、数据库up，未绕过TLS。诊断脚本最初路径错误404已更正，非业务故障。证据[更新前](evidence/2026-09-20-mainline-before-update.json)、[更新后](evidence/2026-09-20-mainline-after-update.json)、[运行](evidence/2026-09-20-mainline-update-runtime.json)。
+- 13:03电脑浏览器一次只读跨模块抽查：更新后原Owner会话保留，today/schedule/learning/fitness可访问，详细训练入口可切换；默认外发未勾选、缺画像时生成禁用。未向正式账号写入合成业务记录、未付费重发、未重测饮食。证据[browser](evidence/2026-09-20-mainline-browser-check.json)，这是页面/会话抽查而非新密码登录或全表单浏览器闭环。
+- 独立复核记录[review](evidence/2026-09-20-mainline-focused-review.md)。失败后事实检查[fail-closed](evidence/2026-09-20-mainline-fail-closed.json)：学习/训练隔离库Action/TimeRequest/Event均0，记录的非法训练原输出仍被当前严格Schema拒绝，未靠取消校验过关。受影响diff格式检查PASS。
+- 使用说明与恢复边界已更新[DEPLOYMENT](../docs/DEPLOYMENT.md)。复用既有合成重开/SQLite新目录恢复及侧车hash证据，不声称真实课表附件引用/DPAPI跨用户跨主机/整机重启已经验证。未提交/推送。
+
+**提前判断（13:03，尚未到4小时）：完整MVP目前不达标，不能提前按完整MVP交付。** 已完成课表与自然语言日程真实服务闭环、修复公开来源读取、服务器更新/数据保留和浏览器抽查。剩余两类外部条件：专业动作适用审核材料；学习/训练各1次额外合成真实调用的明确授权（原额度各1/1已耗尽）。两项异步问题尚无回复，继续保留目标与严格校验，不能按时间到点标完成。学习真实失败根因未精确判定，提示完善仅有本地证据。等待期间不重复付费或反复跑已过检查。
+
+- 第2轮目标审计：上一轮属于progress（真实证据、修复、部署均有产物）；本轮从TASKS/原始失败证据重新核对，没有新审核材料或追加调用答复。已准备`data/mvp-acceptance/live-learning-extra1.ts`与`live-fitness-extra1.ts`，**未执行**；必须先获追加授权，才可设置一次性执行开关。学习复验复用已成功检索及引用，仅重新校验选中正文，不重搜5条；增加合成响应留存供定位，单次模型上限和已存在证据禁止重发仍保留。未触碰正式数据或新增网络调用。当前仍缺同两项外部输入，goal保持active，不伪称后台有运行中的验收任务。
+- 第3轮阻塞审计：上一轮只有复验准备，未推进实际业务验收，按no progress处理。现再次核对原始证据：学习、训练模型均FAIL且各1次，extra1结果文件均不存在，专业审核来源仍未提供；会话中两项问题无新增答复。当前无运行中的验收任务可等待，也无无需外部输入即可关闭这些门禁的剩余动作。相同阻塞已连续3轮，goal标BLOCKED，停止自动轮询；完整MVP仍未达标，不缩小目标、不取消校验、不重复付费。用户提供材料/追加授权后从现有成果恢复，未受影响证据直接复用。
+
+
+### 2026-09-20 营养接入变更：真实闭环通过并更新服务器
+
+用户已明确允许最小真实API及固定版本动作文字目录下载/导入；随后要求只配置DeepSeek，工具联网查营养并本地复用。此修订取代USDA必须配置的前置条件，规格见TECH_SPEC §17/MVP-SCOPE。正式独立MVP库已有1个Owner、1条DeepSeek凭据；未输出密钥。已有USDA配置仍可选用；当前用户无需填写USDA。
+
+- 新DeepSeek营养工具和Owner隔离SQLite缓存已装配到正常服务。先读缓存，未命中才调用工具访问固定中/英文Wikipedia；原文、100g/mL基准、四项营养数值及单位逐项校验，保存URL/抓取时间/引用/hash。缓存30天、每Owner最多100条；重复匹配不联网、不解密、不占外部额度。缓存不是已确认餐食。来源覆盖有限，无依据保持未匹配。
+- 最小测试：缓存额度/确认组合case1/1；真实适配stub及缓存组合case1/1；Web营养文件6/6。独立限定复核发现并修复USDA折叠读取/保存竞态、脂肪分项被当总脂肪两项P2；后者包含截取`fat 1 g`子串绕过，现同时检查完整来源行。未跑全仓/手机/重复E2E。
+- 真实餐食解析一次PASS（合成Cheddar cheese 100g）；真实营养一次逻辑批次PASS：2次DeepSeek、2次Wikipedia请求，无自动重试；查询→选择→确认→新草稿重复匹配全部通过，重复匹配新增外部请求0、actualCalls=0。数据位于隔离验收库，未向正式用户餐食写合成记录。证据：[解析](evidence/2026-09-20-live-meal-parse.json)、[联网与缓存](evidence/2026-09-20-live-web-nutrition.json)。
+- Core类型检查PASS。Web初次构建暴露异步ref类型收窄错误，使用读取中止helper修复，最终生产构建PASS：[构建](evidence/2026-09-20-nutrition-production-build-r1.log)。只停止并重开核验归属的MVP任务进程，保留Caddy及旧数据。
+- 正式服务已更新：迁移32成功、Owner/DeepSeek凭据仍各1条、缓存表存在；HTTPS setup/CSRF及Core ready均200、Secure cookie、无证书校验绕过，needsSetup=false。证据：[运行元数据](evidence/2026-09-20-nutrition-runtime-metadata.json)、[HTTPS](evidence/2026-09-20-nutrition-runtime-https.json)。页面USDA已折叠为可选，主要说明DeepSeek和本地复用。
+- 已批准的健身文字目录固定revision `7455efae41b330c265e7cd4b78dfa848e7ce5ebd`下载并校验Git blob/SHA256，LICENSE/NOTICE保留，未下载媒体；正式MVP导入1324条，全为UNREVIEWED、review=0。证据：[下载](evidence/2026-09-20-fitness-source-download.json)、[导入](evidence/2026-09-20-fitness-source-import.json)。不伪造资格或Owner适用依据，外部详细训练适用契约仍是缺口。
+
+本次DeepSeek联网营养及缓存需求已部署并取得真实最小闭环证据；**完整服务器MVP仍未整体达标**：其他能力真实验收和外部健身动作适用范围接线仍需完成。没有提交/推送。下文未授权、未配置、未安装及未调用为历史，以上最新状态优先。
+
+### 最新：用户再次明确“安装”，实际HTTPS信任验收通过
+
+已将实际自启实例CA `8AE33DEC5D07FEEB277993A2D751F3264A91D139`导入CurrentUser Root。Import-Certificate返回成功；同进程Certificate provider的Test-Path一度返回false，未据此反复安装。随后新进程通过.NET X509Store读取到精确指纹，且未绕过证书校验的真实HTTPS setup-status=200、CSRF=200/Secure cookie、错误Origin=403，证据`evidence/2026-09-20-mvp-https-trusted.json`。正式实例仍needsSetup=true。证书安装/HTTPS入口阻塞已解除，下文未信任与取消记录保留历史；真实API、动作目录授权及外部动作适用范围接线仍未完成，本次“安装”仅对应证书，不扩张成付费API或数据导入授权。完整MVP尚未完成。
+
+### 2026-09-20 完整服务器MVP持续实施（等待用户输入，未完成）
+
+本次恢复后的第3轮阻塞审计：同一证书确认/真实调用授权条件持续未满足。前轮对会话75531及进程11180的观察为verified wait；最新进程11180已不存在；随后会话75531返回exit1及Windows错误“操作已被用户取消”(0x800704C7)，因此已确认导入取消，实际CA仍未受信任，不再宣称窗口仍打开，也不再自动重发导入。真实API和动作目录授权无新回复。没有可据以完成剩余真实验收的新增输入，goal再次标blocked，等待用户主动回复；保留全部成果与完整MVP范围，不重复测试。
+
+恢复后最新核对：原证书进程14344及工具会话40537均已不存在，不能再称原窗口仍在等待；实际CA未受信任，正常HTTPS仍失败，两个自启任务仍Running。原导入终止原因未知，不推断用户已同意或拒绝。沿已批准部署方案核验公开证书指纹后重新发起一次CurrentUser导入，当前工具会话75531仍运行；不重复安装Caddy或重跑业务测试。真实API及动作目录下载授权没有新回复。此为恢复后的第1轮阻塞审计，goal保持active。
+
+最新阻塞审计：部署验收轮及随后两轮均未收到所需交互/授权；本轮重新查询证书导入进程14344仍存活，窗口为“安全警告”，实际CA仍未受信任；两个服务任务继续Running。前轮有新的来源/代码缺口证据，本轮属于对活进程的verified wait，不新增重复测试。真实API及文字动作目录下载/导入的异步授权仍未回复。系统部署已获授权，不重新请求；只等待原生证书窗口操作。当前不能执行剩余真实验收，也不能编造外部动作资格与Owner适用依据。goal标blocked以停止无变化自动轮询；目标仍为完整服务器MVP，非完成或缩小范围。用户回复后继续现有状态，不重新安装或重跑已通过用例。
+
+用户已要求“直接完成项目mvp，自动决策”。在已批准正式需求内连续补齐功能，普通可逆实现不再逐步确认；手机保持移出范围，测试保持最小完整流程。真实付费调用、个人数据、安装及系统部署仍依既有明确边界，在具体方案完成后处理。原FIT修复预算与历史结果不重置。
+
+- 饮食文本：新增有界DeepSeek JSON传输及Owner凭据解析器，正常app装配接通餐食文本解析和既有辅助训练文本入口。单一合成接口场景通过，含未配置/未同意不发送、解析落草稿、同键重放、非法营养输出拒绝。真实API尚未调用。
+- 课表：已接DeepSeek视觉适配、Owner配置状态和导入服务；不确定字段保留null，界面补全，未完整不得确认。一个隔离合成场景通过识别→不完整阻断→补全→确认课程/重复规则/日程；不是实际截图API证据。
+- 学习公开检索：Wikipedia中/英文适配器完成，正常server启动装配，确认执行前无网络；定点2/2通过。真实网络可达性待核验。
+- 营养配置：migration31新增Owner加密凭据表，USDA配置接口与Web设置入口已写入；一个隔离合成场景通过认证、拒绝DEMO_KEY、保存/查询不解密不联网、移除。USDA事实适配器及完整匹配装配仍在集成中。
+- 07:00：原实现仅准备上下文，现接已有LOCAL_RULES协调器，在事务中每天只生成一次可审核Proposal，不自动应用、不调用Provider。today定点场景1/1通过，同日重复访问仍只有1份Run/Proposal、Event为0。
+- 自然语言日程：已实现只读解析、参考日期/时区、缺字段保留null、已确认日程重叠原因、编辑后撤销旧冲突说明，接回既有提案确认。一个合成服务场景1/1通过，缺确认/缺key不外发，只有ACCEPT后出现Event。解析接口已Owner鉴权及30次/分钟限流。
+- USDA适配与Owner接线已完成，源许可/份量依据见TECH_SPEC；单一适配场景1/1通过。现有`mvp-health-text.test.ts`扩为解析→真实适配stub查源→选择→确认的完整接口场景并1/1通过，200g的确定性汇总正确。没有真实USDA/DeepSeek请求。候选Web编辑功能正在补齐。
+- 集中Core类型首次失败仅USDA引用了Node环境未暴露的`ReadableStreamReadResult`；改为从reader.read推导类型后第二次exit0，无运行逻辑修改，不重复适配测试。最终Web构建、一次核心浏览器主路径、真实能力与服务器运行恢复门禁尚未完成。不能称完整MVP已达标。
+
+#### 本轮最新集成结果（以上“仍在实施/尚未构建”由此更新）
+
+- 饮食Web候选编辑/排除已补齐，使用既有`REPLACE_CANDIDATES`，保存后清空旧匹配；未保存不得继续匹配/选择/确认。文本解析增加初始未勾选的外发确认，移除“仅本地保存”误导文案；USDA失败提示与小数输入已修正。定点Web文件4/4通过，其中新增一个完整编辑确认场景。
+- 独立Astra medium只读检查生产适配、Owner凭据、课表完整性、营养单位来源与自动LOCAL_RULES装配，无实质P0/P1/P2发现；没有再跑测试或复核全库。
+- 隔离副本`data/mvp-build-37e25fae5c504791987fcea574727c68/apps/web`生产构建exit0，含源码TypeScript及页面产物。没有改日常预览的.next/tsconfig/next-env，没有复制.env或用户库。日志[Web build](evidence/2026-09-20-mvp-web-build.log)。副本含只读依赖/Core junction，保留，不盲目递归删除。
+- 新增服务器桌面浏览器单case：身份→配置营养密钥（合成密钥）→主动同意文本解析→150g改200g→保存→匹配fixture来源→选择→确认→刷新读取。首次仅测试定位歧义失败（“餐食文本”同时匹配新checkbox）；改成exact后同一case1/1通过，4.5s、总5.4s。未改业务绕过校验。失败[日志](evidence/2026-09-20-mvp-browser-initial-failed.log)/[上下文](evidence/2026-09-20-mvp-browser-initial-context.md)保留，成功[日志](evidence/2026-09-20-mvp-browser-r1.log)。测试中明确断言TEST_FIXTURE、确认200kcal/蛋白20g/碳水40g/脂肪10g，不能当真实营养数据。无浏览器error；运行器仅有NO_COLOR/FORCE_COLOR提示。沿用Web loopback网络拒绝保护且无未知目标标记，测试后3217/4327无监听。
+- 本轮局部浏览器修复1次（测试定位）；不消耗或重置原FIT04c历史预算。没有跑手机、全站或全仓回归。**当前为服务器功能的本地集成PASS，完整MVP仍缺真实Provider/合法动作数据实际启用和服务器运行恢复证据。**
+
+本轮证据汇总：[服务器MVP本地集成](evidence/2026-09-20-server-mvp-local.md)。已通过异步问题请求真实接口验收授权：合成内容、已保存DeepSeek凭据、五类能力各最多一次、不自动重试/不发送个人记录；等待用户回复，不把等待当同意。只读本机核对Tailscale命令不可用，所查3000/4311/3041/4341/3443端口无监听；未安装软件或启动实际服务器。下一步先在明确授权范围执行真实能力最小路径，并完成独立HTTPS入口/常驻运行及备份恢复方案，具体系统改动仍需按AGENTS单独确认。
+
+部署方案及回退范围已写入DEPLOYMENT顶部，Caddy本机配置已准备（未安装/运行验证）：独立MVP目录、HTTPS127.0.0.1:3443→Web3041→Core4341、仅当前用户CA信任、登录自启任务、合成数据重开与新目录恢复。已发起第二项具体系统部署授权问题，仍等待回复；不会因为“自动决策”自行越过AGENTS明确保留的安装/生产权限。当前goal保持active，未标完整或blocked。
+
+实现由既有Terra Max角色分别负责独立视觉、公开检索/USDA、自然语言日程范围，主Agent维护装配与唯一进度；集中集成检查，避免重复全仓测试。工作保留在当前worktree，未提交/推送/部署。
+
+#### 部署授权后实际结果（2026-09-20 01:21，北京时间）
+
+用户明确回复“允许按此方案部署验收”，覆盖官方Caddy、当前用户CA信任、独立MVP目录、登录自启及合成重开/恢复；未覆盖另一项尚待回复的真实付费API验收。
+
+- 最终实际worktree的生产Web构建exit0，日志`evidence/2026-09-20-mvp-production-build.log`；已安装官方Caddy v2.11.4，release archive SHA256 `1708333f79e274c7697285afe6d592ab39314e0b131e9ec6bea08ad27df62ebf`匹配，配置验证通过。
+- 两个当前用户Limited登录任务已登记并Running：`\EV-AI-Assistant\EV AI Dashboard MVP`及`EV Local HTTPS MVP`，无限执行时长、允许电池供电。4341/3041/3443均只监听127.0.0.1。主服务已实际停止并重开，Core ready/database up；新MVP仍needsSetup=true，未用合成Owner占用正式实例。没有主机重启或防火墙变更。
+- 自启环境无法看到交互环境安装的LOCALAPPDATA工具目录（同用户名/相同路径，但File/Directory.Exists为false）；核对二进制SHA256后复制到worktree内忽略目录`data/mvp-tools/caddy-2.11.4`，任务使用该绝对路径后运行成功。不是未核对路径就调整系统权限。原始工具保留。两个环境还产生了不同的CA，不能沿用交互实例的信任证据。
+- **当前唯一TLS系统交互：实际自启CA `8AE33DEC5D07FEEB277993A2D751F3264A91D139`正在等待Windows“安全警告”中点击是。** 交互实例旧CA `ABCDEA45F98C454BAD3FF641C7EE6BBE316AEFF7`已曾获信任，但不能验证实际服务；当前正常HTTPS请求仍因证书链失败，不绕过校验标PASS。已请求用户完成原生窗口。
+- Web本机上游最小检查：CSRF初始化200且Secure cookie；错误Origin403。暂不能替代最终HTTPS端到端验证。状态证据`evidence/2026-09-20-mvp-deployment.json`。
+- 1条独立合成恢复流程通过：真实Core HTTP创建Owner/任务→关闭重开→登录/原任务读取→SQLite CLI create/verify/restore至新目录→恢复实例登录/任务读取；artifacts与memory合成侧车文件备份/恢复hash一致。证据`evidence/2026-09-20-mvp-recovery.json`。仅合成内容，未读旧个人库；没有实际课表附件引用或DPAPI密钥恢复证据，不宣称完整跨环境恢复。
+- 脚本定点修复：已安装系统的“找不到任务”异常新增匹配CmdletizationQuery_NotFound；自启隐藏窗口且不再受默认3天限制；新TLS wrapper保留简短失败日志。诊断阶段临时日志代码已移除，最终PowerShell语法检查通过。未跑全仓测试。
+
+完整MVP仍未达标：待实际HTTPS信任与最终入口核验、真实Provider授权/调用、合法动作数据实际启用；恢复边界如上保留。goal继续active，没有提交或推送。上文“未安装/未部署/待系统授权”是此前状态，由本节更新。
+
+#### 继续核对：外部动作实际接入缺口
+
+上一轮分类为progress：完成安装、自启修复、真实服务重开和独立恢复证据。本轮核对证书导入进程14344仍活跃且窗口为“安全警告”，实际CA尚未进入CurrentUser Root；两个服务任务仍运行。没有重新发起导入或绕过证书校验。
+
+只读来源元数据已固定：`hasaneyldrm/exercises-dataset` main revision `7455efae41b330c265e7cd4b78dfa848e7ce5ebd`；`data/exercises.json` 17,391,530 bytes，Git blob SHA `3cbb77b678c40d7342897d38e4c61e9502f829a7`（不是SHA256）。尚未下载数据本体/导入。来源README、LICENSE/NOTICE边界保留：文字与媒体分别处理，不下载媒体。
+
+发现需要纠正此前“仅差合法数据启用”的笼统表述：`apps/core/src/modules/fitness/planning-context.ts` snapshots对EXTERNAL_DATASET无条件抛WORKOUT_PROFESSIONAL_CONFIRMATION_REQUIRED；目录独立review存自由文本人口范围，不能证明Owner适用性。因此外部数据完成导入也不能直接进入详细计划。后续须补明确、可核验的适用范围契约与接线，使用真实审核依据；不能以AI自编reviewer/qualificationRef或直接删除阻断来宣称完成。内部starter真实调用与外部动作实际链路必须区分记录。
+
+### 2026-09-20 FIT04c extra1与只读联网已获授权
+
+用户回复“允许”，批准上一轮明确提出的FIT04c额外一次定点诊断修复、原同一隔离场景最多重跑一次，以及只读联网查阅官方接口/数据源资料。原2/2保留，extra1现在开始；只改原测试基础设施范围，不改业务确认规则，不预先豁免取消/网络失败。真实付费调用、个人数据、下载安装和部署未新增授权。当前使用既有失败日志作RED证据，不额外重跑基线；结果在本节追加。
+
+**最新结果：FIT04c本地限定PASS。** 只改原范围三文件，唯一重跑exit0、1/1；原始9次GET取消与9份独立请求ID/AbortSignal证据配对，未解释失败0。Next可选npm版本查询在传输前被精确禁用并记录，未知TCP目的地仍拒绝并阻断归档。两次Fake及最终Action/TimeRequest/Event=1/1/1、反馈与记忆进入下一次上下文、第二份DRAFT均保持。成功证据已归档并复制至plans/evidence；3217/4327无监听。定点类型0诊断、两个脚本语法通过；Astra medium一次只读聚焦复核PASS，未重复测试。预算原2/2+extra1 1/1已用。未提交推送、未真实调用、未部署，不能称完整MVP完成。报告：[extra1](evidence/2026-09-20-fit04c-extra1.md)。下方2026-09-19失败记录是历史，不再作为当前本地闭环阻塞。
+
+#### 缺失真实能力的只读选型结果（待实施，不代表接通）
+
+| 能力 | 最小接入方向 | 已核对事实与剩余条件 |
+| --- | --- | --- |
+| 课表截图 | DeepSeek `deepseek-flash`，现有凭据保护、直接base64图片，不另建文件上传服务 | [官方视觉文档](https://api-docs.deepseek.com/guides/vision/)提供Chat Completions图片格式；需补Owner凭据工厂到VisionCapability/导入服务的装配，不能启动时解密或提前发送截图。缺真实调用证据 |
+| 饮食文本/自然语言日程 | 复用DeepSeek结构化输出、既有确认与确定性校验 | 新文本解析不得给出营养事实，也不直接落Event；服务端适配、路由/UI接线与最小场景仍待实现 |
+| 营养数值 | 优先评估USDA FoodData Central作为可替换首个数据来源 | [官方API指南](https://fdc.nal.usda.gov/api-guide/)明确搜索/详情接口、需API key、CC0；DEMO_KEY仅适合限额探索，不作为正式可用配置。中国食物名称映射、克/毫升/份量身份和人工候选确认仍需实现，不能声称覆盖全部中国饮食 |
+| 公开学习检索 | 优先评估MediaWiki匿名公开检索作为一条最小公开资料链路；保留可替换接口 | [Search](https://www.mediawiki.org/wiki/API:Search)及[Etiquette](https://www.mediawiki.org/wiki/API:Etiquette)提供查询格式与User-Agent/串行请求要求；百科来源必须标为公开资料，不能标为课程官方资料。不是全网搜索，目标主机实际可达性尚未测试 |
+
+现有默认文本模型常量是`deepseek-v4-flash`，不是早期deepseek-chat；[官方模型说明](https://api-docs.deepseek.com/quick_start/pricing/)仍接受该别名并路由到最新Flash。本轮未擅自改动现有模型配置，也不因文档列明能力就将当前项目标为可用。只读选型未使用用户密钥或产生模型费用。
+
+### 本轮最新范围：移除手机MVP门禁
+
+用户明确“手机端从mvp里删除掉，只需要服务器端现在”。正式范围已同步PRD与MVP-SCOPE；沿用服务器Core/Web及电脑浏览器操作，不改为纯API或新增云迁移。手机适配、移动矩阵、物理iPhone/Safari和专为手机安排的远程访问部署退出本轮，不再作为完整MVP阻断。旧V9记录与结果保留历史效力，其手机必达条款不再驱动当前任务。其余领域、真实Provider和服务器运行/恢复要求保留；仍按最小完整流程验证。本次仅调整文档，没有运行业务测试或修改业务代码。
+
+### 本轮最新测试约束：最小完整跑通，优先完成功能
+
+用户明确要求：“现在所有的测试都以最小完整跑通的测试为主，减少大多无须的测试，把token都用在完成功能上”。此约束优先于技能默认的全量测试、重复审查与扩展矩阵；不改变完整MVP范围，不把未运行或失败写成通过。
+
+- 每条新增/实际改动的业务链仅验证1条完整成功路径；涉及未确认写入、身份/数据隔离、无Provider伪成功等实际风险时补必要阻断，优先合并于同一场景，不穷举排列。
+- 已有且仍适用于当前代码的证据直接复用；仅因实际改动、失败或尚未解决的具体风险重验，不为文档更新、形式收口或重复审查再次跑测试。
+- 集成后集中执行受影响范围的类型检查与必要构建，以及1条贯穿核心操作的浏览器主路径；领域检查与浏览器不重复覆盖同一细节，不运行根全仓测试、全站E2E、全迁移或多浏览器矩阵。
+- 真实Provider和服务器恢复等当前正式范围内必要验收只验证最小完整路径；Mock/模拟不能替代这些真实证据。手机已移出范围。缺资源如实列出，不以增加本地测试填补。
+- 减少重复读文档、重复汇报与无明确问题的整版复核，把实现工作集中在缺失功能与必要集成。只对具体发现和直接影响做聚焦检查。
+- 本条是验证策略调整，不自行追加已耗尽的FIT04c修复次数，也不扩张付费API、真实数据、下载安装或部署权限；已有执行授权继续有效，无需对普通步骤重复询问。
+
+### 2026-09-19 本轮目标：完整 MVP 达标（冲刺安排，尚非验收结果）
+
+用户在本次项目评估后明确选择“完整 MVP 达标”。不以桌面试用版替代正式范围，不恢复已退役项目分析/Codex功能。以PRD最新修订、MVP-SCOPE与V9实际验收边界为准；一晚为冲刺时间目标，不是无条件完成承诺。此节只记录目标与工作安排，不把选择交付目标解释为新增付费调用、个人数据、系统部署或超预算修复授权。下方04c原始失败及2/2预算保留。
+
+#### 工作顺序与交付门禁
+
+| 顺序 | 工作包与主要落点 | 可验收结果 | 依赖/当前状态 |
+| --- | --- | --- | --- |
+| 1 | FIT04c诊断收口：现有fitness单browser spec、run-e2e、fitness-planning-evidence、专用bootstrap | 四类GET取消具可核对配对；Web网络拒绝可脱敏归因；不放宽未知目标拒绝、业务事实与归档门禁；同一case通过并有归档 | 原extra1仍待明确授权；尚未改码/重跑 |
+| 2 | 饮食真实接入：nutrition/provider与service、health-loop、既有凭据及界面 | 文本食物/数量解析→可信营养查询→确定性计算→可编辑确认→本地记录与当日统计；缺源/单位不明不伪造数值 | 需要确定可用营养来源；真实API另核准 |
+| 3 | 课程真实接入：providers/capabilities、calendar/import-service、learning/service及对应页面 | 一张截图产生可纠正课程候选并确认入日程；一条公开检索资料形成带引用学习Action/TimeRequest | 需要确定视觉/搜索能力；文本Key不等于视觉可用 |
+| 4 | 健身真实链路：fitness/deepseek-workout-planning、planning-context/service、catalog及feedback-memory | 合法来源候选→经批准上下文→真实模型草案→训练确认→独立日程确认→实际输入反馈→下次可选上下文 | 依赖1；外部动作数据资格、真实调用及个人数据分别核准；Fake不计真实效果 |
+| 5 | 自然语言日程与每日协调：calendar、daily-planning及schedule页面 | 一句事项→可修改候选/冲突→确认写入；核对07:00与首次访问行为、单日重复触发、未批准外发边界 | 先依据现有提案服务冻结最小输入输出；不另造日程事实系统 |
+| 6 | 共同底座核验：auth/tasks/today/memory/providers及app装配 | 唯一Owner、任务生命周期、今日聚合、记忆编辑/删除/存在版本恢复、能力状态与失败提示均真实 | 复用有效证据，仅对实际受影响链路补必要检查 |
+| 7 | 最终集成与服务器运行：server、Web BFF、Windows脚本与backup工具 | 正常启动接通已实现能力；受影响类型/构建通过；电脑浏览器核心流程；07:00行为与实际运行相符；备份恢复边界有证据 | 不含手机及专为手机的私有访问；任务注册/重启、真实数据恢复仍在具体方案准备后核准 |
+| 8 | 最终交付 | 按正式需求逐项给出已通过、失败或未验证及证据；全部必需门禁满足才声明完整MVP | 未通过不能按时间到点标完成；阶段保存沿既有精确授权，不自动发布 |
+
+#### 冲刺组织与检查约束
+
+- 按北京时间2026-09-20 00:00至08:00作为建议首个冲刺窗口；用户尚未确认通宵截止时间。时间用来安排检查点，不删减完整MVP范围。04:00检查真实能力接入，06:30检查可交付范围；未达标明确延续工作，不自动改称试用版完成目标。
+- 可独立推进饮食与课程适配准备；共享app.ts、公共契约导出、迁移及本文件统一串行整合，避免覆盖当前未提交健身工作。当前没有因此启动额外Agent。
+- 优先复用既有Provider Port、凭据保护、Proposal/版本/幂等/事务。每个新增闭环先固定1成功及关键阻断的最小检查；遵守当前测试预算，不擅自根test、全站E2E或安装依赖。
+- 新视觉/搜索/营养适配器在服务来源与能力确定后，才冻结精确接口与实现步骤；不从旧技术蓝图推定运行代码已存在。
+- 不读取凭据正文或日常数据库来完成本轮排期；真实调用先准备脱敏样本、固定目的地、次数/输入输出上限及费用边界，再提交具体核准。系统部署先准备可审阅配置，再核准执行。
+- 本轮当前仅完成只读核对与排期写入；没有新增测试通过、业务修复、真实网络调用、部署或发布结果。
+
+### 最新状态：2026-09-19健身业务路径已跑到终点，整体验收未通过
+
+03b extra1、03d R2、04b R2及03e均已限定实现/复核通过，预算原样保留。04c初版+R1+R2已用尽：初版Windows --import原始路径启动失败（0case）；R1修file URL后单case在表单选择器失败；R2修实际可访问选择器后单case走完业务断言，但最终诊断门禁失败。**不能声明健身闭环PASS。**
+
+R2实际证据：2次Fake、训练确认后Action1/TimeRequest1/Event0、LOCAL_RULES单独确认后Event1；实际合成反馈保存201、记忆RECORDED，授权反馈与记忆进入第二次Provider输入，第二份留DRAFT，最终事实1/1/1。consoleProblems/apiFailures/pageErrors/browser externalRequests均0，但failedRequests=9（GET ERR_ABORTED）。另有Web网络拒绝标记，仅denied=true，未记录目标/原因，不能宣称Web零外连尝试；Core拒绝计数0。缺少成功browser artifact/归档。
+
+证据：evidence/2026-09-19-fit04c-final.md及run-initial/r1/r2日志、r2-fake.json、r2-failed-requests.json。失败运行managed-run-8l1XsQ保留；3217/4327已无监听，next-env前后hash一致，未操作日常数据/3000预览，未提交推送。Planck正复核实际失败证据，不重跑或改码。当前唯一下一步：复核后请求一次仅04c诊断/验收基础设施的限定修复授权；未获授权前不再执行或修改该任务，不重置2/2。
+
+Planck实际证据复核完成：NOT PASS。只读核对合成库事实1/1/1、workout2（COMPLETED/DRAFT各1）、feedback1，Fake两次及第二次feedback1/memory1成立；四文件/R2日志hash匹配，成功artifact/归档缺失。代码存在与端点吻合的AbortController生命周期清理，但缺逐请求ID/signal/时序配对，不能直接豁免9次取消；网络拒绝至少一次，不能区分真实外连意图、内部连接或参数解析误判，也不代表外连成功。下一步请求extra1仅四端点取消取证与网络guard脱敏归因、必要定点测试基础设施修复，同一合成case最多再运行一次；保持原始失败计数、拒绝未知目的地和业务/归档门禁，不预先授权扣除错误。阶段交接docs/releases/2026-09-19-fitness-local-loop-handoff.md。
+
+### 2026-09-19 当前授权：03b额外一次定点修复
+
+当前接线进度补记：04b五文件UI已交付，原单Web组合case RED→GREEN，覆盖显式同意、草稿/修订/提案和实际反馈；一次测试扩充按R1/2计。仅Mock接口，不代表Core/浏览器闭环通过。Astra medium Mill进行一次限定只读复核；主继续后端集成准备，03d仍在实施，03e待服务接口稳定。04c最终浏览器仍未运行。证据见evidence/2026-09-19-fit04b.md及同名精确diff、原始日志。
+
+04b限定审查发现两项有效P2，主核实：按body永久缓存check-in幂等键使A→B→A重放旧A；旧手动反馈丢弃返回的safetyNotice。已交原Ohm执行剩余R2/2，保持原五文件和同一个Webcase，成功确认check-in后退役该次键、未知结果重试保留；手动反馈独立展示安全提示。未将Mock绿色当作这两项已验证。03e只读准备完成，实际服务还在03d实施中，默认adapter/路由尚未接通。
+
+03d交付：六文件单组合case 1/1、定点tsc通过，R1/2用于V1夹具类型及同case断言补齐；原Astra Bohr聚焦复核中。服务构造接口已稳定，8秒Provider deadline但不宣称HTTP断连取消；反馈/记忆分事务，V1/V2列表在SQL区分。证据fit03d.md/.diff及日志。04b R2三文件修复交回，原case RED→GREEN 1/1，预算2/2耗尽；Mill仅复核原两项及直接影响。两片均未因本地测试先标整段完成；03e待03d限定复核。
+
+04b R2限定复核PASS：Mill核对原两项、三文件/hash及原单case日志，无剩余有效发现，2/2不重置。主首次Web typecheck exit2，仅报告旧.next/types引用已退役projects页面；不是新UI类型错误，也不标类型通过。不删除或覆盖用户预览缓存，待隔离新产物核验。原始输出fit04b-main-typecheck.log。
+
+03d限定复核发现有效P2：自动记忆证明读取后、只按数字版本写入前，另一连接删除重建同版本人工内容可被覆盖。已交原Lorentz最后R2/2，仅helper与原case；优先复用现有writeForCompaction事务内beforeProjection，以实际parentRevision UUID校验并回滚冲突，避免新记忆框架或重构原投影事务。对应自动证明使用回调revision，不以提交后重读冒充同一写入身份。事实先提交不变，03e仍不越过此复核。
+
+04c准备继续：04b最终UI限定通过后，原Popper获准编写原单browser spec，不启动服务或测试；最终GO仍待03e。沿用0/2预算和原四文件范围，测试两次Fake生成，第二次确认授权反馈/记忆确实交给Provider，第二份只留DRAFT不新增已确认Action/Event。不是额外browser case或真实模型授权；证据helper随原契约同步。
+
+03d R2限定复核PASS：原Bohr确认实际事务内parent/source revision UUID门禁、投影前回滚及同事务自动证明；单case真实第二连接删除重建反例RED→GREEN 1/1、定点tsc通过，原entity-service未改。原2/2已用尽。当前唯一下一步：原Dirac执行03e App/新planning-routes/单routes case接线（新接线0/2，不重置04a旧缺陷预算），通过后04c最终browser；04c现只编写准备。证据fit03d-r2.md/.diff和原始日志。真实API/用户数据/提交权限未扩张。
+
+03e限定复核PASS：Planck核对App/新路由/单case及当前hash，鉴权、默认无Fake、配置零解密外探、注入门禁及响应包装通过；03e R1/2为非法descriptor测试类型标注，保留1轮。04c四文件静态边界也PASS，实际browser尚未运行。主集中Core配置+专用bootstrap共169入口0诊断；隔离Web build R1 exit0（首轮副本漏复制测试配置，补复制后通过，无业务改动），99个Web源码/测试文件与副本hash一致，diff --check exit0。证据fit-web-isolated-validation.md及日志。
+
+当前唯一下一步：Popper已收到04c最终GO，执行原sole fitness-planning-loop.spec.ts，初版0/2、仅测试基础设施允许局部修复；发现已冻结业务缺陷不得越权修或降低门禁。后续主复核实际归档与闭环事实，更新最终交接。未使用真实API/健康数据，也未新增提交。
+
+用户答复“可以”，批准上一轮明确提出的03b新check-in失效缺陷一次限定修复，原2/2保留为2/2+额外1/1。当前执行：原Terra Carver仅改planning-context、必要repository查询和原context单case，先复现新风险状态B之后旧安全状态A仍被使用，再修共享readBasis并覆盖preview/resolve/revalidate。不改迁移/历史报告，不新增产品范围。原Astra Bohr仅复核该发现及修复直接影响，通过后恢复03d/e及04b/c已有契约；不再等待重复同意。
+
+沿用既有隔离worktree、TASKS唯一进度、最小测试和无自动提交边界；用户显式约束优先于新版技能的全套测试/新账本/自动提交或自主超额默认。此前暂停段保留为历史状态，不是当前待授权。真实API、个人数据、安装/下载与发布未新增授权。
+
+已恢复Carver定点实现；Ohm按已冻结接口恢复04b的mock测试与UI实现，Popper恢复04c独立fixture/runner准备（均原0/2，不运行浏览器）。写集合分别是Core上下文3文件、Web5文件、E2E4文件，不重叠；依赖语义保持冻结，03d/e仍等03b限定复核。运行环境只读核对Node v24.18.0、分支/HEAD未变，无安装或基线全套。主整理接线契约与证据，不重复子Agent实现。
+
+03b extra1交回：新增Owner范围、有界LIMIT1的findLatestEffectiveCheckIn，created_at/rowid降序，排除尚未生效的未来时间；共享readBasis在风险时422、其他新状态使旧依据409。原单case RED 1 failed→GREEN 1 passed，原定点tsc无诊断；合成savepoint保留原case，验证同时间戳/UUID无关顺序与零新workout/proposal。证据2026-09-19-fit03b-extra1.md/.diff及日志，预算2/2+额外1/1已用，迁移未改。Bohr限定复核中，尚不提前放行03d。
+
+03b extra1限定复核PASS：Bohr逐项确认旧依据失效、最新风险优先422、安全更新409、同时间戳追加顺序和直接回归，三文件/diff/迁移hash一致。主核对原始RED/GREEN/tsc及当前hash后放行03d。当前唯一下一步：Lorentz实施原03d五文件服务闭环（0/2），Ohm继续04b mock/UI。04c专用bootstrap/runner/evidence已交准备草稿，未执行类型/服务/browser；等最终App/UI就绪再单browser GO，原0/2不重置。此前暂停段仅历史。
+
+03d范围小裁定：如旧训练列表隔离需要，允许repository.ts作为第6文件仅给listWorkouts增加可选revisionSchema SQL过滤，使count与分页一致，默认保留兼容；不得取页后filter造成错误总数，或修改冻结03b上下文/迁移。属于原V1/V2兼容需求，03d预算不变；03b先前hash将因该独立hunk变化，最终证据须记录，不能笼统沿用全文hash。
+
+### 当前安全暂停点（2026-09-18，本轮交回）
+
+- 已批准的03a测试反例、04a响应清理各额外一次修复均实现且原Astra限定复核PASS；每项仍为原2/2+额外1/1，旧证据不改写。
+- 03b存储/上下文已实现，migration30，单case1/1及定点tsc通过；独立审查因“新的风险check-in未使旧安全依据失效”未通过。2/2已用尽，**当前唯一下一步：用户授权一次该缺陷的定点修复 → 原case反例验证 → Bohr限定复核**。异步授权问题已发出，未收到答复；不将此前两项授权扩大为第三项。
+- 03d服务仍只读准备；03e路由/默认adapter装配未实施。04b仅只读核对接口，5个UI允许文件均未修改、未跑测试（0/2）；此前“并行接线”是派工目标，不是已交付页面。
+- 04c仅新增 `scripts/fitness-planning-evidence.mjs` 的独立证据门禁草稿；bootstrap/runner分支/browser case未写，未跑服务、类型或浏览器（0/2），尚未经独立复核，不能当验收产物。
+- 所有worker已要求冻结在安全检查点，原dirty保留。未接入真实API、未下载/导入真实外部数据、未碰日常库或预览，未新增提交/推送。健身闭环尚未完成，恢复后沿用原worker与各自预算，不重开任务名。
+
+### 2026-09-18 追加限定修复授权与继续闭环
+
+03a extra1已限定通过：Bohr独立复核单替代940/570秒均合法，组合1280秒精确拒绝；原生产契约/validator未改，RED 1 failed→GREEN 1 passed。证据fit03a-extra1.md/.diff；预算原2/2+额外1/1。03b已GO，独占repository、planning-context、migration30和单context case，接口采用owner/version CAS、当前memory revision UUID、预览选择短时保存与服务端确认时钟；最多2局部修复。04a extra1原case1/1及Core类型通过，Planck限定复核中。
+
+04a extra1限定复核通过：Planck核对精确diff应用后与当前全文相同，未读完body清理、非2xx、终止abort及清理异常保护关闭原P2；迟到响应仅静态核对，未称真实流/Provider验证。证据fit04a-extra1.md/.diff，预算原2/2+额外1/1已满，adapter默认装配仍待03e串行接线。两处前置已关闭，当前唯一下一步为03b存储上下文实现，然后03d服务闭环。
+
+03d只读准备由Terra Lorentz进行，暂不写03b独占文件。预计写planning-service.ts、service.ts（V1保护/反馈接线）、proposal-applier.ts、feedback-memory.ts及一个loop test；以新增小服务保持V1类型与逻辑兼容，沿用已有幂等/配额/事务，不新增通用框架。实际GO须等03b交付及限定复核；main维护规范文档。
+
+04c测试基础设施可独立先行：Terra Popper只写专用fitness-planning-test-bootstrap.ts、runner精确fitness-planning-loop.spec.ts分支、单browser spec和必要fitness-planning-evidence.mjs。当前不启动测试/浏览器，待app/UI就绪主GO；新分支使用独立Fake/数据/日志和自身证据门禁，其余selector原门禁不变，不免除归档检查。整个04c沿用一次实施最多2局部修复，不因准备与最终运行分开重置。专用App option约定workoutPlanningProvider，复用既有TEST_FIXTURE隔离门禁；不造真实凭据。
+
+下游接口冻结：planning/profile GET/PUT返回data.profile（未建null）；candidates与memory GET返回data.items，memory只含当前revision元数据；context/preview POST返回data=preview；capability GET返回独立V2 descriptor；planning/workouts的create/detail/revisions/proposal/feedback使用V2服务，决定仍全局proposals/:id/decision。新反馈响应独立追加memoryStatus，不改变旧strict反馈响应。详细读取需带候选快照供名称/说明展示。03d记忆可复用v07_audit_events的source尝试标记及自动正文hash，无新表：仅首次新feedback尝试，重放不重写；失败DEGRADED不自动补偿，事实仍供下次授权预览；人工改动/无法证明自动来源跳过，删除后不从历史重建。内存/投影写入在反馈事实提交之后，经原EntityMemoryService完成，不扩大为原memory服务事务重构。
+
+04b按冻结HTTP契约并行：Terra Ohm独占fitness-workspace/workout-review、新detailed-workout-workspace/detailed-workout-review和单Webcase五文件。旧手动入口保留，新显眼入口切换详细流程；旧反馈也改为实际输入。只mock单case，无browser运行，最终browser仍04c一次。Core/UI都用profile null、memory metadata、detail citations和独立memoryStatus；列表data.items为workout+revisionSchema有界页，不扩大历史revision浏览功能。独立初版最多2局部修复，具体源码接口不一致先反馈主，禁止静默移除校验。
+
+03b交回待复核：migration30与4文件交付，目标context case最终1/1、定点导入依赖tsc exit0。初版后两轮均Owner fixture约束修复，2/2耗尽，不能豁免。证据fit03b.md/.diff及原始日志；Bohr正在一次限定审查。revalidateCurrent不依赖preview TTL，外部自由文本population无法确定适用性时受控拒绝；本轮仅内置starter执行，外部仍可导入检索，不声称外部动作自动适用已完成。
+
+03b限定审查未通过（2026-09-18）：Bohr发现有效P2，readBasis只按旧checkInId读取，不检查更新的check-in；新增疼痛/急性风险状态不会使旧无痛预览及revalidateCurrent失效。主核对planning-context:63与repository.hasRecentPain仅查feedback确认属实，现有case只覆盖疼痛反馈，非新check-in。2/2已尽，不自行修；已异步请求一次仅当前check-in依据/必要查询/原case反例的授权。03d/e后端接线暂停，04b界面与04c隔离fixture独立准备可继续，不能标闭环通过或运行真实Provider。当前唯一下一步为取得此定点授权并修复/复核；旧单casePASS不抹除也不替代此缺口。
+
+用户明确“批准，修复了之后继续完成闭环”：03a测试反例、04a响应资源清理各追加**一次**定点修正；旧2/2保留，记作2/2+额外1/1，不授权循环扩张。原Terra实现、原Astra限定复核，依然无真实凭据/费用/下载/日常数据/发布授权。技能流程使用已核验的product-prd隔离worktree和本文件唯一进度，用户的小测试/原角色/无自动提交约束覆盖技能默认全套、自动提交、新账本及五轮修复。
+
+第一步并行处理互不重叠的测试反例与adapter清理；主同步冻结03b存储/上下文接口。03a只改原domain单case，分别证明单个替代不超时、组合精确拒绝；04a只改原adapter和单case，超限/非2xx/取消均结束上游body且不掩盖原错误、不等待不结束的清理。每项保留真实日志/前后diff/最终hash，限定复核通过后直接继续剩余FIT任务。
+
 ### 2026-09-18 连续完成健身闭环（最新授权）
 
 用户要求“完成修复后直接去跑健身功能，直到完成健身闭环”。授权继续 R4 定点处理已证实的 V9 测试失败链，复核后执行已批准阶段提交/推送，再连续实施 FIT-02/03/04；不逐个小任务索要继续。旧2/2和R3记录不抹除。R4一次实现最多两轮局部修复，健身各任务沿用最小验证/两轮修复边界。
@@ -12,7 +315,79 @@
 - 完成定义：可用动作候选 → 状态/目标与近期反馈 → 详细训练草案 → 用户确认形成Action/TimeRequest → 日程审核 → 完成/跳过反馈 → 下一次规划读取限量本地记忆；真实DeepSeek适配接线具备但本轮只Fake/合成验证，外部未审核动作不能伪装安全候选。未配置真实Provider保持不可用。
 - 限制：不读/改日常数据库、不安装、不自动下载全库/媒体、不执行真实付费请求或使用用户健康数据，不恢复项目模块。提交授权仅本轮阶段保存，不自动main合并/tag/Release。只有本地闭环证据存在才标本地通过，真实模型/生产另列未验证。
 - R4 已限定通过：同一 V9 case 初次FAIL，局部修复1/2后 1 passed / exit0；五次计数全部执行，确认前events0、确认后events1、providerCalls0。主核对最后日志及hash CFF7C61E176469A9A523ECBAE7CA260128BE1AF1EE95F4992FA5C316EA2B4D51；Astra medium Darwin 独立复核规格/质量通过。AbortSignal证据只对精确metadata端点、最多5次配对，非逐请求ID关联属于本case有界权衡。其余网络及安全断言保留。证据：[R4](evidence/2026-09-18-project-removal-r4.md)及同名diff；旧FAIL保留，REMOVE-03仅本地限定收尾完成，不等于全量或生产验收。
-- 当前唯一下一步：按已授权范围提交推送阶段快照，再执行FIT-02；不等待新的小步骤确认。
+- 阶段保存已完成：提交 `2634a289a68891e0fb58649838829e1c2f8c81b4` 已推送 origin/codex/product-prd，ls-remote匹配；未合并/tag/Release。150文件为累计阶段源码/文档/测试，忽略个人数据/缓存；历史evidence格式限制见阶段文档。
+- 技术校准：[Astra规划建议](evidence/2026-09-18-fitness-planning.md) 作为参考而非新产品范围。主采用版本化目录、V2兼容和现有事务链路；不因建议扩大成通用审核/后台框架。外部未审核动作不自动入计划，内置starter用于本地验证，真实资格/医疗风险不由模型伪造。
+- [x] FIT-02 执行契约（已限定通过）：合并目录存储/检索/资格为一个任务，一次实现最多2轮修复。允许6个代码/测试文件（必要的独立contracts导出占1文件）：packages/contracts/src/fitness-catalog.ts、index.ts；Core fitness/catalog-repository.ts、catalog-service.ts；storage/migrations.ts；tests/fitness-catalog-storage.test.ts。按规划§2实现固定来源版本canonical hash/事务幂等冲突、参数化有界检索、独立追加review和资格筛选，外部事实UNREVIEWED不改，旧starter不动。无Web批准医学安全按钮，不下载/seed真实审核。测试一个合成组合case覆盖导入/检索/资格、冲突零写入与撤销拒绝；Core必要类型检查。报告/精确diff至evidence/2026-09-18-fit02.*；主维护正文，不准worker提交或派agent。起点最大迁移27，实际追加28。
+- 当前唯一下一步：执行已获批的03a与04a各一次定点修正及原审查复核，随后接03b上下文存储和后续闭环；不重置各2/2，不重复询问常规步骤。
+
+FIT-02 初版：Terra Max Carver交付6文件、v28，单组合case RED→GREEN 1/1，Core typecheck exit0，diff主核对SHA84B94795518EB71A9135B468874FD039DC416A2126766FCE88296295FF0DE84A。Astra medium Epicurus复核发现有效P2：listEligible先all()载入所有review/动作再限量，违反有界读取；其余同版冲突事务/不可变来源/撤销及旧迁移保护正向。R1/2已派回原实现者，只修有界读取并复验同一case，不能提前标FIT02完成。03a纯逻辑继续独立进行，旧契约不变。
+
+FIT-03c 可独立先行：FIT02 R1只改catalog-repository/test，已释放迁移文件；03c独占migrations及health-capabilities、health-loop/repository、fitness/service（只V1配额调用点）与新capability test五文件。追加新能力/HEALTH_DISCLOSURE_V2，旧V1保持兼容，V1与V2合计每日5次训练调用（不能只新接口计总数）。保留现有capability运行表/claim/边界，必要重建表时必须保留全部旧行、索引、owner约束及被其他表trigger引用的语义；不改已编号迁移，不用writable_schema或清库。一个合成迁移/配额组合case含旧记录和相关引用保留，V2声明配对及第6次拒绝。一次实现最多2局部修复；报告与diff用fit03c。此项不消费03a新DTO，不改其文件/公共index，不接真实Provider。
+
+健身剩余执行映射（复用规划建议，不是新增产品）：
+
+| 任务 | 交付/文件边界 | 消费与产出 / 检查 |
+| --- | --- | --- |
+| FIT-03a | contracts/fitness-planning.ts + index；domain/fitness-planning.ts + index；domain/tests/fitness-planning.test.ts | FIT02候选 → V2上下文/计划strict契约、纯校验与Provider Port。一个组合case验证三阶段、固定引用及总时长/替代参数拒绝。 |
+| FIT-03b | fitness/repository、planning-context；追加migration；Core定点context test | V2契约 → 本Owner画像、最近14天至多5反馈、授权FITNESS记忆/候选hash与预览。旧revision保留，缺失风险信息不推定安全。 |
+| FIT-03c | health-capabilities契约、health-loop/repository、追加migration、Core定点capability test | V1/V2共享每天5次训练预算；V2声明与运行日志，不假装已有真实调用；旧行保留。 |
+| FIT-03d | fitness/service、repository、proposal-applier、feedback-memory、Core定点loop test | Fake V2 → 草案/编辑/提案/确认待办与TimeRequest → 反馈/记忆 → 下次上下文；重放不多调用，风险/版本/来源失效不写入。 |
+| FIT-03e | fitness/routes、app装配、Core定点routes test | `/v1/fitness/planning/*`接口接通（覆盖规划建议的/v2路径），不改BFF任意版本转发；旧入口兼容，鉴权/Owner隔离。 |
+| FIT-04a | fitness/deepseek-workout-planning、app、fitness/routes、Core adapter test | 既有凭据服务 → 有界真实adapter；Fake HTTP验证，未配置503零fetch，坏输出受控；不得连带使饮食READY。 |
+| FIT-04b | fitness-workspace、workout-review、Web定点test | 画像/授权预览/详细计划/确认/真实反馈输入/记忆状态；响应式沿用，失败不能显示成功。 |
+| FIT-04c | 合成E2E adapter/bootstrap、专用fitness spec、runner/必要evidence helper | 整个健身版本一次聚焦浏览器：草案→确认→静态排程→反馈→再次规划；专用数据目录、Fake标识、零外网。 |
+
+接口依赖预检：FIT02输出不可变来源/独立资格，03a不得修改其上游原文；03b和03d共用repository须串行；03c扩展能力SQL CHECK与TS契约必须同步；03e与04a共用app/routes须串行；04b消费03e稳定响应和04a可用状态。各子切片证据独立，但FIT03整体修复问题连续计数，不能重命名重置失败预算。类型/构建在最终受影响workspace集中检查，不每步全套；具体新增函数以已核对的交付接口更新，不盲抄规划建议。无真实权限时仍完成本地程序闭环，真实外部数据/调用另标未验证。
+
+并行边界：03a纯schema/validator不读取FIT02数据库或review DTO，消费独立的冻结候选值，允许与02并行。03a暂不写contracts/index.ts（归02）；只写fitness-planning新契约、domain新纯逻辑/index和定点test。公共导出及import归03a后续集成，在02释放文件后完成，未集成前不标完成。两者不共享写文件/迁移/测试端口；不运行全套。FIT02实际定义PlanCandidateV2为外部资格候选；03a通用候选采用WorkoutPlanningCandidateV2避免同名，03b显式转换而非修改上游。
+
+预算解释校正（尚未发生FIT03修复）：上表是预先划分的独立可验收任务，每项按用户“每任务最多2轮”执行；同一缺陷跨任务继续累计，不能挪到新编号重置。此前“FIT03整体连续计数”指同一问题，不把相互独立的首次实现错误任意汇总成整版停止门槛。
+
+03b集成准备：保留旧FitnessRepository方法返回类型，追加V2专用读取/写入方法，内部复用SQL，避免一项存储任务使全部V1调用方类型失效。V1误读V2的受控409由03d/e接线时落实，不能留下500。预览建立owner+contextHash绑定的有界本地request记录（保存选择/引用而非复制完整健康正文），创建时从该记录重建相同候选/记忆选择与当前版本进行hash复验；不能从客户端hash臆造曾经同意的payload。预览时间不等于实际同意时间，consentedAt必须在真实确认创建时记录。记忆选择用当前有效revision的UUID映射到实体/领域，删除后不读历史revision补回。此段待03a最终契约/复核后再执行，不是新功能已落盘。
+
+03a实施交回：Terra Max Dewey已交5文件，单Domain case1/1及contracts/domain类型通过，测试夹具窄类型修复1/2；独立通用候选WorkoutPlanningCandidateV2与02名称分离。报告/精确diff遗漏已要求补交，不重跑、不算业务新修复轮次；随后聚焦review，未标完成。主核对contract hash528460d8b372734552c44a8a6d8d1a367157b3f42046f5433b7f6265697f98fa、validator hash ee14c981a52bd834c2c60e3aa8adbed5064cd813867e722f36acf6f31b8e3544。
+
+03a证据已补交，Astra medium Bohr进行只读限定复核。02的R1已将完整资格过滤和LIMIT下推SQL，同case1/1；测试固定27→28，最终hash3477A800CC2F7866A3BDAF699400077DE880EEEDBCA0EF2E84FB5B4EA15B382F。后次Core typecheck受并行03c未完成接口影响exit1，未把早先类型PASS当最终工作区PASS；Epicurus正在限定复核，不重跑。
+
+FIT04a独立adapter可先行：Terra Max Dirac仅写fitness/deepseek-workout-planning.ts和对应单测试，消费已存在V2端口；app/routes仍后续串行接线。固定既有endpoint/model、凭据短暂解密、8秒取消、24KB输入/64KB响应信封/12KB内容、无重试/工具/redirect、无配置503零fetch。Fake credential/HTTP单组合case，不真实联网，不提前宣称默认服务已可用；本项与后续接线共用修复预算，不以子名称重置。
+
+03a限定审查：Bohr实际spawn为gpt-6-astra/medium，复用1case及哈希，发现4项有效P2：预览强制consentedAt、可选身体正文缺授权交叉校验、receipt与payload字段/候选集合不完整匹配、多个替代项组合可能超预算。原Terra正在R2/2最后一轮合并修正，保持单case和旧V1；同一缺陷不能在后续任务重置预算。Core身份/14天查询/资格实时性仍属于后续任务，不误要求纯校验器读库。尚未观察真实数据泄露或实际用户计划受损。
+
+FIT02 R1限定Spec/Quality已通过（Epicurus）：SQL完整过滤后LIMIT≤5，排序靠前的不匹配记录不遮蔽后续匹配；固定27→28及原来源/事务边界保留，无新增有效阻断。此为切片本地通过，后续集中类型检查仍待执行。原Carver接03b上下文/仓储切片，先只读准备接口，迁移等03c释放后由主明确GO；共享迁移不并发写入。
+
+FIT02-IMPORT独立交付入口：原parser/repo只有程序内调用，不能当作用户已能导入。新增本机cli/fitness-catalog.ts及一个合成import test，显式已有data-dir/JSON绝对路径/固定revision，文字32MiB边界，已有库/表才可导入，不自动迁移、下载或制造审核资格；同版冲突零写入。此为原数据接入需求的操作入口，不是增加外部服务或重置02缺陷预算；初次实现最多2局部修复。由Terra单独实现，其他repo/migration不改，真实下载/导入仍待授权。
+
+03a R2限定复核（实现已修、验收PARTIAL）：Bohr核对最终hash531ebb8a（契约）/6422ddbc（validator）与报告一致，原4个实现问题均已解决。新增证据缺口：单case双替代反例的第一替代单独已2140秒>1200秒，先触发单个超时，generic错误前缀断言不能证明组合门禁。未观察业务算法错误；但不能把1case绿色当组合分支覆盖。2/2预算耗尽，Dewey已要求停止改测；主异步请求一次仅改反例数据/精确错误断言的额外授权，待答复。03b不越过此门禁，03c/04a独立adapter/离线导入可继续不受影响部分。证据见evidence/2026-09-18-fit03a-r2.md/.diff，原FAIL与预算保持。
+
+03c实现交回：追加29，旧运行30列、索引及跨表Owner trigger保留，增加WORKOUT_DETAILED_PLANNING/HEALTH_DISCLOSURE_V2与countReservedWorkoutCalls。主读取原始日志：目标单case1/1、Core typecheck exit0；第6次V1调用在新旧合计5次后429，providerCalls0。Astra medium Planck限定复核中；迁移文件写入已释放但03b仍受03a门禁。报告初称业务修复1/2、另3个fixture调整未计，主要求补真实失败/修改顺序再裁定，不能只因测试调整就排除预算。初版.diff实际是摘要而非完整补丁，也已要求补真实差异；不把证据补交当新业务修复授权。
+
+03c限定复核通过：Planck实读5文件hash/日志，旧表30列/约束及三个跨表trigger静态一致，无有效P0/P1/P2；不宣称测试逐列覆盖全部旧行或所有跨Owner分支。完整diff已补交（40416bytes，SHA96C26110146DC2555AE8B1809E3276DF2612C8E5408BC49C9E52E1089E3D2910）。计数纠正为**至少2轮、预算视为2/2已用尽**：初始RED之外保存日志显示2次失败重验，最终1/1；另外500/422诊断无独立原始日志，不能断言全部修复仅两轮，也不因fixture标签豁免。后续同问题无剩余修复额度。源码未因补证据再改。
+
+FIT02-IMPORT初版：Godel交回2文件，合成1case1/1（含真实子进程CLI重放及冲突exit1），实现后修复0/2；没有真实导入。Planck正在限定复核。Core类型检查待适配器稳定后集中一次，不用此前03c的类型PASS覆盖晚落盘CLI。
+
+FIT02-IMPORT复核：Planck静态无有效P0/P1/P2，但初交报告没有可定位原始运行输出，证据PARTIAL。主于17:09:10仅补跑原同一文件 `npm run test --workspace @ev/core -- tests/fitness-catalog-import.test.ts`，exit0/1文件1case通过；原始日志 `C:/Users/asus/AppData/Local/Temp/fit02-import-main-6cb3f647c68d411ab3efaa44981a3ed4.log`。没有业务/测试修改，修复仍0/2；路径拒绝/超限/缺schema等未动态穷举，只有静态检查，不扩展覆盖声明。
+
+FIT04a独立adapter交回：Dirac新增adapter/test，2/2修复已尽（预取消promise未处理拒绝、async iterable类型收窄），同case最终通过；尚未装配app/routes，不能从网页使用。主于17:12:47补原始输出 `npm test --workspace @ev/core -- tests/deepseek-workout-planning.test.ts` exit0/1文件1case，日志 `C:/Users/asus/AppData/Local/Temp/fit04a-main-492e9b6fcae747c6a5d85575cc0cca7a.log`；仅Fake HTTP/credential，未真实调用。Planck限定复核中。
+
+集中Core类型检查发现FIT02-IMPORT的 `cli/fitness-catalog.ts:215 TS2366`，非adapter错误；已交Godel R1/2仅修never/return控制流，再同case+Coretypecheck一次。不能把此前import运行通过当作类型通过；旧失败记录保留。
+
+FIT04a限定复核PARTIAL：Planck核hash/主1case原始日志，确认配置/请求/解析主要边界，但发现有效P2响应清理缺口。超64,000字节或非2xx直接抛错时signal尚未abort，iterator.return/reader.cancel条件不成立；外层finally又清除8秒timer，响应资源可能继续存活。只有静态控制流证据，未证实泄露或实际网络故障；原Fake测试仅验证拒绝错误码，没验证cancel。阻断本片有界资源验收。预算2/2已尽，源码已冻结，主另异步请求一次仅清理/同case断言修正授权。不得以03e装配任务名修此旧问题或重置预算。
+
+### 本轮暂停交接（等待限定授权，不是健身闭环完成）
+
+| 项目 | 最终状态与证据边界 |
+| --- | --- |
+| 原项目退役修复R4 / 阶段保存 | 限定浏览器1case通过并独立复核，2634a28已推现有分支；不合并/tag/Release。 |
+| FIT02目录与资格 | DONE（限定）；固定27→28合成1case、独立复核通过，无真实下载/导入。 |
+| FIT02-IMPORT本机入口 | DONE（限定）；R1仅两处return fail，17:14:13原case1/1、Core typecheck exit0，Planck R1复核通过。最终CLI hash4BB69A53…，test未变；修复1/2。 |
+| FIT03a详细计划契约/纯校验 | PARTIAL；4项实现静态已修，2/2已尽，单case未真正覆盖组合替代超时门禁，等待额外仅测试修正。 |
+| FIT03c运行/额度/迁移29 | DONE（限定）；1case及独立静态复核通过。修复预算按至少2轮视为耗尽，不豁免未完整保存的fixture诊断。 |
+| FIT04a独立DeepSeek适配器 | PARTIAL；Fake同case1/1，2/2已尽，响应提前拒绝后的资源清理P2未修；未装配默认server。 |
+| FIT03b/d/e与FIT04b/c | 尚未实现；上下文/画像持久化、计划服务/反馈记忆、API、页面和最终健身浏览器闭环均不能标完成。 |
+
+主最终核对HEAD2634a28、codex/product-prd、暂存区为空；上述健身新增改动仍未提交/推送。CLI/adapter最终hash与各报告一致。最新Core类型检查已通过；contracts/domain复用03a最后代码的类型结果。Web构建、最终健身浏览器路径、全仓测试、真实Provider、真实数据和生产验证均未运行。`git diff --check`排除历史evidence补丁后无诊断；该检查不声称覆盖所有未跟踪文件。
+
+没有重启用户预览或触碰日常数据。已更新TECH_SPEC/API/DATABASE及本唯一进度；原FAIL/初版证据保留。恢复只需先处理顶部两个限定授权，批准后在原任务上追加一次修正并原审查复核，不以新任务重置预算；随后继续既定健身链路，不重做规划、不恢复项目分析。
 
 ### 2026-09-18 继续推进（当前入口）
 

@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { AppOptions } from './app';
 import { buildApp } from './app';
 import { loadConfig, type CoreConfig } from './config';
+import { createWikipediaPublicSearchCapability } from './modules/learning/wikipedia-search';
 
 interface StartableCoreApp {
   log: {
@@ -88,6 +89,7 @@ export async function startCore(overrides: CoreStartupOverrides = {}): Promise<v
       ...(runtimeLogRoot !== undefined ? { runtimeLogRoot } : {}),
       secureCookies: config.secureCookies,
       enableDailyPlanAutomation: true,
+      publicSearchCapability: createWikipediaPublicSearchCapability(),
     });
     await app.listen({ host: config.host, port: config.port });
     registerSignal('SIGINT', () => {

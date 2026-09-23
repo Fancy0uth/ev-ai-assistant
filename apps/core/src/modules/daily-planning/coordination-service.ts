@@ -3,6 +3,7 @@ import {
   type DailyPlanProposal,
   type DailyPlanProposalItem,
   type LocalTime,
+  type DailyPlanTrigger,
 } from '@ev/contracts';
 import { DailyPlanBaseVersionStaleError, type DailyPlanRunRepository } from './repository';
 import type { DailyPlanningContextService, DailyPlanningPacket } from './context-service';
@@ -16,7 +17,7 @@ type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
 type CoordinatedItem = WithoutId<DailyPlanProposalItem>;
 
 export interface DailyPlanCoordinationService {
-  coordinateLocalRules(ownerId: string, localDate: string): DailyPlanProposal;
+  coordinateLocalRules(ownerId: string, localDate: string, trigger?: DailyPlanTrigger): DailyPlanProposal;
 }
 
 export interface DailyPlanCoordinationServiceOptions {
@@ -175,8 +176,8 @@ export function createDailyPlanCoordinationService(
   const now = options.now ?? (() => new Date());
 
   return {
-    coordinateLocalRules(ownerId, localDate) {
-      const draft = options.contextService.prepareDraft(ownerId, localDate, 'MANUAL', now());
+    coordinateLocalRules(ownerId, localDate, trigger = 'MANUAL') {
+      const draft = options.contextService.prepareDraft(ownerId, localDate, trigger, now());
       const timestamp = draft.runInput.createdAt;
       const items = buildLocalRulesItems(draft.packet).map((item) => ({ id: newId(), ...item }));
       const scheduledCount = items.filter((item) => item.operation === 'SCHEDULE_TIME_REQUEST').length;

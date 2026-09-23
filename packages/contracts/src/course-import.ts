@@ -28,9 +28,21 @@ const candidateConfidenceFieldsSchema = z.object({
   startLocalTime: z.number().min(0).max(1), endLocalTime: z.number().min(0).max(1), weekStart: z.number().min(0).max(1),
   weekEnd: z.number().min(0).max(1), weekPattern: z.number().min(0).max(1),
 }).strict();
+const candidateTitleSchema = z.string().min(1).max(200).refine((value) => value.trim().length > 0);
+const candidateLocationSchema = z.string().min(1).max(200).nullable();
 const candidateFieldsSchema = z.object({
-  title: z.string().min(1).max(200).refine((value) => value.trim().length > 0),
-  location: z.string().min(1).max(200).nullable(),
+  title: candidateTitleSchema.nullable(),
+  location: candidateLocationSchema,
+  weekday: z.number().int().min(1).max(7).nullable(),
+  startLocalTime: localTimeSchema.nullable(),
+  endLocalTime: localTimeSchema.nullable(),
+  weekStart: z.number().int().min(1).max(53).nullable(),
+  weekEnd: z.number().int().min(1).max(53).nullable(),
+  weekPattern: teachingWeekPatternSchema.nullable(),
+}).strict();
+const completeCandidateFieldsSchema = z.object({
+  title: candidateTitleSchema,
+  location: candidateLocationSchema,
   weekday: z.number().int().min(1).max(7),
   startLocalTime: localTimeSchema,
   endLocalTime: localTimeSchema,
@@ -39,6 +51,14 @@ const candidateFieldsSchema = z.object({
   weekPattern: teachingWeekPatternSchema,
 }).strict();
 const candidateTimingRefinement = (candidate: z.infer<typeof candidateFieldsSchema>, context: z.RefinementCtx) => {
+  if (candidate.weekStart !== null && candidate.weekEnd !== null && candidate.weekEnd < candidate.weekStart) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['weekEnd'], message: '结束周不能早于开始周' });
+  }
+  if (candidate.startLocalTime !== null && candidate.endLocalTime !== null && candidate.endLocalTime <= candidate.startLocalTime) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['endLocalTime'], message: '结束时间必须晚于开始时间' });
+  }
+};
+const completeCandidateTimingRefinement = (candidate: z.infer<typeof completeCandidateFieldsSchema>, context: z.RefinementCtx) => {
   if (candidate.weekEnd < candidate.weekStart) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['weekEnd'], message: '结束周不能早于开始周' });
   }
@@ -46,18 +66,26 @@ const candidateTimingRefinement = (candidate: z.infer<typeof candidateFieldsSche
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['endLocalTime'], message: '结束时间必须晚于开始时间' });
   }
 };
+const candidateConfidenceSchema = z.object({ overall: z.number().min(0).max(1), fields: candidateConfidenceFieldsSchema }).strict();
+const candidateProvenanceSchema = z.object({
+  kind: z.enum(['VISION_OUTPUT', 'OWNER_EDIT']), providerId: z.string().min(1).max(120).nullable(),
+  capabilityRunId: z.uuid().nullable(), editedFields: z.array(z.string().min(1).max(80)).max(12), capturedAt: z.iso.datetime(),
+}).strict();
 export const visionCourseScheduleCandidateSchema = candidateFieldsSchema.extend({
-  confidence: z.object({ overall: z.number().min(0).max(1), fields: candidateConfidenceFieldsSchema }).strict(),
+  confidence: candidateConfidenceSchema,
 }).strict().superRefine(candidateTimingRefinement);
 export const courseScheduleCandidateSchema = candidateFieldsSchema.extend({
   candidateId: z.uuid(),
   included: z.boolean(),
-  confidence: z.object({ overall: z.number().min(0).max(1), fields: candidateConfidenceFieldsSchema }).strict(),
-  provenance: z.array(z.object({
-    kind: z.enum(['VISION_OUTPUT', 'OWNER_EDIT']), providerId: z.string().min(1).max(120).nullable(),
-    capabilityRunId: z.uuid().nullable(), editedFields: z.array(z.string().min(1).max(80)).max(12), capturedAt: z.iso.datetime(),
-  }).strict()).min(1).max(16),
+  confidence: candidateConfidenceSchema,
+  provenance: z.array(candidateProvenanceSchema).min(1).max(16),
 }).strict().superRefine(candidateTimingRefinement);
+export const completeCourseScheduleCandidateSchema = completeCandidateFieldsSchema.extend({
+  candidateId: z.uuid(),
+  included: z.boolean(),
+  confidence: candidateConfidenceSchema,
+  provenance: z.array(candidateProvenanceSchema).min(1).max(16),
+}).strict().superRefine(completeCandidateTimingRefinement);
 export const courseScheduleExtractionSchema = z.object({
   candidates: z.array(courseScheduleCandidateSchema).min(1).max(80),
 }).strict();

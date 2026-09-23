@@ -15,10 +15,12 @@ import {
   type Proposal,
   type Workout,
   type WorkoutRevision,
+  type WorkoutFeedbackInput,
 } from '@ev/contracts';
 import { Activity, AlertTriangle, Save } from 'lucide-react';
 import { useState } from 'react';
 import { WorkoutReview } from '@/components/fitness/workout-review';
+import { DetailedWorkoutWorkspace } from './detailed-workout-workspace';
 import { CoreClientError, requestCore } from '@/lib/core-client';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
 
@@ -40,6 +42,7 @@ function idempotentInit(): { headers: HeadersInit } {
 }
 
 export function FitnessWorkspace({ initialDate }: { initialDate: string }) {
+  const [detailed, setDetailed] = useState(false);
   const [localDate, setLocalDate] = useState(initialDate);
   const [sleepMinutes, setSleepMinutes] = useState('420');
   const [energyLevel, setEnergyLevel] = useState('3');
@@ -56,6 +59,7 @@ export function FitnessWorkspace({ initialDate }: { initialDate: string }) {
   const [workoutDetail, setWorkoutDetail] = useState<WorkoutDetail | null>(null);
   const [savedWorkouts, setSavedWorkouts] = useState<Workout[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
+  const [feedbackSafetyNotice, setFeedbackSafetyNotice] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [textProviderReady, setTextProviderReady] = useState(false);
 
@@ -207,17 +211,15 @@ export function FitnessWorkspace({ initialDate }: { initialDate: string }) {
     }
   }
 
-  async function recordFeedback(outcome: 'COMPLETED' | 'SKIPPED'): Promise<void> {
+  async function recordFeedback(input: WorkoutFeedbackInput): Promise<void> {
     if (!workoutDetail) return;
     setFailure(null);
     setIsBusy(true);
     try {
-      const now = new Date();
-      const body = outcome === 'COMPLETED'
-        ? { outcome, expectedVersion: workoutDetail.workout.version, hadPain: false, note: null, perceivedEffort: null, startedAt: new Date(now.getTime() - 30 * 60_000).toISOString(), endedAt: now.toISOString() }
-        : { outcome, expectedVersion: workoutDetail.workout.version, hadPain: false, note: null, perceivedEffort: null, startedAt: null, endedAt: null };
+      const body = { ...input, expectedVersion: workoutDetail.workout.version };
       const payload = await requestCore(`fitness/workouts/${workoutDetail.workout.id}/feedback`, { method: 'POST', ...idempotentInit(), body: JSON.stringify(body) });
       const result = workoutFeedbackResponseSchema.parse(payload).data;
+      setFeedbackSafetyNotice(result.safetyNotice);
       setWorkoutDetail((current) => current ? { ...current, workout: result.workout, action: result.action as { id?: string } | null } : current);
       setStage('DONE');
     } catch (error) {
@@ -228,12 +230,14 @@ export function FitnessWorkspace({ initialDate }: { initialDate: string }) {
     }
   }
 
+  if (detailed) return <DetailedWorkoutWorkspace initialDate={initialDate} onBack={() => setDetailed(false)} />;
   if (stage === 'SAFETY_BLOCKED' && checkIn?.safety.eligibility === 'BLOCKED') {
     return <section className="domain-workspace health-safety" aria-labelledby="fitness-heading"><p className="section-kicker">FITNESS / SAFETY BLOCK</p><h1 id="fitness-heading">训练与恢复</h1><div className="health-safety__notice" role="alert"><AlertTriangle aria-hidden="true" size={20} /><h2>STOP_EXERCISE_AND_SEEK_PROFESSIONAL_HELP</h2><p>已报告疼痛或急性风险。系统不会创建训练、查询目录或调用 Provider。</p></div></section>;
   }
 
   return (
     <section className="domain-workspace health-workspace" aria-labelledby="fitness-heading">
+      <button type="button" disabled={isBusy} onClick={() => setDetailed(true)}>DeepSeek 详细训练计划</button>
       <header className="domain-workspace__header"><p className="section-kicker">FITNESS / OWNER REVIEW</p><h1 id="fitness-heading">训练与恢复</h1><p>先记录本地状态，再由你审阅内部目录、草稿和提案。该流程不作医疗诊断。</p></header>
       {stage === 'CHECK_IN' || stage === 'FAILED' ? <form className="domain-card domain-form" onSubmit={(event) => void submitCheckIn(event)}>
         <div className="domain-card__heading"><Activity aria-hidden="true" size={19} /><div><h2>今天的训练状态</h2><p>{localDate} · 仅本地保存</p></div></div>
@@ -258,6 +262,7 @@ export function FitnessWorkspace({ initialDate }: { initialDate: string }) {
         <ul>{catalog.items.map((item) => <li key={item.citation.citationId}><label><input aria-label={`选择 ${item.name}`} checked={selectedCitationIds.includes(item.citation.citationId)} type="checkbox" onChange={() => toggleCitation(item.citation.citationId)} /> <strong>{item.name}</strong><span>{item.neutralTechniqueText}</span><small>引用 {item.citation.citationId.slice(0, 12)}…</small></label></li>)}</ul>
         <button disabled={isBusy || selectedCitationIds.length === 0} onClick={() => void createWorkout('MANUAL')} type="button">创建手动训练草稿</button>
       </section> : null}
+      {feedbackSafetyNotice ? <p className="health-review__failure" role="alert">{feedbackSafetyNotice}：已报告疼痛，请停止训练并寻求专业帮助。</p> : null}
       {workoutDetail ? <WorkoutReview key={workoutDetail.revision.id} workout={workoutDetail.workout} revision={workoutDetail.revision} proposal={workoutDetail.proposal} action={workoutDetail.action} timeRequest={workoutDetail.timeRequest} busy={isBusy} failure={failure} onSaveRevision={saveRevision} onSubmitProposal={submitProposal} onDecideProposal={decideProposal} onFeedback={recordFeedback} /> : null}
     </section>
   );

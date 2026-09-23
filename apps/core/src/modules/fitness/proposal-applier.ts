@@ -3,6 +3,9 @@ import type { Proposal } from '@ev/contracts';
 import type Database from 'better-sqlite3';
 import { ApiError } from '../../http/api-error';
 import type { CalendarRepository } from '../calendar/repository';
+import { createFitnessRepository } from './repository';
+import { createFitnessPlanningContextService } from './planning-context';
+import { workoutPlanCitationIds, workoutPlanContentHash } from './planning-service';
 
 function cannotApply(message: string): never {
   throw new ApiError(422, 'PROPOSAL_CANNOT_APPLY', message);
@@ -15,6 +18,8 @@ export function createWorkoutProposalApplier(
 ) {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? randomUUID;
+  const fitness = createFitnessRepository(database);
+  const context = createFitnessPlanningContextService(database, { now });
   const appendAudit = database.prepare(`insert into v07_audit_events (
     id, owner_id, event_type, entity_type, entity_id, entity_version, metadata_json, created_at
   ) values (?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -42,7 +47,23 @@ export function createWorkoutProposalApplier(
       const revision = database.prepare(`select content_hash from workout_revisions_v2
         where owner_id = ? and id = ? and workout_id = ?`).get(ownerId, change.workout.revisionId, workout.id) as { content_hash: string } | undefined;
       if (!revision || revision.content_hash !== change.workout.contentHash) cannotApply('训练修订已变化或不可访问');
-      const citationIds = (database.prepare(`select citation_id from workout_revision_citations_v2
+      const isV2 = fitness.currentRevisionSchema(ownerId, workout.id) === 'WORKOUT_PLAN_V2';
+      const detail = isV2 ? fitness.findWorkoutRevisionV2(ownerId, change.workout.revisionId) : undefined;
+      if (isV2) {
+        if (!detail || detail.revision.workoutId !== workout.id || workoutPlanContentHash(detail.revision) !== revision.content_hash) {
+          cannotApply('详细训练修订内容已变化');
+        }
+        context.revalidateCurrent(ownerId, detail.revision, detail.citations);
+        const plan = detail.revision;
+        if (proposal.title !== plan.title || change.action.title !== plan.title
+          || change.action.targetDate !== plan.scheduling.targetDate
+          || change.scheduling.durationMinutes !== plan.scheduling.durationMinutes
+          || change.scheduling.priority !== plan.scheduling.priority
+          || change.scheduling.earliestStartLocalTime !== plan.scheduling.earliestStartLocalTime
+          || change.scheduling.latestEndLocalTime !== plan.scheduling.latestEndLocalTime
+          || change.scheduling.isFixed !== false) cannotApply('提案标题或排程与修订不一致');
+      }
+      const citationIds = detail ? workoutPlanCitationIds(detail.revision) : (database.prepare(`select citation_id from workout_revision_citations_v2
         where owner_id = ? and revision_id = ? order by position asc`).all(ownerId, revision ? change.workout.revisionId : '') as Array<{ citation_id: string }>)
         .map((row) => row.citation_id);
       if (citationIds.length !== change.citationIds.length || citationIds.some((id, index) => id !== change.citationIds[index])) {

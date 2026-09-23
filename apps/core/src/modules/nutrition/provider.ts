@@ -31,6 +31,8 @@ export class NutritionProviderError extends Error {
 
 export interface NutritionDataProvider {
   readonly descriptor: NutritionDataProviderDescriptor;
+  readonly deadlineMs?: number;
+  readCachedBatch?(input: Parameters<NutritionDataProvider['searchBatch']>[0]): unknown | undefined;
   searchBatch(input: {
     queries: Array<{ candidateId: string; query: string; unit: ServingUnit; limit: 5 }>;
   }, signal: AbortSignal): Promise<unknown>;
@@ -92,6 +94,7 @@ export async function executeNutritionSearchBatch(
   try {
     const result = await executeV07ProviderBoundary({
       input,
+      deadlineMs: provider.deadlineMs ?? 8_000,
       invoke: (providerInput, signal) => provider.searchBatch(providerInput, signal),
       parseOutput: (output) => nutritionSearchBatchOutputSchema.parse(output),
       correlateOutput: (parsed, request) => {

@@ -17,6 +17,7 @@ export type DailyPlanAutomationResult =
   | 'NOT_DUE'
   | 'EXISTING_RUN'
   | 'AWAITING_CONTEXT_APPROVAL'
+  | 'LOCAL_PROPOSAL_READY'
   | 'PREPARATION_FAILED';
 
 export interface DailyPlanAutomationService {
@@ -28,6 +29,7 @@ export interface DailyPlanAutomationService {
 
 export interface DailyPlanAutomationServiceOptions {
   dailyPlanPreflightService: DailyPlanAutomationPreflightPort;
+  prepareLocalProposal?: (ownerId: string, localDate: string, trigger: DailyPlanTrigger) => void;
   dailyPlanRunRepository: DailyPlanAutomationRunRepository;
   findOwnerId: () => string | undefined;
   now?: () => Date;
@@ -92,6 +94,10 @@ export function createDailyPlanAutomationService(
       return 'EXISTING_RUN';
     }
     try {
+      if (options.prepareLocalProposal) {
+        options.prepareLocalProposal(ownerId, localDate, trigger);
+        return 'LOCAL_PROPOSAL_READY';
+      }
       options.dailyPlanPreflightService.prepare(ownerId, localDate, trigger);
       return 'AWAITING_CONTEXT_APPROVAL';
     } catch {

@@ -55,6 +55,8 @@ describe('local course profiles and attributed resources', () => {
     expect(request?.body).toMatchObject({ stream: false, response_format: { type: 'json_object' } });
     expect(request?.body).not.toHaveProperty('tools');
     expect(request?.body).not.toHaveProperty('images');
+    const prompt = (request?.body.messages as Array<{ content: string }>)[0]!.content;
+    for (const field of ['"schemaVersion"', '"durationMinutes"', '"LOW"', '"MEDIUM"', '"HIGH"']) expect(prompt).toContain(field);
   });
 
   it('rejects an oversized DeepSeek response body before JSON parsing', async () => {

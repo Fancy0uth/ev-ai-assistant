@@ -11,6 +11,10 @@ import {
   type ProviderKey,
 } from '@ev/contracts';
 import { ApiError, registerErrorHandling } from './http/api-error';
+import type { WorkoutPlanningProvider } from '@ev/domain';
+import { createDeepSeekWorkoutPlanningProvider } from './modules/fitness/deepseek-workout-planning';
+import { createWorkoutPlanningService } from './modules/fitness/planning-service';
+import { registerFitnessPlanningRoutes } from './modules/fitness/planning-routes';
 import { createAgentRepository } from './modules/agent/repository';
 import { registerAgentRoutes } from './modules/agent/routes';
 import { createAgentService } from './modules/agent/service';
@@ -22,6 +26,13 @@ import { registerCalendarRoutes } from './modules/calendar/routes';
 import { createCalendarService } from './modules/calendar/service';
 import { registerCourseImportRoutes } from './modules/calendar/import-routes';
 import { createCourseImportService } from './modules/calendar/import-service';
+import { createDeepSeekCourseVisionResolver } from './modules/calendar/deepseek-course-vision';
+import { createEventLanguageService } from './modules/calendar/event-language';
+import { registerEventLanguageRoutes } from './modules/calendar/event-language-routes';
+import { createNutritionCredentialService } from './modules/nutrition/credential-service';
+import { registerNutritionCredentialRoutes } from './modules/nutrition/credential-routes';
+import { createUsdaNutritionResolver } from './modules/nutrition/usda-resolver';
+import { createDeepSeekWebNutritionResolver } from './modules/nutrition/deepseek-web-nutrition';
 import { registerDayPlanningRoutes } from './modules/day-planning/routes';
 import { createDayPlanningService } from './modules/day-planning/service';
 import { registerHealthRoutes } from './modules/health/routes';
@@ -31,10 +42,12 @@ import { createFitnessService } from './modules/fitness/service';
 import { createV07IdempotencyService } from './modules/health-loop/idempotency-service';
 import { createV07HealthLoopRepository } from './modules/health-loop/repository';
 import { registerHealthLoopRoutes } from './modules/health-loop/routes';
+import { createDeepSeekHealthTextResolver } from './modules/health-loop/deepseek-health-text';
 import { registerLearningRoutes } from './modules/learning/routes';
 import { createLearningService } from './modules/learning/service';
 import { createDeepSeekLearningAdviceCapability } from './modules/learning/deepseek-learning-advice';
 import { createPublicResourceFetcher, type PublicResourceFetcher } from './modules/learning/public-resource-fetcher';
+import { createWikipediaResourceFetcher } from './modules/learning/wikipedia-resource-fetcher';
 import { registerMemoryRoutes } from './modules/memory/routes';
 import { registerMemoryCompactionRoutes } from './modules/memory/compaction-routes';
 import { createMemoryCompactionService } from './modules/memory/compaction-service';
@@ -88,6 +101,7 @@ import { isPathInsideRoot } from './filesystem/path-containment';
 import { createRuntimeLogger, safeRuntimeLogSerializers, type RuntimeLogger } from './observability/runtime-logger';
 
 export interface AppOptions {
+  workoutPlanningProvider?: WorkoutPlanningProvider;
   agentProvider?: AgentProvider;
   artifactRoot?: string;
   visionCapability?: VisionCapability;
@@ -121,7 +135,11 @@ export interface AppOptions {
 export async function buildApp(options: AppOptions = {}): Promise<FastifyInstance> {
   let healthTextDescriptor: HealthTextProvider['descriptor'] | undefined;
   let nutritionDataDescriptor: NutritionDataProvider['descriptor'] | undefined;
+  let workoutPlanningDescriptor: WorkoutPlanningProvider['descriptor'] | undefined;
   try {
+    workoutPlanningDescriptor = options.workoutPlanningProvider
+      ? healthTextProviderDescriptorSchema.parse(options.workoutPlanningProvider.descriptor)
+      : undefined;
     healthTextDescriptor = options.healthTextProvider
       ? healthTextProviderDescriptorSchema.parse(options.healthTextProvider.descriptor)
       : undefined;
@@ -146,7 +164,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const dataRoot = databasePath === ':memory:' ? join(tmpdir(), 'ev-ai-assistant') : dirname(databasePath);
   const artifactRoot = options.artifactRoot ?? join(dataRoot, 'artifacts');
   const fixtureRequested = healthTextDescriptor?.adapterKind === 'TEST_FIXTURE'
-    || nutritionDataDescriptor?.adapterKind === 'TEST_FIXTURE';
+    || nutritionDataDescriptor?.adapterKind === 'TEST_FIXTURE'
+    || workoutPlanningDescriptor?.adapterKind === 'TEST_FIXTURE';
   if (fixtureRequested) {
     const gate = options.v07TestAdapterGate;
     const pathsInsideRunnerRoot = gate
@@ -190,6 +209,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   const v07IdempotencyService = createV07IdempotencyService({
     database,
     repository: healthLoopRepository,
+    nutritionMatchLeaseMs: 70_000,
   });
   const proposalRepository = createProposalRepository(database);
   const proposalService = createProposalService(proposalRepository, calendarRepository, { database });
@@ -202,17 +222,21 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       now: () => new Date(),
     }),
   });
-  const fitnessService = createFitnessService(
-    fitnessRepository,
-    calendarRepository,
-    healthLoopRepository,
-    v07IdempotencyService,
-    ...(options.healthTextProvider ? [{ healthTextProvider: options.healthTextProvider }] : []),
-  );
   const providerCredentialService = createProviderCredentialService(
     database,
     options.secretStore ?? createWindowsDpapiSecretStore(),
     options.deepSeekConnectionTester ? { connectionTester: options.deepSeekConnectionTester } : {},
+  );
+  const healthTextProviderForOwner = createDeepSeekHealthTextResolver(providerCredentialService);
+  const visionCapabilityForOwner = createDeepSeekCourseVisionResolver(providerCredentialService);
+  const eventLanguageService = createEventLanguageService(calendarRepository, providerCredentialService);
+  const nutritionCredentials = createNutritionCredentialService(database, options.secretStore ?? createWindowsDpapiSecretStore());
+  const usdaNutritionForOwner = createUsdaNutritionResolver(nutritionCredentials);
+  const webNutritionForOwner = createDeepSeekWebNutritionResolver(database, providerCredentialService);
+  const nutritionDataProviderForOwner = (ownerId: string) => usdaNutritionForOwner(ownerId) ?? webNutritionForOwner(ownerId);
+  const fitnessService = createFitnessService(
+    fitnessRepository, calendarRepository, healthLoopRepository, v07IdempotencyService,
+    { healthTextProviderForOwner, ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}) },
   );
   const learningAdviceCapabilityFactory = explicitLearningAdviceCapability
     ? undefined
@@ -224,7 +248,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     capabilityRegistry,
     capabilityRuns: capabilityRunRepository,
     proposalService,
-    publicResourceFetcher: options.publicResourceFetcher ?? createPublicResourceFetcher(),
+    publicResourceFetcher: options.publicResourceFetcher ?? createWikipediaResourceFetcher(createPublicResourceFetcher()),
     credentialService: providerCredentialService,
     ...(learningAdviceCapabilityFactory ? { learningAdviceCapabilityFactory } : {}),
     ...(options.learningExternalOperationObserver ? { onExternalOperation: options.learningExternalOperationObserver } : {}),
@@ -239,7 +263,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     calendarRepository,
     artifactRoot,
     capabilityRegistry,
-    options.courseImportExternalOperationObserver ? { onExternalOperation: options.courseImportExternalOperationObserver } : {},
+    { visionCapabilityForOwner, ...(options.courseImportExternalOperationObserver ? { onExternalOperation: options.courseImportExternalOperationObserver } : {}) },
   );
   const artifactDeleteRecovery = await courseImportService.recoverPendingArtifactDeletes();
   for (const failure of artifactDeleteRecovery.failures) {
@@ -309,6 +333,11 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   });
   const dailyPlanAutomationService = createDailyPlanAutomationService({
     dailyPlanPreflightService,
+    prepareLocalProposal: database.transaction((ownerId: string, localDate: string, trigger: import('@ev/contracts').DailyPlanTrigger) => {
+      if (!dailyPlanRepository.findLatestRunForDate(ownerId, localDate)) {
+        dailyPlanCoordinationService.coordinateLocalRules(ownerId, localDate, trigger);
+      }
+    }),
     dailyPlanRunRepository: dailyPlanRepository,
     findOwnerId: () => authRepository.findOwnerId(),
     ...(options.dailyPlanAutomationNow ? { now: options.dailyPlanAutomationNow } : {}),
@@ -317,6 +346,8 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     },
   });
   const nutritionService = createNutritionService(database, {
+    nutritionDataProviderForOwner,
+    healthTextProviderForOwner,
     healthLoopRepository,
     v07IdempotencyService,
     ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}),
@@ -349,6 +380,16 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
       app.log.info(event, 'memory compaction');
     },
   });
+  const defaultWorkoutPlanningProvider = createDeepSeekWorkoutPlanningProvider({ credentialService: providerCredentialService });
+  const injectedWorkoutPlanningProvider = options.workoutPlanningProvider;
+  const workoutPlanningProvider: WorkoutPlanningProvider = injectedWorkoutPlanningProvider && workoutPlanningDescriptor
+    ? { descriptor: workoutPlanningDescriptor, generateWorkout: (owner, input, signal) => injectedWorkoutPlanningProvider.generateWorkout(owner, input, signal) }
+    : defaultWorkoutPlanningProvider;
+  const workoutPlanningService = createWorkoutPlanningService(
+    database, calendarRepository, fitnessService, healthLoopRepository, v07IdempotencyService,
+    { workoutPlanningProvider, memory: entityMemoryService,
+      isConfigured: owner => workoutPlanningDescriptor?.adapterKind === 'TEST_FIXTURE' || defaultWorkoutPlanningProvider.configured(owner) },
+  );
   memoryCompactionHook.service = memoryCompactionService;
   if (options.enableDailyPlanAutomation) dailyPlanAutomationService.scheduleNextRun();
   app.addHook('onClose', async () => {
@@ -365,7 +406,7 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
     ...(runtimeLogger !== undefined ? { runtimeLogger } : {}),
     schedulerStatus: options.enableDailyPlanAutomation ? 'unknown' : 'not_run',
   });
-  await registerHealthLoopRoutes(app, { authService, ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}), ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}) });
+  await registerHealthLoopRoutes(app, { authService, healthTextProviderForOwner, nutritionDataProviderForOwner, ...(options.healthTextProvider ? { healthTextProvider: options.healthTextProvider } : {}), ...(options.nutritionDataProvider ? { nutritionDataProvider: options.nutritionDataProvider } : {}) });
   await registerAuthRoutes(app, {
     authService,
     secureCookies: options.secureCookies ?? false,
@@ -378,14 +419,17 @@ export async function buildApp(options: AppOptions = {}): Promise<FastifyInstanc
   await registerTaskRoutes(app, { authService, taskService });
   await registerCalendarRoutes(app, { authService, calendarService });
   await registerCourseImportRoutes(app, { authService, courseImportService });
+  await registerEventLanguageRoutes(app, { authService, eventLanguageService });
   await registerFitnessRoutes(app, { authService, fitnessService });
+  await registerFitnessPlanningRoutes(app, { authService, workoutPlanningService });
   await registerNutritionRoutes(app, { authService, nutritionService });
   await registerLearningRoutes(app, { authService, learningService });
   await registerMemoryRoutes(app, { authService, memoryService });
   await registerEntityMemoryRoutes(app, { authService, entityMemoryService });
   await registerMemoryCompactionRoutes(app, { authService, memoryCompactionService });
   await registerProposalRoutes(app, { authService, proposalService, idempotencyService });
-  await registerProviderRoutes(app, { authService, providerService, providerCredentialService, capabilityRegistry });
+  await registerProviderRoutes(app, { authService, providerService, providerCredentialService, capabilityRegistry, visionCapabilityForOwner });
+  await registerNutritionCredentialRoutes(app, { authService, credentials: nutritionCredentials });
   await registerDailyPlanningRoutes(app, {
     authService,
     dailyPlanningService,

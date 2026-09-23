@@ -2,10 +2,14 @@
 
 import {
   createEventProposalInputSchema,
+  eventLanguageParseInputSchema,
+  eventLanguageParseResponseSchema,
   proposalDecisionSchema,
   proposalListResponseSchema,
   proposalResponseSchema,
   proposalVersionConflictDetailsSchema,
+  type EventLanguageParseResult,
+  type EventLanguageMissingField,
   type EventKind,
   type Proposal,
 } from '@ev/contracts';
@@ -32,6 +36,15 @@ const eventKinds: Array<[EventKind, string]> = [
   ['STUDY', '学习'],
   ['COURSE', '课程'],
 ];
+
+const missingFieldLabels: Record<EventLanguageMissingField, string> = {
+  title: '标题',
+  kind: '类型',
+  localDate: '日期',
+  startLocalTime: '开始时间',
+  endLocalTime: '结束时间',
+  isHard: '是否为固定安排',
+};
 
 function failureMessage(error: unknown): string {
   return error instanceof CoreClientError ? error.message : '手工日程提案暂时未完成，请稍后重试。';
@@ -75,11 +88,16 @@ function conflictProposal(error: unknown): Proposal | null {
 export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPanelProps) {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [title, setTitle] = useState('');
-  const [kind, setKind] = useState<EventKind>('MEETING');
+  const [kind, setKind] = useState<EventKind | ''>('MEETING');
   const [localDate, setLocalDate] = useState(initialDate);
   const [startLocalTime, setStartLocalTime] = useState('09:00');
   const [endLocalTime, setEndLocalTime] = useState('10:00');
-  const [isHard, setIsHard] = useState(false);
+  const [isHard, setIsHard] = useState<boolean | null>(false);
+  const [eventLanguageText, setEventLanguageText] = useState('');
+  const [externalProcessingConfirmed, setExternalProcessingConfirmed] = useState(false);
+  const [eventLanguageAssessment, setEventLanguageAssessment] = useState<EventLanguageParseResult | null>(null);
+  const [eventLanguageReviewRequired, setEventLanguageReviewRequired] = useState(false);
+  const [isParsingEventLanguage, setIsParsingEventLanguage] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -89,6 +107,7 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
   const [isReloading, setIsReloading] = useState(false);
   const [listRequest, setListRequest] = useState({ id: 0, isReload: false });
   const createInFlightRef = useRef(false);
+  const eventLanguageParseInFlightRef = useRef(false);
   const decisionInFlightRef = useRef<string | null>(null);
   const decisionIdempotencyKeysRef = useRef(new Map<string, string>());
   const listRequestIdRef = useRef(0);
@@ -209,6 +228,56 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
     reloadPendingProposals(false);
   }
 
+  function clearEventLanguageAssessment(): void {
+    if (eventLanguageAssessment !== null) {
+      setEventLanguageAssessment(null);
+      setEventLanguageReviewRequired(true);
+    }
+  }
+
+  async function parseEventLanguage(): Promise<void> {
+    if (eventLanguageParseInFlightRef.current || createInFlightRef.current || listReloadInFlightRef.current) return;
+    const input = eventLanguageParseInputSchema.safeParse({
+      text: eventLanguageText,
+      referenceDate: initialDate,
+      timezone: 'Asia/Shanghai',
+      externalProcessingConfirmed,
+    });
+    if (!input.success) {
+      setFailure(input.error.issues[0]?.message ?? '请检查自然语言事项描述。');
+      return;
+    }
+    eventLanguageParseInFlightRef.current = true;
+    setIsParsingEventLanguage(true);
+    setFailure(null);
+    setStatusMessage(null);
+    try {
+      const payload = await requestCore('event-language/parse', {
+        method: 'POST',
+        body: JSON.stringify(input.data),
+      });
+      const result = eventLanguageParseResponseSchema.parse(payload).data;
+      setTitle(result.candidate.title ?? '');
+      setKind(result.candidate.kind ?? '');
+      setLocalDate(result.candidate.localDate ?? '');
+      setStartLocalTime(result.candidate.startLocalTime ?? '');
+      setEndLocalTime(result.candidate.endLocalTime ?? '');
+      setIsHard(result.candidate.isHard);
+      setEventLanguageAssessment(result);
+      setEventLanguageReviewRequired(false);
+      setStatusMessage(
+        result.missingFields.length === 0
+          ? '已填入可编辑候选，请核对冲突后再创建待确认日程。'
+          : '已填入可识别字段；请补全提示的字段后再创建待确认日程。',
+      );
+    } catch (error: unknown) {
+      setFailure(failureMessage(error));
+    } finally {
+      eventLanguageParseInFlightRef.current = false;
+      setIsParsingEventLanguage(false);
+    }
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (createInFlightRef.current || listReloadInFlightRef.current) return;
@@ -302,14 +371,85 @@ export function ManualEventProposalPanel({ initialDate }: ManualEventProposalPan
       </header>
 
       <form className="manual-event-proposal-form" onSubmit={(event) => void submit(event)} noValidate>
-        <label>日程标题<input maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-        <label>日程类型<select value={kind} onChange={(event) => setKind(event.target.value as EventKind)}>{eventKinds.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label>日程日期<input type="date" value={localDate} onChange={(event) => setLocalDate(event.target.value)} /></label>
-        <label>开始时间<input type="time" value={startLocalTime} onChange={(event) => setStartLocalTime(event.target.value)} /></label>
-        <label>结束时间<input type="time" value={endLocalTime} onChange={(event) => setEndLocalTime(event.target.value)} /></label>
-        <label className="manual-event-proposal-form__hard"><input checked={isHard} type="checkbox" onChange={(event) => setIsHard(event.target.checked)} /> 固定安排</label>
-        <button disabled={isCreating || isReloading} aria-busy={isCreating || isReloading || undefined} type="submit">创建待确认日程</button>
+        <fieldset>
+          <legend>自然语言生成候选</legend>
+          <label>
+            描述事项
+            <textarea
+              maxLength={1000}
+              value={eventLanguageText}
+              onChange={(event) => setEventLanguageText(event.target.value)}
+              placeholder="例如：周三下午两点和导师开会"
+            />
+          </label>
+          <label className="manual-event-proposal-form__hard">
+            <input
+              checked={externalProcessingConfirmed}
+              type="checkbox"
+              onChange={(event) => setExternalProcessingConfirmed(event.target.checked)}
+            />
+            我确认将这条事项描述发送给已配置的 Provider 解析
+          </label>
+          <p className="domain-form__hint">参考日期：{initialDate}（Asia/Shanghai）。未填写或不明确的字段会留空供你补全。</p>
+          <button
+            disabled={!externalProcessingConfirmed || isParsingEventLanguage || isCreating || isReloading}
+            aria-busy={isParsingEventLanguage || undefined}
+            type="button"
+            onClick={() => void parseEventLanguage()}
+          >
+            {isParsingEventLanguage ? '正在解析候选…' : '解析并填入候选'}
+          </button>
+        </fieldset>
+
+        <label>日程标题<input maxLength={200} value={title} onChange={(event) => { clearEventLanguageAssessment(); setTitle(event.target.value); }} /></label>
+        <label>
+          日程类型
+          <select value={kind} onChange={(event) => { clearEventLanguageAssessment(); setKind(event.target.value as EventKind | ''); }}>
+            <option value="">请选择类型</option>
+            {eventKinds.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label>日程日期<input type="date" value={localDate} onChange={(event) => { clearEventLanguageAssessment(); setLocalDate(event.target.value); }} /></label>
+        <label>开始时间<input type="time" value={startLocalTime} onChange={(event) => { clearEventLanguageAssessment(); setStartLocalTime(event.target.value); }} /></label>
+        <label>结束时间<input type="time" value={endLocalTime} onChange={(event) => { clearEventLanguageAssessment(); setEndLocalTime(event.target.value); }} /></label>
+        <label className="manual-event-proposal-form__hard">
+          安排性质
+          <select
+            value={isHard === null ? '' : String(isHard)}
+            onChange={(event) => {
+              clearEventLanguageAssessment();
+              setIsHard(event.target.value === '' ? null : event.target.value === 'true');
+            }}
+          >
+            <option value="">请选择是否为固定安排</option>
+            <option value="true">固定安排</option>
+            <option value="false">可协商安排</option>
+          </select>
+        </label>
+        <button disabled={isCreating || isReloading || isParsingEventLanguage} aria-busy={isCreating || isReloading || undefined} type="submit">创建待确认日程</button>
       </form>
+
+      {eventLanguageAssessment ? (
+        <section className="manual-event-proposal-panel__assessment" aria-live="polite">
+          <h3>已解析候选的冲突提示</h3>
+          <p>以下冲突只对应刚解析出的候选（参考：{eventLanguageAssessment.reference.localDate}，{eventLanguageAssessment.reference.timezone}）。你仍可编辑候选后再创建待确认 Proposal。</p>
+          {eventLanguageAssessment.missingFields.length > 0 ? (
+            <p role="status">请补全：{eventLanguageAssessment.missingFields.map((field) => missingFieldLabels[field]).join('、')}。</p>
+          ) : null}
+          {eventLanguageAssessment.conflicts.length === 0 ? (
+            <p role="status">当前候选没有发现与已确认日程的时间重叠。</p>
+          ) : (
+            <ul>
+              {eventLanguageAssessment.conflicts.map((conflict) => (
+                <li key={conflict.eventId}>{conflict.reason}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+      {eventLanguageReviewRequired ? (
+        <p className="manual-event-proposal-panel__failure" role="status">候选已修改，上次冲突检查已失效，请核对当日日程后确认。</p>
+      ) : null}
 
       {visibleFailure ? <p className="manual-event-proposal-panel__failure" role="alert">{visibleFailure}</p> : null}
       {listFailure ? <button disabled={isReloading} aria-busy={isReloading || undefined} type="button" onClick={() => reloadPendingProposals()}>重新读取待确认手工日程</button> : null}
