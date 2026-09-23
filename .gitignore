@@ -3,11 +3,14 @@
 .sentrux/
 node_modules/
 .next/
+.next-*/
 dist/
 coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
+__pycache__/
+*.pyc
 .env
 .env.*
 !.env.example

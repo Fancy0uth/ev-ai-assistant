@@ -260,7 +260,7 @@ describe('AgentWorkspace', () => {
     expect(screen.getByText('请安排今天')).toBeInTheDocument();
     expect(screen.getByLabelText('消息内容')).toHaveValue('');
     expect(screen.getByLabelText('消息内容')).toBeEnabled();
-    expect(screen.getByLabelText('消息内容')).toHaveFocus();
+    await waitFor(() => expect(screen.getByLabelText('消息内容')).toHaveFocus());
   });
 
   it('preserves the draft and trusted messages when a send success payload is malformed', async () => {

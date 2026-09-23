@@ -1,11 +1,12 @@
 'use client';
 
-import { Bot, CalendarDays, ListTodo, LogOut } from 'lucide-react';
+import { Bot, CalendarCheck, CalendarDays, ListTodo, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { logoutResponseSchema } from '@ev/contracts';
 import { useState, type ReactNode } from 'react';
 import { CoreClientError, requestCore } from '@/lib/core-client';
+import { ProviderStatus } from './provider-status';
 
 interface AppShellProps {
   children: ReactNode;
@@ -13,6 +14,7 @@ interface AppShellProps {
 
 const navigationItems = [
   { href: '/today', label: '今天', icon: CalendarDays },
+  { href: '/daily-plan', label: '每日计划', icon: CalendarCheck },
   { href: '/tasks', label: '任务', icon: ListTodo },
   { href: '/agent', label: 'Agent', icon: Bot },
 ] as const;
@@ -111,28 +113,7 @@ export function AppShell({ children }: AppShellProps) {
         {children}
       </main>
       <aside className="dashboard-agent" aria-label="Agent 状态">
-        <div className="agent-rail">
-          <div className="agent-rail__identity">
-            <span className="agent-rail__icon" aria-hidden="true">
-              <Bot size={18} />
-            </span>
-            <div>
-              <p>LOCAL FRAMEWORK</p>
-              <h2>Agent API 未连接</h2>
-            </div>
-          </div>
-          <p className="agent-rail__copy">框架已就绪；连接本地 API 后可在 Agent 页面开始会话。</p>
-          <dl className="agent-rail__status">
-            <div>
-              <dt>框架</dt>
-              <dd>本地</dd>
-            </div>
-            <div>
-              <dt>API</dt>
-              <dd>未连接</dd>
-            </div>
-          </dl>
-        </div>
+        <ProviderStatus />
       </aside>
 
       <nav className="mobile-nav" aria-label="移动端主导航">

@@ -1,4 +1,5 @@
 import type { TodaySnapshot } from '@ev/contracts';
+import Link from 'next/link';
 
 type Snapshot = TodaySnapshot['data'];
 
@@ -7,6 +8,12 @@ const levelCopy = {
   TIGHT: { label: '日程偏紧', note: '先处理优先级最高的工作' },
   OVERLOADED: { label: '负载过高', note: '建议减少或延期部分任务' },
 } as const;
+
+function recoveryCopy(value: number): { label: string; note: string } {
+  if (value <= 34) return { label: '注意恢复', note: '今天优先降低训练和任务负载' };
+  if (value <= 59) return { label: '适度安排', note: '保留弹性时间，避免连续高强度安排' };
+  return { label: '恢复良好', note: '当前恢复信号支持按计划安排训练' };
+}
 
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -19,6 +26,8 @@ function formatDate(date: string): string {
 
 export function StatusOverview({ snapshot }: { snapshot: Snapshot }) {
   const copy = levelCopy[snapshot.status.level];
+  const recoverySignal = snapshot.signals.filter((signal) => signal.kind === 'RECOVERY').slice(-1)[0];
+  const recovery = recoverySignal ? recoveryCopy(recoverySignal.value) : null;
 
   return (
     <section className="status-overview" aria-labelledby="status-heading">
@@ -74,7 +83,9 @@ export function StatusOverview({ snapshot }: { snapshot: Snapshot }) {
                 <span className={`priority-flag priority-flag--${priority.priority.toLowerCase()}`}>
                   {priority.priority}
                 </span>
-                <p>{priority.title}</p>
+                <Link aria-label={`查看优先任务详情：${priority.title}`} href={`/tasks/${priority.id}`}>
+                  {priority.title}
+                </Link>
                 <small>{priority.area}</small>
               </li>
             ))}
@@ -83,6 +94,21 @@ export function StatusOverview({ snapshot }: { snapshot: Snapshot }) {
           <p className="compact-empty">当前没有需要优先处理的任务。</p>
         )}
       </article>
+
+      {recoverySignal && recovery ? (
+        <article className="overview-card overview-card--recovery">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">LOCAL CHECK-IN</p>
+              <h2>恢复状态</h2>
+            </div>
+            <span>{recoverySignal.value} / 100</span>
+          </div>
+          <p className="recovery-card__level">{recovery.label}</p>
+          <p className="recovery-card__note">{recovery.note}</p>
+          <p className="recovery-card__boundary">来自本地打卡，不构成医疗判断</p>
+        </article>
+      ) : null}
     </section>
   );
 }

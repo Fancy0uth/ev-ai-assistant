@@ -1,0 +1,513 @@
+--- a/apps/core/src/storage/migrations.ts (pre-PC01 dirty baseline)
++++ b/apps/core/src/storage/migrations.ts
+@@ -2345,0 +2345,46 @@
+
++  {
++    version: 27,
++    name: 'add_project_conversation_storage',
++    sql: `
++      create unique index project_scopes_owner_id_id_uidx
++        on project_scopes(owner_id, id);
++
++      create table project_conversations (
++        id text primary key,
++        owner_id text not null references owners(id) on delete cascade,
++        project_scope_id text not null,
++        created_at text not null,
++        unique(owner_id, project_scope_id),
++        foreign key (owner_id, project_scope_id)
++          references project_scopes(owner_id, id) on delete restrict
++      );
++
++      create index project_conversations_owner_project_idx
++        on project_conversations(owner_id, project_scope_id);
++
++      create table project_conversation_messages (
++        sequence integer primary key autoincrement,
++        id text not null unique,
++        session_id text not null references project_conversations(id) on delete cascade,
++        client_message_id text not null,
++        role text not null check (role = 'USER'),
++        content text not null check (
++          length(content) between 1 and 8000
++          and length(trim(content)) > 0
++        ),
++        created_at text not null,
++        unique(session_id, client_message_id)
++      );
++
++      create index project_conversation_messages_session_sequence_idx
++        on project_conversation_messages(session_id, sequence);
++
++      create trigger project_conversations_v27_identity_immutable
++      before update of owner_id, project_scope_id on project_conversations
++      when new.owner_id is not old.owner_id
++        or new.project_scope_id is not old.project_scope_id
++      begin
++        select raise(abort, 'project conversation identity is immutable');
++      end;
++    `,
++  },
+warning: in the working copy of 'apps/core/src/modules/projects/conversation-repository.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/apps/core/src/modules/projects/conversation-repository.ts b/apps/core/src/modules/projects/conversation-repository.ts
+new file mode 100644
+index 0000000..6bca5a1
+--- /dev/null
++++ b/apps/core/src/modules/projects/conversation-repository.ts
+@@ -0,0 +1,206 @@
++import { randomUUID } from 'node:crypto';
++import type Database from 'better-sqlite3';
++import { ApiError } from '../../http/api-error';
++
++export interface ProjectConversation {
++  id: string;
++  projectId: string;
++  createdAt: string;
++}
++
++export interface ProjectConversationMessage {
++  id: string;
++  sessionId: string;
++  sequence: number;
++  content: string;
++  role: 'USER';
++  createdAt: string;
++}
++
++export interface ProjectConversationRepository {
++  getOrCreate(ownerId: string, projectId: string): ProjectConversation;
++  appendUserMessage(
++    ownerId: string,
++    projectId: string,
++    input: { clientMessageId: string; content: string },
++  ): { message: ProjectConversationMessage; replayed: boolean };
++  listMessages(
++    ownerId: string,
++    projectId: string,
++    input: { limit: number; beforeSequence?: number },
++  ): ProjectConversationMessage[];
++}
++
++interface ConversationRow {
++  id: string;
++  project_scope_id: string;
++  created_at: string;
++}
++
++interface MessageRow {
++  id: string;
++  session_id: string;
++  sequence: number;
++  content: string;
++  role: 'USER';
++  created_at: string;
++}
++
++const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++
++function toConversation(row: ConversationRow): ProjectConversation {
++  return { id: row.id, projectId: row.project_scope_id, createdAt: row.created_at };
++}
++
++function toMessage(row: MessageRow): ProjectConversationMessage {
++  return {
++    id: row.id,
++    sessionId: row.session_id,
++    sequence: row.sequence,
++    content: row.content,
++    role: row.role,
++    createdAt: row.created_at,
++  };
++}
++
++function projectScopeNotFound(): never {
++  throw new ApiError(404, 'PROJECT_SCOPE_NOT_FOUND', '项目范围不存在');
++}
++
++function invalidMessage(): never {
++  throw new ApiError(400, 'PROJECT_MESSAGE_INVALID', '项目消息输入无效');
++}
++
++function isConstraintError(error: unknown): boolean {
++  return typeof error === 'object'
++    && error !== null
++    && 'code' in error
++    && typeof error.code === 'string'
++    && error.code.startsWith('SQLITE_CONSTRAINT');
++}
++
++function normalizeMessageInput(input: { clientMessageId: string; content: string }): {
++  clientMessageId: string;
++  content: string;
++} {
++  const candidate = input as unknown;
++  if (typeof candidate !== 'object' || candidate === null) invalidMessage();
++  const { clientMessageId, content } = candidate as { clientMessageId?: unknown; content?: unknown };
++  if (typeof clientMessageId !== 'string' || !uuidPattern.test(clientMessageId) || typeof content !== 'string') {
++    invalidMessage();
++  }
++  const normalizedContent = content.trim();
++  if (Array.from(normalizedContent).length < 1 || Array.from(normalizedContent).length > 8000) invalidMessage();
++  return { clientMessageId, content: normalizedContent };
++}
++
++function normalizeListInput(input: { limit: number; beforeSequence?: number }): {
++  limit: number;
++  beforeSequence: number | null;
++} {
++  const candidate = input as unknown;
++  if (typeof candidate !== 'object' || candidate === null) invalidMessage();
++  const { limit, beforeSequence } = candidate as { limit?: unknown; beforeSequence?: unknown };
++  if (!Number.isInteger(limit) || limit < 1 || limit > 100) invalidMessage();
++  if (beforeSequence !== undefined && (!Number.isSafeInteger(beforeSequence) || beforeSequence < 1)) invalidMessage();
++  return { limit, beforeSequence: beforeSequence ?? null };
++}
++
++export function createProjectConversationRepository(database: Database.Database): ProjectConversationRepository {
++  const findScope = database.prepare('select id from project_scopes where owner_id = ? and id = ?');
++  const findConversation = database.prepare(
++    'select id, project_scope_id, created_at from project_conversations where owner_id = ? and project_scope_id = ?',
++  );
++  const insertConversation = database.prepare(
++    'insert into project_conversations (id, owner_id, project_scope_id, created_at) values (?, ?, ?, ?)',
++  );
++  const findMessageByClientId = database.prepare(
++    `select id, session_id, sequence, content, role, created_at
++     from project_conversation_messages where session_id = ? and client_message_id = ?`,
++  );
++  const insertMessage = database.prepare(
++    `insert into project_conversation_messages (
++      id, session_id, client_message_id, role, content, created_at
++    ) values (?, ?, ?, 'USER', ?, ?)`,
++  );
++  const listMessageRows = database.prepare(
++    `select message.id, message.session_id, message.sequence, message.content, message.role, message.created_at
++     from project_conversation_messages as message
++     join project_conversations as conversation on conversation.id = message.session_id
++     where conversation.owner_id = ?
++       and conversation.project_scope_id = ?
++       and (? is null or message.sequence < ?)
++     order by message.sequence desc
++     limit ?`,
++  );
++
++  function assertScope(ownerId: string, projectId: string): void {
++    if (!findScope.get(ownerId, projectId)) projectScopeNotFound();
++  }
++
++  function findOrCreateConversation(ownerId: string, projectId: string): ProjectConversation {
++    const existing = findConversation.get(ownerId, projectId) as ConversationRow | undefined;
++    if (existing) return toConversation(existing);
++    const timestamp = new Date().toISOString();
++    try {
++      insertConversation.run(randomUUID(), ownerId, projectId, timestamp);
++    } catch (error) {
++      if (!isConstraintError(error)) throw error;
++    }
++    const created = findConversation.get(ownerId, projectId) as ConversationRow | undefined;
++    if (!created) throw new Error('PROJECT_CONVERSATION_NOT_PERSISTED');
++    return toConversation(created);
++  }
++
++  const getOrCreate = database.transaction((ownerId: string, projectId: string): ProjectConversation => {
++    assertScope(ownerId, projectId);
++    return findOrCreateConversation(ownerId, projectId);
++  });
++
++  const appendUserMessage = database.transaction((
++    ownerId: string,
++    projectId: string,
++    input: { clientMessageId: string; content: string },
++  ): { message: ProjectConversationMessage; replayed: boolean } => {
++    assertScope(ownerId, projectId);
++    const normalized = normalizeMessageInput(input);
++    const conversation = findOrCreateConversation(ownerId, projectId);
++    const existing = findMessageByClientId.get(conversation.id, normalized.clientMessageId) as MessageRow | undefined;
++    if (existing) {
++      if (existing.content !== normalized.content) {
++        throw new ApiError(409, 'PROJECT_MESSAGE_CONFLICT', '同一消息标识不能对应不同正文');
++      }
++      return { message: toMessage(existing), replayed: true };
++    }
++
++    try {
++      insertMessage.run(randomUUID(), conversation.id, normalized.clientMessageId, normalized.content, new Date().toISOString());
++    } catch (error) {
++      if (!isConstraintError(error)) throw error;
++      const replayed = findMessageByClientId.get(conversation.id, normalized.clientMessageId) as MessageRow | undefined;
++      if (!replayed) throw error;
++      if (replayed.content !== normalized.content) {
++        throw new ApiError(409, 'PROJECT_MESSAGE_CONFLICT', '同一消息标识不能对应不同正文');
++      }
++      return { message: toMessage(replayed), replayed: true };
++    }
++
++    const created = findMessageByClientId.get(conversation.id, normalized.clientMessageId) as MessageRow | undefined;
++    if (!created) throw new Error('PROJECT_MESSAGE_NOT_PERSISTED');
++    return { message: toMessage(created), replayed: false };
++  });
++
++  const listMessages = database.transaction((
++    ownerId: string,
++    projectId: string,
++    input: { limit: number; beforeSequence?: number },
++  ): ProjectConversationMessage[] => {
++    assertScope(ownerId, projectId);
++    const { limit, beforeSequence } = normalizeListInput(input);
++    return (listMessageRows.all(ownerId, projectId, beforeSequence, beforeSequence, limit) as MessageRow[])
++      .reverse()
++      .map(toMessage);
++  });
++
++  return { getOrCreate, appendUserMessage, listMessages };
++}
+
+warning: in the working copy of 'apps/core/tests/project-conversation-repository.test.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/apps/core/tests/project-conversation-repository.test.ts b/apps/core/tests/project-conversation-repository.test.ts
+new file mode 100644
+index 0000000..1a45523
+--- /dev/null
++++ b/apps/core/tests/project-conversation-repository.test.ts
+@@ -0,0 +1,240 @@
++import Database from 'better-sqlite3';
++import { describe, expect, it } from 'vitest';
++import { ApiError } from '../src/http/api-error';
++import { runMigrations } from '../src/storage/migrations';
++
++interface ProjectConversation {
++  id: string;
++  projectId: string;
++  createdAt: string;
++}
++
++interface ProjectConversationMessage {
++  id: string;
++  sessionId: string;
++  sequence: number;
++  content: string;
++  role: 'USER';
++  createdAt: string;
++}
++
++interface ProjectConversationRepository {
++  getOrCreate(ownerId: string, projectId: string): ProjectConversation;
++  appendUserMessage(
++    ownerId: string,
++    projectId: string,
++    input: { clientMessageId: string; content: string },
++  ): { message: ProjectConversationMessage; replayed: boolean };
++  listMessages(
++    ownerId: string,
++    projectId: string,
++    input: { limit: number; beforeSequence?: number },
++  ): ProjectConversationMessage[];
++}
++
++async function loadConversationRepository(): Promise<{
++  createProjectConversationRepository(database: Database.Database): ProjectConversationRepository;
++}> {
++  const modulePath = '../src/modules/projects/conversation-repository';
++  return import(modulePath) as Promise<{
++    createProjectConversationRepository(database: Database.Database): ProjectConversationRepository;
++  }>;
++}
++
++function rowCount(database: Database.Database, table: string): number {
++  return (database.prepare(`select count(*) as count from ${table}`).get() as { count: number }).count;
++}
++
++function expectApiError(operation: () => unknown, statusCode: number, code: string): void {
++  let thrown: unknown;
++  try {
++    operation();
++  } catch (error) {
++    thrown = error;
++  }
++  expect(thrown).toBeInstanceOf(ApiError);
++  expect(thrown).toMatchObject({ statusCode, code });
++}
++
++describe('PC-01 project conversation repository', () => {
++  it('upgrades only v26 to v27, binds every operation to its Owner and project scope, and persists ordered idempotent user messages', async () => {
++    const database = new Database(':memory:');
++    const timestamp = '2026-09-16T00:00:00.000Z';
++    const ownerId = 'pc01-owner';
++    const firstProjectId = 'pc01-project-one';
++    const secondProjectId = 'pc01-project-two';
++    const firstClientMessageId = '00000000-0000-4000-8000-000000002701';
++    const secondClientMessageId = '00000000-0000-4000-8000-000000002702';
++
++    try {
++      database.pragma('foreign_keys = ON');
++      runMigrations(database, 26);
++      expect(database.prepare('select max(version) as version from schema_migrations').get()).toEqual({ version: 26 });
++
++      database.prepare(
++        'insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)',
++      ).run(ownerId, 'pc01-owner', 'synthetic-hash', timestamp);
++      database.prepare(`insert into project_scopes (
++        id, owner_id, label, root_path, created_at, updated_at
++      ) values (?, ?, ?, ?, ?, ?)`).run(
++        firstProjectId,
++        ownerId,
++        'PC-01 first synthetic project',
++        '/synthetic/pc01/first',
++        timestamp,
++        timestamp,
++      );
++      database.prepare(`insert into project_scopes (
++        id, owner_id, label, root_path, created_at, updated_at
++      ) values (?, ?, ?, ?, ?, ?)`).run(
++        secondProjectId,
++        ownerId,
++        'PC-01 second synthetic project',
++        '/synthetic/pc01/second',
++        timestamp,
++        timestamp,
++      );
++      database.prepare(`insert into tasks (
++        id, owner_id, title, area, priority, status, target_date, completed_at,
++        version, created_at, updated_at
++      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
++        'pc01-existing-task',
++        ownerId,
++        'Retain synthetic task through project conversation migration',
++        'WORK',
++        'HIGH',
++        'OPEN',
++        null,
++        null,
++        1,
++        timestamp,
++        timestamp,
++      );
++      database.prepare(
++        'insert into agent_sessions (id, owner_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)',
++      ).run('pc01-generic-agent-session', ownerId, 'Retained generic agent session', timestamp, timestamp);
++      database.prepare(
++        'insert into agent_messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)',
++      ).run('pc01-generic-agent-message', 'pc01-generic-agent-session', 'USER', 'Retained generic message', timestamp);
++
++      runMigrations(database);
++      expect(
++        database.prepare('select version, name from schema_migrations where version = 27').get(),
++      ).toEqual({ version: 27, name: 'add_project_conversation_storage' });
++
++      expect(database.prepare('select id, username from owners where id = ?').get(ownerId)).toEqual({
++        id: ownerId,
++        username: 'pc01-owner',
++      });
++      expect(database.prepare('select id, owner_id from tasks where id = ?').get('pc01-existing-task')).toEqual({
++        id: 'pc01-existing-task',
++        owner_id: ownerId,
++      });
++      expect(database.prepare('select id from agent_sessions where id = ?').get('pc01-generic-agent-session')).toEqual({
++        id: 'pc01-generic-agent-session',
++      });
++      expect(database.prepare('select id from agent_messages where id = ?').get('pc01-generic-agent-message')).toEqual({
++        id: 'pc01-generic-agent-message',
++      });
++      expect(
++        database.prepare("select name from sqlite_master where type = 'table' and name like 'project_conversation%' order by name").all(),
++      ).toEqual([
++        { name: 'project_conversation_messages' },
++        { name: 'project_conversations' },
++      ]);
++
++      const { createProjectConversationRepository } = await loadConversationRepository();
++      const repository = createProjectConversationRepository(database);
++      const firstConversation = repository.getOrCreate(ownerId, firstProjectId);
++      expect(firstConversation).toMatchObject({
++        id: expect.any(String),
++        projectId: firstProjectId,
++        createdAt: expect.any(String),
++      });
++      expect(repository.getOrCreate(ownerId, firstProjectId)).toEqual(firstConversation);
++
++      const firstAppend = repository.appendUserMessage(ownerId, firstProjectId, {
++        clientMessageId: firstClientMessageId,
++        content: '  First project update is persisted before any provider work.  ',
++      });
++      const secondAppend = repository.appendUserMessage(ownerId, firstProjectId, {
++        clientMessageId: secondClientMessageId,
++        content: 'Second project update follows the durable first update.',
++      });
++      expect(firstAppend).toMatchObject({
++        replayed: false,
++        message: {
++          id: expect.any(String),
++          sessionId: firstConversation.id,
++          sequence: expect.any(Number),
++          content: 'First project update is persisted before any provider work.',
++          role: 'USER',
++          createdAt: expect.any(String),
++        },
++      });
++      expect(secondAppend.message.sequence).toBeGreaterThan(firstAppend.message.sequence);
++      expect(repository.listMessages(ownerId, firstProjectId, { limit: 10 })).toEqual([
++        firstAppend.message,
++        secondAppend.message,
++      ]);
++      expect(repository.listMessages(ownerId, firstProjectId, {
++        limit: 1,
++        beforeSequence: secondAppend.message.sequence,
++      })).toEqual([firstAppend.message]);
++
++      const replay = repository.appendUserMessage(ownerId, firstProjectId, {
++        clientMessageId: firstClientMessageId,
++        content: 'First project update is persisted before any provider work.',
++      });
++      expect(replay).toEqual({ message: firstAppend.message, replayed: true });
++      expectApiError(() => repository.appendUserMessage(ownerId, firstProjectId, {
++        clientMessageId: firstClientMessageId,
++        content: 'Conflicting content must not overwrite the persisted update.',
++      }), 409, 'PROJECT_MESSAGE_CONFLICT');
++      expect(rowCount(database, 'project_conversation_messages')).toBe(2);
++
++      expect(repository.listMessages(ownerId, secondProjectId, { limit: 10 })).toEqual([]);
++      expect(rowCount(database, 'project_conversations')).toBe(1);
++      const secondConversation = repository.getOrCreate(ownerId, secondProjectId);
++      expect(secondConversation.id).not.toBe(firstConversation.id);
++      expect(repository.listMessages(ownerId, secondProjectId, { limit: 10 })).toEqual([]);
++
++      expectApiError(() => repository.appendUserMessage(ownerId, firstProjectId, {
++        clientMessageId: 'not-a-uuid',
++        content: 'Invalid client id is rejected.',
++      }), 400, 'PROJECT_MESSAGE_INVALID');
++      expectApiError(() => repository.appendUserMessage(ownerId, firstProjectId, {
++        clientMessageId: '00000000-0000-4000-8000-000000002703',
++        content: '   ',
++      }), 400, 'PROJECT_MESSAGE_INVALID');
++      expectApiError(() => repository.listMessages(ownerId, firstProjectId, { limit: 0 }), 400, 'PROJECT_MESSAGE_INVALID');
++      expectApiError(() => repository.listMessages(ownerId, firstProjectId, {
++        limit: 1,
++        beforeSequence: 0,
++      }), 400, 'PROJECT_MESSAGE_INVALID');
++
++      const beforeForbiddenAccess = {
++        conversations: rowCount(database, 'project_conversations'),
++        messages: rowCount(database, 'project_conversation_messages'),
++      };
++      expectApiError(() => repository.getOrCreate('pc01-other-owner', firstProjectId), 404, 'PROJECT_SCOPE_NOT_FOUND');
++      expectApiError(() => repository.appendUserMessage('pc01-other-owner', firstProjectId, {
++        clientMessageId: '00000000-0000-4000-8000-000000002704',
++        content: 'Other Owner cannot append.',
++      }), 404, 'PROJECT_SCOPE_NOT_FOUND');
++      expectApiError(() => repository.listMessages('pc01-other-owner', firstProjectId, { limit: 10 }), 404, 'PROJECT_SCOPE_NOT_FOUND');
++      expectApiError(() => repository.getOrCreate(ownerId, 'pc01-missing-project'), 404, 'PROJECT_SCOPE_NOT_FOUND');
++      expect({
++        conversations: rowCount(database, 'project_conversations'),
++        messages: rowCount(database, 'project_conversation_messages'),
++      }).toEqual(beforeForbiddenAccess);
++      expect(rowCount(database, 'tasks')).toBe(1);
++      expect(rowCount(database, 'actions')).toBe(0);
++      expect(rowCount(database, 'time_requests')).toBe(0);
++      expect(rowCount(database, 'proposals')).toBe(0);
++      expect(rowCount(database, 'events')).toBe(0);
++    } finally {
++      database.close();
++    }
++  });
++});
+
+

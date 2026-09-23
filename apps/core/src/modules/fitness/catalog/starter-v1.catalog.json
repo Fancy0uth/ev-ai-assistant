@@ -1,0 +1,106 @@
+[
+  {
+    "exerciseId": "chair-sit-to-stand",
+    "name": "Chair sit to stand / 椅子坐站",
+    "neutralTechniqueText": "Stand up from a stable chair with controlled movement, then sit down with control.",
+    "goals": ["STRENGTH", "RECOVERY"],
+    "movementTags": ["SQUAT", "LOWER_BODY"],
+    "equipment": ["CHAIR"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 2, "reps": 6, "durationSeconds": null, "restSeconds": 60 },
+      "MODERATE": { "rounds": 3, "reps": 8, "durationSeconds": null, "restSeconds": 60 }
+    }
+  },
+  {
+    "exerciseId": "wall-push-up",
+    "name": "Wall push-up / 靠墙俯卧撑",
+    "neutralTechniqueText": "Press against a wall with a steady body position and a comfortable range of motion.",
+    "goals": ["STRENGTH"],
+    "movementTags": ["PUSH", "UPPER_BODY"],
+    "equipment": ["WALL"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 2, "reps": 6, "durationSeconds": null, "restSeconds": 60 },
+      "MODERATE": { "rounds": 3, "reps": 10, "durationSeconds": null, "restSeconds": 60 }
+    }
+  },
+  {
+    "exerciseId": "hip-hinge-practice",
+    "name": "Hip hinge practice / 髋部折叠练习",
+    "neutralTechniqueText": "Practice a controlled hip hinge while keeping movement smooth and unhurried.",
+    "goals": ["MOBILITY", "STRENGTH"],
+    "movementTags": ["HINGE", "LOWER_BODY"],
+    "equipment": ["NONE"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 2, "reps": 6, "durationSeconds": null, "restSeconds": 45 },
+      "MODERATE": { "rounds": 3, "reps": 8, "durationSeconds": null, "restSeconds": 45 }
+    }
+  },
+  {
+    "exerciseId": "glute-bridge",
+    "name": "Glute bridge / 臀桥",
+    "neutralTechniqueText": "Lie on a mat and lift the hips with a controlled pace, then lower with control.",
+    "goals": ["STRENGTH", "RECOVERY"],
+    "movementTags": ["HINGE", "FLOOR"],
+    "equipment": ["MAT"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 2, "reps": 8, "durationSeconds": null, "restSeconds": 60 },
+      "MODERATE": { "rounds": 3, "reps": 10, "durationSeconds": null, "restSeconds": 60 }
+    }
+  },
+  {
+    "exerciseId": "bird-dog",
+    "name": "Bird dog / 鸟狗式",
+    "neutralTechniqueText": "From a stable hands-and-knees position, extend opposite limbs in a controlled sequence.",
+    "goals": ["MOBILITY", "STRENGTH"],
+    "movementTags": ["BALANCE", "FLOOR"],
+    "equipment": ["MAT"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 2, "reps": 6, "durationSeconds": null, "restSeconds": 45 },
+      "MODERATE": { "rounds": 3, "reps": 8, "durationSeconds": null, "restSeconds": 45 }
+    }
+  },
+  {
+    "exerciseId": "dead-bug",
+    "name": "Dead bug / 死虫式",
+    "neutralTechniqueText": "From a stable floor position, move opposite limbs slowly while keeping a controlled pace.",
+    "goals": ["STRENGTH"],
+    "movementTags": ["CORE", "FLOOR"],
+    "equipment": ["MAT"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 2, "reps": 6, "durationSeconds": null, "restSeconds": 45 },
+      "MODERATE": { "rounds": 3, "reps": 8, "durationSeconds": null, "restSeconds": 45 }
+    }
+  },
+  {
+    "exerciseId": "standing-calf-raise",
+    "name": "Standing calf raise / 站姿提踵",
+    "neutralTechniqueText": "Raise and lower the heels with a steady, controlled tempo while standing.",
+    "goals": ["STRENGTH", "RECOVERY"],
+    "movementTags": ["LOWER_BODY", "STANDING"],
+    "equipment": ["NONE"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 2, "reps": 8, "durationSeconds": null, "restSeconds": 45 },
+      "MODERATE": { "rounds": 3, "reps": 12, "durationSeconds": null, "restSeconds": 45 }
+    }
+  },
+  {
+    "exerciseId": "easy-walk",
+    "name": "Easy walk / 轻松步行",
+    "neutralTechniqueText": "Walk at a comfortable, self-selected pace on a familiar route.",
+    "goals": ["ENDURANCE", "RECOVERY"],
+    "movementTags": ["WALK", "STANDING"],
+    "equipment": ["NONE"],
+    "impact": "LOW",
+    "defaults": {
+      "LOW": { "rounds": 1, "reps": null, "durationSeconds": 300, "restSeconds": 0 },
+      "MODERATE": { "rounds": 1, "reps": null, "durationSeconds": 600, "restSeconds": 0 }
+    }
+  }
+]

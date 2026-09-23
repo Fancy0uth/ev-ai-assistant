@@ -1,0 +1,154 @@
+diff --git a/C:/Users/asus/AppData/Local/Temp/ev-project-removal-r4-before-6a2447ef60bb496e8fff9fc903a00caf/v0.9-private-iphone.spec.ts b/apps/web/e2e/v0.9-private-iphone.spec.ts
+index c789433..8a14330 100644
+--- a/C:/Users/asus/AppData/Local/Temp/ev-project-removal-r4-before-6a2447ef60bb496e8fff9fc903a00caf/v0.9-private-iphone.spec.ts
++++ b/apps/web/e2e/v0.9-private-iphone.spec.ts
+@@ -51,6 +51,7 @@ type BrowserDiagnostics = {
+   cspConsoleProblems: string[];
+   externalRequests: string[];
+   failedRequests: string[];
++  cancelledMetadataRequests: string[];
+   pageErrors: string[];
+ };
+ 
+@@ -102,6 +103,7 @@ function collectBrowserDiagnostics(page: Page): BrowserDiagnostics {
+     cspConsoleProblems: [],
+     externalRequests: [],
+     failedRequests: [],
++    cancelledMetadataRequests: [],
+     pageErrors: [],
+   };
+ 
+@@ -152,6 +154,60 @@ async function restrictBrowserToLoopbackWeb(page: Page, diagnostics: BrowserDiag
+   });
+ }
+ 
++async function installMetadataCancellationEvidence(page: Page): Promise<void> {
++  // Observe the real fetch signal without changing requests, responses, or rejection behavior.
++  await page.exposeFunction('recordV9MetadataCancellation', () => {
++    metadataCancellationEvidence.push('GET /api/core/providers/deepseek/credential');
++  });
++  await page.addInitScript(() => {
++    const originalFetch = window.fetch.bind(window);
++    window.fetch = async (input, init) => {
++      const requestUrl = new URL(input instanceof Request ? input.url : String(input), location.href);
++      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
++      const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
++      try {
++        return await originalFetch(input, init);
++      } catch (error) {
++        if (requestUrl.origin === location.origin
++          && requestUrl.pathname === '/api/core/providers/deepseek/credential'
++          && method === 'GET' && signal?.aborted
++          && error instanceof DOMException && error.name === 'AbortError') {
++          await (window as unknown as { recordV9MetadataCancellation(): Promise<void> }).recordV9MetadataCancellation();
++        }
++        throw error;
++      }
++    };
++  });
++}
++
++const metadataCancellationEvidence: string[] = [];
++
++function auditMetadataCancellations(diagnostics: BrowserDiagnostics): void {
++  const expectedFailure = `net::ERR_ABORTED GET ${webOrigin}/api/core/providers/deepseek/credential`;
++  for (let index = diagnostics.failedRequests.length - 1; index >= 0; index -= 1) {
++    if (diagnostics.failedRequests[index] === expectedFailure && metadataCancellationEvidence.length > 0) {
++      metadataCancellationEvidence.pop();
++      diagnostics.cancelledMetadataRequests.push(diagnostics.failedRequests.splice(index, 1)[0]!);
++    }
++  }
++  // At most one dev-effect cancellation for each of the five authenticated page mounts.
++  expect.soft(diagnostics.cancelledMetadataRequests.length).toBeLessThanOrEqual(5);
++  expect.soft(metadataCancellationEvidence, 'Unmatched AbortSignal evidence').toEqual([]);
++}
++
++async function withCredentialMetadata<T>(page: Page, navigate: () => Promise<T>): Promise<T> {
++  const metadataResponse = page.waitForResponse((response) =>
++    response.request().method() === 'GET'
++      && new URL(response.url()).origin === webOrigin
++      && new URL(response.url()).pathname === '/api/core/providers/deepseek/credential',
++  { timeout: 8_000 });
++  const [result, response] = await Promise.all([navigate(), metadataResponse]);
++  expect(response.status()).toBe(200);
++  expect(await response.finished()).toBeNull();
++  await expect(page.getByRole('heading', { name: 'DeepSeek：未配置', exact: true })).toBeVisible();
++  return result;
++}
++
+ async function authenticateViaSetupOrLogin(page: Page): Promise<void> {
+   await page.goto('/');
+   const setup = page.getByRole('heading', { name: '建立本地身份' });
+@@ -168,7 +224,7 @@ async function authenticateViaSetupOrLogin(page: Page): Promise<void> {
+     response.request().method() === 'POST'
+       && new URL(response.url()).pathname === (isSetup ? '/api/core/auth/setup' : '/api/core/auth/login'),
+   );
+-  await page.getByRole('button', { name: isSetup ? '创建本地账号' : '登录' }).click();
++  await withCredentialMetadata(page, () => page.getByRole('button', { name: isSetup ? '创建本地账号' : '登录' }).click());
+   const [csrf, authentication] = await Promise.all([csrfResponse, authResponse]);
+   expect(csrf.status()).toBe(200);
+   expect(csrf.headers()['cache-control']).toBe('no-store');
+@@ -187,12 +243,13 @@ async function attachDiagnostics(testInfo: TestInfo, diagnostics: BrowserDiagnos
+ test('V9-05 uses one ordinary work LOCAL_RULES review path without Provider calls and only writes facts after confirmation', async ({ page }, testInfo) => {
+   test.setTimeout(90_000);
+   const diagnostics = collectBrowserDiagnostics(page);
++  await installMetadataCancellationEvidence(page);
+   await restrictBrowserToLoopbackWeb(page, diagnostics);
+ 
+   try {
+     await authenticateViaSetupOrLogin(page);
+ 
+-    const initialToday = await page.goto('/today');
++    const initialToday = await withCredentialMetadata(page, () => page.goto('/today'));
+     if (!initialToday) throw new Error('Today navigation did not return an HTML response.');
+     const initialNonce = assertHtmlCsp(initialToday);
+     await assertDocumentNonce(page, initialNonce);
+@@ -218,10 +275,10 @@ test('V9-05 uses one ordinary work LOCAL_RULES review path without Provider call
+       area: 'WORK',
+       scheduling: { durationMinutes: 60, earliestStartLocalTime: '09:00', latestEndLocalTime: '10:00' },
+     });
+-    await expect(page.getByRole('link', { name: `查看任务详情：${taskTitle}` })).toBeVisible();
++    await expect(page.getByRole('link', { name: `查看任务详情：${taskTitle}`, exact: true })).toBeVisible();
+     expect(readFactCounts()).toEqual({ events: 0, providerCalls: 0 });
+ 
+-    await page.goto(`/daily-plan?date=${encodeURIComponent(targetDate)}`);
++    await withCredentialMetadata(page, () => page.goto(`/daily-plan?date=${encodeURIComponent(targetDate)}`));
+     await expect(page.getByRole('heading', { name: '每日计划审核' })).toBeVisible();
+     const localRulesResponse = page.waitForResponse((response) =>
+       response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/core/daily-plans/coordinate',
+@@ -256,8 +313,8 @@ test('V9-05 uses one ordinary work LOCAL_RULES review path without Provider call
+     expect(appliedDecision?.scheduledEventId).toMatch(/^[0-9a-f-]{36}$/i);
+     expect(readFactCounts()).toEqual({ events: 1, providerCalls: 0 });
+ 
+-    await page.goto('/today');
+-    const refreshedToday = await page.reload();
++    await withCredentialMetadata(page, () => page.goto('/today'));
++    const refreshedToday = await withCredentialMetadata(page, () => page.reload());
+     if (!refreshedToday) throw new Error('Today refresh did not return an HTML response.');
+     const refreshedNonce = assertHtmlCsp(refreshedToday);
+     await assertDocumentNonce(page, refreshedNonce);
+@@ -268,12 +325,17 @@ test('V9-05 uses one ordinary work LOCAL_RULES review path without Provider call
+ 
+     expect(diagnostics.apiRequests.filter((entry) => /\/api\/core\/daily-plans\/(generate|preflights)/.test(entry))).toEqual([]);
+   } finally {
+-    await attachDiagnostics(testInfo, diagnostics);
+-    expect(diagnostics.apiFailures).toEqual([]);
+-    expect(diagnostics.consoleProblems).toEqual([]);
+-    expect(diagnostics.cspConsoleProblems).toEqual([]);
+-    expect(diagnostics.externalRequests).toEqual([]);
+-    expect(diagnostics.failedRequests).toEqual([]);
+-    expect(diagnostics.pageErrors).toEqual([]);
++    auditMetadataCancellations(diagnostics);
++    expect.soft(diagnostics.apiFailures, 'API failures').toEqual([]);
++    expect.soft(diagnostics.consoleProblems, 'Browser console problems').toEqual([]);
++    expect.soft(diagnostics.cspConsoleProblems, 'CSP problems').toEqual([]);
++    expect.soft(diagnostics.externalRequests, 'External requests').toEqual([]);
++    expect.soft(diagnostics.failedRequests, 'Failed network requests').toEqual([]);
++    expect.soft(diagnostics.pageErrors, 'Browser page errors').toEqual([]);
++    try {
++      await attachDiagnostics(testInfo, diagnostics);
++    } catch (error) {
++      expect.soft(error, 'Browser diagnostics attachment failed').toBeUndefined();
++    }
+   }
+ });

@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  proposalResponseSchema,
   taskResponseSchema,
   todaySnapshotSchema,
   type Task,
@@ -10,8 +11,12 @@ import {
 import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CoreClientError, requestCore } from '@/lib/core-client';
+import { CoreClientError, isUncertainCoreWriteFailure, requestCore } from '@/lib/core-client';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { StatusOverview } from './status-overview';
+import { DayConsole } from './day-console';
+import { DailyPlanStatusCard } from './daily-plan-status-card';
+import { ModuleQuickLinks } from './module-quick-links';
 import { TaskComposer, type TaskCreationResult, type TaskDraft } from './task-composer';
 import { TaskList } from './task-list';
 
@@ -44,6 +49,7 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
   const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [mutationKey, setMutationKey] = useState<string | null>(null);
   const createInFlight = useRef(false);
+  const proposalDecisionKeys = useRef(new Map<string, string>());
 
   const handleFailure = useCallback(
     (failure: unknown): void => {
@@ -140,6 +146,42 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
     }
   }
 
+  async function decideProposal(proposalId: string, input: { version: number; decision: 'ACCEPT' | 'REJECT' }): Promise<void> {
+    setMutationKey(proposalId);
+    setError(null);
+    const semanticAction = `${proposalId}:${input.version}:${input.decision}`;
+    const idempotencyKey = proposalDecisionKeys.current.get(semanticAction) ?? createIdempotencyKey();
+    proposalDecisionKeys.current.set(semanticAction, idempotencyKey);
+    try {
+      const payload = await requestCore(`proposals/${proposalId}/decision`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: { 'Idempotency-Key': idempotencyKey },
+      });
+      const parsed = proposalResponseSchema.safeParse(payload);
+      const expectedStatus = input.decision === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED';
+      const responseIsCorrelated =
+        parsed.success &&
+        parsed.data.data.id === proposalId &&
+        parsed.data.data.version > input.version &&
+        parsed.data.data.status === expectedStatus;
+      if (!responseIsCorrelated) {
+        setError('Core 返回的提案决定无法确认，正在重新读取今天的数据');
+        await refresh();
+        return;
+      }
+      proposalDecisionKeys.current.delete(semanticAction);
+      await refresh();
+    } catch (failure) {
+      if (!isUncertainCoreWriteFailure(failure)) {
+        proposalDecisionKeys.current.delete(semanticAction);
+      }
+      handleFailure(failure);
+    } finally {
+      setMutationKey(null);
+    }
+  }
+
   if (isLoading || (!snapshot && !error)) {
     return <DashboardSkeleton />;
   }
@@ -162,8 +204,8 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
       <header className="today-header">
         <div>
           <p className="section-kicker">DAILY COMMAND CENTER / {snapshot.date}</p>
-          <h1>今天，从最重要的事开始。</h1>
-          <p>任务、状态与 Agent 能力全部来自这台电脑上的真实数据。</p>
+          <h1>今天的控制台</h1>
+          <p>先看今天已确认的时间，再处理具体行动；AI 只能生成等待你审核的计划草案。</p>
         </div>
         <div className="core-connection" role="status" aria-busy={isRefreshing}>
           <span aria-hidden="true" /> {isRefreshing ? '正在刷新今天的数据' : 'Core 已连接'}
@@ -188,8 +230,11 @@ export function TodayDashboard({ initialDate }: TodayDashboardProps) {
         </div>
       ) : null}
 
+      <DayConsole snapshot={snapshot} decidingProposalId={mutationKey} onDecision={decideProposal} />
+      <DailyPlanStatusCard date={snapshot.date} dailyPlan={snapshot.dailyPlan} />
       <StatusOverview snapshot={snapshot} />
-      <TaskComposer isPending={mutationKey === 'create'} onCreate={createTask} />
+      <ModuleQuickLinks />
+      <TaskComposer isPending={mutationKey === 'create'} targetDate={initialDate} onCreate={createTask} />
       <TaskList
         tasks={snapshot.tasks}
         updatingTaskId={mutationKey}

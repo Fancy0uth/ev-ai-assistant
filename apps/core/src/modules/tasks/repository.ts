@@ -1,4 +1,13 @@
-import type { Task, TaskArea, TaskListQuery, TaskPriority, TaskStatus } from '@ev/contracts';
+import {
+  taskSchema,
+  type NormalizedTask,
+  type Task,
+  type TaskArea,
+  type TaskListQuery,
+  type TaskPriority,
+  type TaskSchedulingInput,
+  type TaskStatus,
+} from '@ev/contracts';
 import type Database from 'better-sqlite3';
 
 interface TaskRow {
@@ -9,6 +18,10 @@ interface TaskRow {
   status: TaskStatus;
   target_date: string | null;
   completed_at: string | null;
+  scheduling_duration_minutes: number | null;
+  scheduling_earliest_start_local_time: string | null;
+  scheduling_latest_end_local_time: string | null;
+  scheduling_is_fixed: number | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -18,32 +31,51 @@ interface NewTask extends Task {
   ownerId: string;
 }
 
-interface TaskUpdate {
+export interface TaskUpdate {
   title: string;
   area: TaskArea;
   priority: TaskPriority;
   status: TaskStatus;
   targetDate: string | null;
   completedAt: string | null;
+  scheduling?: TaskSchedulingInput | null;
   updatedAt: string;
   expectedVersion: number;
 }
 
-interface TaskPage {
-  items: Task[];
+interface TaskPage<TTask extends Task> {
+  items: TTask[];
   total: number;
 }
 
-export interface TaskRepository {
-  create(task: NewTask): Task;
-  findById(ownerId: string, id: string): Task | undefined;
-  list(ownerId: string, query: TaskListQuery): TaskPage;
-  listForDate(ownerId: string, targetDate: string): Task[];
-  update(ownerId: string, id: string, update: TaskUpdate): Task | undefined;
+export interface TaskRepository<TTask extends Task = Task> {
+  create(task: NewTask): TTask;
+  findById(ownerId: string, id: string): TTask | undefined;
+  list(ownerId: string, query: TaskListQuery): TaskPage<TTask>;
+  listForDate(ownerId: string, targetDate: string): TTask[];
+  update(ownerId: string, id: string, update: TaskUpdate): TTask | undefined;
 }
 
-function toTask(row: TaskRow): Task {
-  return {
+function toTask(row: TaskRow): NormalizedTask {
+  const hasDuration = row.scheduling_duration_minutes !== null;
+  const hasFixed = row.scheduling_is_fixed !== null;
+  const hasWindow =
+    row.scheduling_earliest_start_local_time !== null ||
+    row.scheduling_latest_end_local_time !== null;
+  if (hasDuration !== hasFixed || (!hasDuration && hasWindow)) {
+    throw new Error('TASK_SCHEDULING_INCONSISTENT_STORAGE');
+  }
+
+  const scheduling = hasDuration
+    ? {
+        durationMinutes: row.scheduling_duration_minutes!,
+        earliestStartLocalTime: row.scheduling_earliest_start_local_time,
+        latestEndLocalTime: row.scheduling_latest_end_local_time,
+        isFixed: row.scheduling_is_fixed === 1,
+      }
+    : null;
+
+  return taskSchema.parse({
     id: row.id,
     title: row.title,
     area: row.area,
@@ -51,10 +83,11 @@ function toTask(row: TaskRow): Task {
     status: row.status,
     targetDate: row.target_date,
     completedAt: row.completed_at,
+    scheduling,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
+  });
 }
 
 const taskColumns = `
@@ -65,6 +98,10 @@ const taskColumns = `
   status,
   target_date,
   completed_at,
+  scheduling_duration_minutes,
+  scheduling_earliest_start_local_time,
+  scheduling_latest_end_local_time,
+  scheduling_is_fixed,
   version,
   created_at,
   updated_at
@@ -98,26 +135,28 @@ function taskListPredicate(ownerId: string, query: TaskListQuery): {
   return { where: conditions.join(' and '), bindings };
 }
 
-export function createTaskRepository(database: Database.Database): TaskRepository {
+export function createTaskRepository(database: Database.Database): TaskRepository<NormalizedTask> {
   const findByIdStatement = database.prepare(
     `select ${taskColumns}
      from tasks
      where id = ? and owner_id = ?`,
   );
 
-  const findById = (ownerId: string, id: string): Task | undefined => {
+  const findById = (ownerId: string, id: string): NormalizedTask | undefined => {
     const row = findByIdStatement.get(id, ownerId) as TaskRow | undefined;
     return row ? toTask(row) : undefined;
   };
 
   return {
     create(task) {
+      const scheduling = task.scheduling ?? null;
       database
         .prepare(
           `insert into tasks (
              id, owner_id, title, area, priority, status, target_date,
-             completed_at, version, created_at, updated_at
-           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             completed_at, scheduling_duration_minutes, scheduling_earliest_start_local_time,
+             scheduling_latest_end_local_time, scheduling_is_fixed, version, created_at, updated_at
+           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           task.id,
@@ -128,6 +167,10 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
           task.status,
           task.targetDate,
           task.completedAt,
+          scheduling?.durationMinutes ?? null,
+          scheduling?.earliestStartLocalTime ?? null,
+          scheduling?.latestEndLocalTime ?? null,
+          scheduling === null ? null : scheduling.isFixed ? 1 : 0,
           task.version,
           task.createdAt,
           task.updatedAt,
@@ -140,6 +183,10 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
         status: task.status,
         target_date: task.targetDate,
         completed_at: task.completedAt,
+        scheduling_duration_minutes: scheduling?.durationMinutes ?? null,
+        scheduling_earliest_start_local_time: scheduling?.earliestStartLocalTime ?? null,
+        scheduling_latest_end_local_time: scheduling?.latestEndLocalTime ?? null,
+        scheduling_is_fixed: scheduling === null ? null : scheduling.isFixed ? 1 : 0,
         version: task.version,
         created_at: task.createdAt,
         updated_at: task.updatedAt,
@@ -207,6 +254,7 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
     },
 
     update(ownerId, id, update) {
+      const scheduling = update.scheduling ?? null;
       const result = database
         .prepare(
           `update tasks
@@ -216,6 +264,10 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
                status = ?,
                target_date = ?,
                completed_at = ?,
+               scheduling_duration_minutes = ?,
+               scheduling_earliest_start_local_time = ?,
+               scheduling_latest_end_local_time = ?,
+               scheduling_is_fixed = ?,
                version = version + 1,
                updated_at = ?
            where id = ? and owner_id = ? and version = ?`,
@@ -227,6 +279,10 @@ export function createTaskRepository(database: Database.Database): TaskRepositor
           update.status,
           update.targetDate,
           update.completedAt,
+          scheduling?.durationMinutes ?? null,
+          scheduling?.earliestStartLocalTime ?? null,
+          scheduling?.latestEndLocalTime ?? null,
+          scheduling === null ? null : scheduling.isFixed ? 1 : 0,
           update.updatedAt,
           id,
           ownerId,

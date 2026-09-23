@@ -2,6 +2,7 @@
 
 import type { Task, TaskStatus } from '@ev/contracts';
 import { Check, Clock3, RotateCcw } from 'lucide-react';
+import Link from 'next/link';
 
 interface TaskListProps {
   tasks: Task[];
@@ -71,6 +72,13 @@ export function TaskList({ tasks, updatingTaskId, onStatusChange }: TaskListProp
                     <span>{priorityCopy[task.priority]}优先级</span>
                     <span>v{task.version}</span>
                   </div>
+                  <Link
+                    aria-label={`查看任务详情：${task.title}`}
+                    className="task-module-link"
+                    href={`/tasks/${task.id}`}
+                  >
+                    查看任务详情
+                  </Link>
                 </div>
                 <button
                   className="task-secondary-action"

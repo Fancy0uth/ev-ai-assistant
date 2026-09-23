@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "EXERCISE_CATALOG_V1",
+  "catalogId": "ev-ai-internal-starter",
+  "catalogVersion": "2026.08.31.1",
+  "source": {
+    "kind": "FIRST_PARTY_INTERNAL",
+    "name": "EV AI internal starter catalog",
+    "licenseId": null,
+    "redistribution": false,
+    "medicalClaims": false
+  },
+  "contentSha256": "cb280d075eb304b7c1127e412b70b9cfd90c62cdd410df2b622a846dfe3846dc",
+  "itemCount": 8
+}

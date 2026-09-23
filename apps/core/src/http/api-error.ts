@@ -15,6 +15,17 @@ export class ApiError extends Error {
   }
 }
 
+export const V07_DAILY_QUOTA_RETRY_AFTER_SECONDS = 86_400;
+
+export class V07DailyQuotaError extends ApiError {
+  readonly retryAfterSeconds = V07_DAILY_QUOTA_RETRY_AFTER_SECONDS;
+
+  constructor(message: string) {
+    super(429, 'RATE_LIMITED', message);
+    this.name = 'V07DailyQuotaError';
+  }
+}
+
 export function registerErrorHandling(app: FastifyInstance): void {
   app.setNotFoundHandler((_request, reply) => {
     return reply.status(404).send(
@@ -28,7 +39,23 @@ export function registerErrorHandling(app: FastifyInstance): void {
   });
 
   app.setErrorHandler((error, request, reply) => {
+    const fastifyCode = (error as { code?: string }).code;
+    if (fastifyCode === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return reply.status(413).send(apiErrorSchema.parse({
+        error: { code: 'IMAGE_TOO_LARGE', message: '课表截图不能超过 5 MB' },
+      }));
+    }
+    if (fastifyCode === 'FST_ERR_CTP_INVALID_MEDIA_TYPE') {
+      return reply.status(415).send(apiErrorSchema.parse({
+        error: { code: 'UNSUPPORTED_IMAGE_TYPE', message: '仅支持 PNG、JPEG 或 WebP 图片' },
+      }));
+    }
     if (error instanceof ApiError) {
+      const retryAfterSeconds = (error as ApiError & { retryAfterSeconds?: number }).retryAfterSeconds;
+      if (retryAfterSeconds !== undefined) reply.header('retry-after', String(retryAfterSeconds));
+      if ((error as ApiError & { idempotencyReplayed?: boolean }).idempotencyReplayed === true) {
+        reply.header('idempotency-replayed', 'true');
+      }
       const details = error.details === undefined ? {} : { details: error.details };
       return reply.status(error.statusCode).send(
         apiErrorSchema.parse({

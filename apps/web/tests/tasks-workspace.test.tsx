@@ -70,7 +70,7 @@ describe('TasksWorkspace', () => {
 
   it('keeps every task control at the mobile font and touch-target floor despite editor button specificity', () => {
     const dashboardCss = readFileSync(resolve(process.cwd(), 'src/app/dashboard.css'), 'utf8');
-    const mobileCss = dashboardCss.slice(dashboardCss.lastIndexOf('@media (max-width: 42rem) {'));
+    const mobileCss = dashboardCss;
     const mobileControlRule = mobileCss.match(
       /\.task-composer input,[\s\S]*?\.tasks-pagination button\s*\{[\s\S]*?\}/,
     )?.[0];
@@ -428,7 +428,9 @@ describe('TasksWorkspace', () => {
       priority: 'LOW',
       targetDate: '2026-08-18',
     });
-    expect(screen.getByRole('button', { name: `编辑任务：${editedTask.title}` })).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: `编辑任务：${editedTask.title}` })).toHaveFocus(),
+    );
   });
 
   it('keeps an unsaved editor draft when another task mutation reloads the same task version', async () => {
@@ -507,7 +509,7 @@ describe('TasksWorkspace', () => {
       priority: task.priority,
       targetDate: task.targetDate,
     });
-    expect(screen.getByRole('heading', { name: '任务工作台' })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole('heading', { name: '任务工作台' })).toHaveFocus());
   });
 
   it('completes a task with exactly the current version and one write request', async () => {

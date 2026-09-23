@@ -1,0 +1,604 @@
+warning: in the working copy of 'apps/core/src/modules/projects/conversation-context.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/apps/core/src/modules/projects/conversation-context.ts b/apps/core/src/modules/projects/conversation-context.ts
+new file mode 100644
+index 0000000..c6c21b0
+--- /dev/null
++++ b/apps/core/src/modules/projects/conversation-context.ts
+@@ -0,0 +1,160 @@
++import type { EntityMemoryDocument } from '../memory/entity-service';
++import type { ProjectConversationMessage } from './conversation-repository';
++import type { createProjectScopeService } from './scope-service';
++
++const USER_REPORT_LIMIT = 50;
++const USER_REPORT_BYTE_LIMIT = 32_000;
++const MEMORY_BYTE_LIMIT = 16_000;
++const FILE_BYTE_LIMIT = 16_000;
++const TOTAL_FILE_BYTE_LIMIT = 64_000;
++
++type ProjectScopeSnapshot = ReturnType<ReturnType<typeof createProjectScopeService>['snapshot']>;
++
++export interface ProjectConversationContext {
++  schemaVersion: 'PROJECT_CONVERSATION_CONTEXT_V1';
++  userReports: Array<{
++    messageId: string;
++    sequence: number;
++    content: string;
++    source: 'USER_REPORTED';
++  }>;
++  memory: {
++    content: string;
++    version: number;
++    source: 'CURRENT_PROJECT_MEMORY';
++  } | null;
++  files: Array<{
++    relativePath: string;
++    content: string;
++    contentHash: string;
++    source: 'PROJECT_FILE';
++  }>;
++  omissions: {
++    olderMessages: boolean;
++    messageIds: string[];
++    files: Array<{ relativePath: string; reason: string }>;
++    memory: boolean;
++  };
++}
++
++export interface ProjectConversationContextInput {
++  messages: readonly ProjectConversationMessage[];
++  scopeSnapshot: ProjectScopeSnapshot;
++  memory: EntityMemoryDocument | undefined;
++}
++
++function projectUserReports(messages: readonly ProjectConversationMessage[]): Pick<
++  ProjectConversationContext,
++  'userReports' | 'omissions'
++> {
++  const visibleMessages = messages.slice(-USER_REPORT_LIMIT);
++  const omittedMessageIds = messages
++    .slice(0, messages.length - visibleMessages.length)
++    .map((message) => message.id);
++  const userReports: ProjectConversationContext['userReports'] = [];
++  let totalBytes = 0;
++
++  for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
++    const message = visibleMessages[index]!;
++    const messageBytes = Buffer.byteLength(message.content, 'utf8');
++    if (totalBytes + messageBytes > USER_REPORT_BYTE_LIMIT) {
++      omittedMessageIds.push(...visibleMessages.slice(0, index + 1).map((olderMessage) => olderMessage.id));
++      break;
++    }
++    totalBytes += messageBytes;
++    userReports.push({
++      messageId: message.id,
++      sequence: message.sequence,
++      content: message.content,
++      source: 'USER_REPORTED',
++    });
++  }
++
++  return {
++    userReports: userReports.reverse(),
++    omissions: {
++      olderMessages: omittedMessageIds.length > 0,
++      messageIds: omittedMessageIds,
++      files: [],
++      memory: false,
++    },
++  };
++}
++
++function projectMemory(memory: EntityMemoryDocument | undefined): Pick<
++  ProjectConversationContext,
++  'memory' | 'omissions'
++> {
++  if (!memory) {
++    return {
++      memory: null,
++      omissions: { olderMessages: false, messageIds: [], files: [], memory: false },
++    };
++  }
++  if (Buffer.byteLength(memory.content, 'utf8') > MEMORY_BYTE_LIMIT) {
++    return {
++      memory: null,
++      omissions: { olderMessages: false, messageIds: [], files: [], memory: true },
++    };
++  }
++  return {
++    memory: {
++      content: memory.content,
++      version: memory.version,
++      source: 'CURRENT_PROJECT_MEMORY',
++    },
++    omissions: { olderMessages: false, messageIds: [], files: [], memory: false },
++  };
++}
++
++function projectFiles(scopeSnapshot: ProjectScopeSnapshot): Pick<
++  ProjectConversationContext,
++  'files' | 'omissions'
++> {
++  const files: ProjectConversationContext['files'] = [];
++  const omissions: ProjectConversationContext['omissions']['files'] = scopeSnapshot.snapshot.skipped
++    .map(({ relativePath, reason }) => ({ relativePath, reason }));
++  let totalBytes = 0;
++
++  for (const file of scopeSnapshot.snapshot.files) {
++    const fileBytes = Buffer.byteLength(file.content, 'utf8');
++    if (fileBytes > FILE_BYTE_LIMIT) {
++      omissions.push({ relativePath: file.relativePath, reason: 'CONTEXT_FILE_LIMIT' });
++      continue;
++    }
++    if (totalBytes + fileBytes > TOTAL_FILE_BYTE_LIMIT) {
++      omissions.push({ relativePath: file.relativePath, reason: 'CONTEXT_TOTAL_LIMIT' });
++      continue;
++    }
++    totalBytes += fileBytes;
++    files.push({
++      relativePath: file.relativePath,
++      content: file.content,
++      contentHash: file.contentHash,
++      source: 'PROJECT_FILE',
++    });
++  }
++
++  return {
++    files,
++    omissions: { olderMessages: false, messageIds: [], files: omissions, memory: false },
++  };
++}
++
++export function projectConversationContext(input: ProjectConversationContextInput): ProjectConversationContext {
++  const reports = projectUserReports(input.messages);
++  const memory = projectMemory(input.memory);
++  const files = projectFiles(input.scopeSnapshot);
++  return {
++    schemaVersion: 'PROJECT_CONVERSATION_CONTEXT_V1',
++    userReports: reports.userReports,
++    memory: memory.memory,
++    files: files.files,
++    omissions: {
++      olderMessages: reports.omissions.olderMessages,
++      messageIds: reports.omissions.messageIds,
++      files: files.omissions.files,
++      memory: memory.omissions.memory,
++    },
++  };
++}
+
+warning: in the working copy of 'apps/core/src/modules/projects/conversation-service.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/apps/core/src/modules/projects/conversation-service.ts b/apps/core/src/modules/projects/conversation-service.ts
+new file mode 100644
+index 0000000..3a92c3a
+--- /dev/null
++++ b/apps/core/src/modules/projects/conversation-service.ts
+@@ -0,0 +1,26 @@
++import { createEntityMemoryService } from '../memory/entity-service';
++import type { ProjectConversationRepository } from './conversation-repository';
++import { projectConversationContext } from './conversation-context';
++import { createProjectScopeService } from './scope-service';
++
++export function createProjectConversationService(dependencies: {
++  conversations: Pick<ProjectConversationRepository, 'appendUserMessage' | 'listMessages'>;
++  scopes: Pick<ReturnType<typeof createProjectScopeService>, 'snapshot'>;
++  memory: Pick<ReturnType<typeof createEntityMemoryService>, 'read'>;
++}) {
++  return {
++    recordProgress(
++      ownerId: string,
++      projectId: string,
++      input: { clientMessageId: string; content: string },
++    ) {
++      return dependencies.conversations.appendUserMessage(ownerId, projectId, input);
++    },
++    buildContext(ownerId: string, projectId: string) {
++      const messages = dependencies.conversations.listMessages(ownerId, projectId, { limit: 51 });
++      const scopeSnapshot = dependencies.scopes.snapshot(ownerId, projectId);
++      const memory = dependencies.memory.read(ownerId, { scopeType: 'PROJECT', scopeId: projectId });
++      return projectConversationContext({ messages, scopeSnapshot, memory });
++    },
++  };
++}
+
+warning: in the working copy of 'apps/core/tests/project-conversation-context.test.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/apps/core/tests/project-conversation-context.test.ts b/apps/core/tests/project-conversation-context.test.ts
+new file mode 100644
+index 0000000..db3c6ac
+--- /dev/null
++++ b/apps/core/tests/project-conversation-context.test.ts
+@@ -0,0 +1,393 @@
++import Database from 'better-sqlite3';
++import { describe, expect, it } from 'vitest';
++import { ApiError } from '../src/http/api-error';
++import { createProjectConversationRepository } from '../src/modules/projects/conversation-repository';
++import { runMigrations } from '../src/storage/migrations';
++
++interface ProjectConversationMessage {
++  id: string;
++  sessionId: string;
++  sequence: number;
++  content: string;
++  role: 'USER';
++  createdAt: string;
++}
++
++interface ProjectConversationAppendResult {
++  message: ProjectConversationMessage;
++  replayed: boolean;
++}
++
++interface ProjectConversationContext {
++  schemaVersion: 'PROJECT_CONVERSATION_CONTEXT_V1';
++  userReports: Array<{
++    messageId: string;
++    sequence: number;
++    content: string;
++    source: 'USER_REPORTED';
++  }>;
++  memory: { content: string; version: number; source: 'CURRENT_PROJECT_MEMORY' } | null;
++  files: Array<{
++    relativePath: string;
++    content: string;
++    contentHash: string;
++    source: 'PROJECT_FILE';
++  }>;
++  omissions: {
++    olderMessages: boolean;
++    messageIds: string[];
++    files: Array<{ relativePath: string; reason: string }>;
++    memory: boolean;
++  };
++}
++
++interface ScopeSnapshot {
++  scope: {
++    id: string;
++    label: string;
++    rootPath: string;
++    createdAt: string;
++    updatedAt: string;
++  };
++  snapshot: {
++    root: string;
++    files: Array<{
++      relativePath: string;
++      content: string;
++      contentHash: string;
++      byteLength: number;
++      readAt: string;
++    }>;
++    skipped: Array<{ relativePath: string; reason: string; checkedAt: string }>;
++    totalBytes: number;
++  };
++}
++
++interface EntityMemoryDocument {
++  scopeType: 'PROJECT';
++  scopeId: string;
++  content: string;
++  version: number;
++  createdAt: string;
++  updatedAt: string;
++}
++
++interface ProjectConversationService {
++  recordProgress(
++    ownerId: string,
++    projectId: string,
++    input: { clientMessageId: string; content: string },
++  ): ProjectConversationAppendResult;
++  buildContext(ownerId: string, projectId: string): ProjectConversationContext;
++}
++
++async function loadConversationService(): Promise<{
++  createProjectConversationService(input: {
++    conversations: {
++      appendUserMessage(
++        ownerId: string,
++        projectId: string,
++        input: { clientMessageId: string; content: string },
++      ): ProjectConversationAppendResult;
++      listMessages(
++        ownerId: string,
++        projectId: string,
++        input: { limit: number; beforeSequence?: number },
++      ): ProjectConversationMessage[];
++    };
++    scopes: { snapshot(ownerId: string, projectId: string): ScopeSnapshot };
++    memory: {
++      read(
++        ownerId: string,
++        identity: { scopeType: 'PROJECT'; scopeId: string },
++      ): EntityMemoryDocument | undefined;
++    };
++  }): ProjectConversationService;
++}> {
++  const modulePath = '../src/modules/projects/conversation-service';
++  return import(modulePath) as Promise<{
++    createProjectConversationService(input: {
++      conversations: {
++        appendUserMessage(
++          ownerId: string,
++          projectId: string,
++          input: { clientMessageId: string; content: string },
++        ): ProjectConversationAppendResult;
++        listMessages(
++          ownerId: string,
++          projectId: string,
++          input: { limit: number; beforeSequence?: number },
++        ): ProjectConversationMessage[];
++      };
++      scopes: { snapshot(ownerId: string, projectId: string): ScopeSnapshot };
++      memory: {
++        read(
++          ownerId: string,
++          identity: { scopeType: 'PROJECT'; scopeId: string },
++        ): EntityMemoryDocument | undefined;
++      };
++    }): ProjectConversationService;
++  }>;
++}
++
++function rowCount(database: Database.Database, table: string): number {
++  return (database.prepare(`select count(*) as count from ${table}`).get() as { count: number }).count;
++}
++
++function expectApiError(operation: () => unknown, statusCode: number, code: string): void {
++  let thrown: unknown;
++  try {
++    operation();
++  } catch (error) {
++    thrown = error;
++  }
++  expect(thrown).toBeInstanceOf(ApiError);
++  expect(thrown).toMatchObject({ statusCode, code });
++}
++
++describe('PC-02 bounded project conversation context', () => {
++  it('persists user reports before context failures and projects only current bounded project inputs', async () => {
++    const database = new Database(':memory:');
++    const timestamp = '2026-09-16T00:00:00.000Z';
++    const ownerId = 'pc02-owner';
++    const projectId = 'pc02-project';
++    const emptyProjectId = 'pc02-empty-project';
++    const firstClientMessageId = '00000000-0000-4000-8000-000000002901';
++    const correctionClientMessageId = '00000000-0000-4000-8000-000000002902';
++
++    try {
++      database.pragma('foreign_keys = ON');
++      runMigrations(database);
++      database.prepare(
++        'insert into owners (id, username, password_hash, created_at) values (?, ?, ?, ?)',
++      ).run(ownerId, 'pc02-owner', 'synthetic-hash', timestamp);
++      for (const [id, label] of [
++        [projectId, 'PC-02 synthetic project'],
++        [emptyProjectId, 'PC-02 empty synthetic project'],
++      ]) {
++        database.prepare(`insert into project_scopes (
++          id, owner_id, label, root_path, created_at, updated_at
++        ) values (?, ?, ?, ?, ?, ?)`).run(id, ownerId, label, `/synthetic/${id}`, timestamp, timestamp);
++      }
++
++      const repository = createProjectConversationRepository(database);
++      const messageReadLimits: number[] = [];
++      const conversations = {
++        appendUserMessage(
++          readOwnerId: string,
++          readProjectId: string,
++          input: { clientMessageId: string; content: string },
++        ): ProjectConversationAppendResult {
++          return repository.appendUserMessage(readOwnerId, readProjectId, input);
++        },
++        listMessages(
++          readOwnerId: string,
++          readProjectId: string,
++          input: { limit: number; beforeSequence?: number },
++        ): ProjectConversationMessage[] {
++          messageReadLimits.push(input.limit);
++          return repository.listMessages(readOwnerId, readProjectId, input);
++        },
++      };
++
++      const tooLargeChineseFile = '进'.repeat(5_334);
++      expect(Buffer.byteLength(tooLargeChineseFile, 'utf8')).toBe(16_002);
++      let snapshotShouldFail = false;
++      let currentMemory: EntityMemoryDocument | undefined = {
++        scopeType: 'PROJECT',
++        scopeId: projectId,
++        content: '当前项目实体记忆。',
++        version: 4,
++        createdAt: timestamp,
++        updatedAt: timestamp,
++      };
++      const snapshotCalls: Array<{ ownerId: string; projectId: string }> = [];
++      const memoryCalls: Array<{ ownerId: string; scopeType: 'PROJECT'; scopeId: string }> = [];
++      const scopes = {
++        snapshot(readOwnerId: string, readProjectId: string) {
++          snapshotCalls.push({ ownerId: readOwnerId, projectId: readProjectId });
++          if (snapshotShouldFail) throw new Error('synthetic snapshot read failure');
++          return {
++            scope: {
++              id: readProjectId,
++              label: 'Synthetic project scope',
++              rootPath: `/synthetic/private/${readProjectId}`,
++              createdAt: timestamp,
++              updatedAt: timestamp,
++            },
++            snapshot: {
++              root: `/synthetic/private/${readProjectId}`,
++              files: [
++                {
++                  relativePath: 'docs/PRD.md',
++                  content: '保留的合成项目文件。',
++                  contentHash: 'synthetic-small-file-hash',
++                  byteLength: Buffer.byteLength('保留的合成项目文件。', 'utf8'),
++                  readAt: timestamp,
++                  extraBoundaryField: 'must not leave the I/O boundary',
++                },
++                {
++                  relativePath: 'docs/TECH_SPEC.md',
++                  content: tooLargeChineseFile,
++                  contentHash: 'synthetic-large-chinese-file-hash',
++                  byteLength: Buffer.byteLength(tooLargeChineseFile, 'utf8'),
++                  readAt: timestamp,
++                },
++              ],
++              skipped: [
++                {
++                  relativePath: 'plans/TASKS.md',
++                  reason: 'MISSING',
++                  checkedAt: timestamp,
++                  extraBoundaryField: 'must not leave the I/O boundary',
++                },
++              ],
++              totalBytes: Buffer.byteLength('保留的合成项目文件。', 'utf8') + Buffer.byteLength(tooLargeChineseFile, 'utf8'),
++            },
++            extraBoundaryField: 'must not leave the I/O boundary',
++          };
++        },
++      };
++      const memory = {
++        read(
++          readOwnerId: string,
++          identity: { scopeType: 'PROJECT'; scopeId: string },
++        ): EntityMemoryDocument | undefined {
++          memoryCalls.push({ ownerId: readOwnerId, ...identity });
++          if (identity.scopeId !== projectId) return undefined;
++          return currentMemory;
++        },
++      };
++
++      const { createProjectConversationService } = await loadConversationService();
++      const service = createProjectConversationService({ conversations, scopes, memory });
++      const firstReport = service.recordProgress(ownerId, projectId, {
++        clientMessageId: firstClientMessageId,
++        content: '第一条项目自述会先持久化。',
++      });
++      expect(firstReport).toMatchObject({
++        replayed: false,
++        message: { content: '第一条项目自述会先持久化。', role: 'USER' },
++      });
++
++      const correction = service.recordProgress(ownerId, projectId, {
++        clientMessageId: correctionClientMessageId,
++        content: '更正：第一条报告的状态仍在进行中。',
++      });
++      expect(correction.message.sequence).toBeGreaterThan(firstReport.message.sequence);
++      const initialContext = service.buildContext(ownerId, projectId);
++      expect(initialContext).toEqual({
++        schemaVersion: 'PROJECT_CONVERSATION_CONTEXT_V1',
++        userReports: [
++          {
++            messageId: firstReport.message.id,
++            sequence: firstReport.message.sequence,
++            content: '第一条项目自述会先持久化。',
++            source: 'USER_REPORTED',
++          },
++          {
++            messageId: correction.message.id,
++            sequence: correction.message.sequence,
++            content: '更正：第一条报告的状态仍在进行中。',
++            source: 'USER_REPORTED',
++          },
++        ],
++        memory: {
++          content: '当前项目实体记忆。',
++          version: 4,
++          source: 'CURRENT_PROJECT_MEMORY',
++        },
++        files: [
++          {
++            relativePath: 'docs/PRD.md',
++            content: '保留的合成项目文件。',
++            contentHash: 'synthetic-small-file-hash',
++            source: 'PROJECT_FILE',
++          },
++        ],
++        omissions: {
++          olderMessages: false,
++          messageIds: [],
++          files: [
++            { relativePath: 'plans/TASKS.md', reason: 'MISSING' },
++            { relativePath: 'docs/TECH_SPEC.md', reason: 'CONTEXT_FILE_LIMIT' },
++          ],
++          memory: false,
++        },
++      });
++      expect(initialContext).not.toHaveProperty('ownerId');
++      expect(initialContext).not.toHaveProperty('root');
++      expect(initialContext).not.toHaveProperty('scope');
++      expect(initialContext.files[0]).not.toHaveProperty('byteLength');
++      expect(initialContext.files[0]).not.toHaveProperty('readAt');
++      if (initialContext.memory !== null) {
++        expect(initialContext.memory).not.toHaveProperty('scopeId');
++        expect(initialContext.memory).not.toHaveProperty('createdAt');
++      }
++      expect(messageReadLimits.every((limit) => limit === 51)).toBe(true);
++      expect(snapshotCalls.at(-1)).toEqual({ ownerId, projectId });
++      expect(memoryCalls.at(-1)).toEqual({ ownerId, scopeType: 'PROJECT', scopeId: projectId });
++
++      currentMemory = undefined;
++      const afterMemoryDeletion = service.buildContext(ownerId, projectId);
++      expect(afterMemoryDeletion.memory).toBeNull();
++      expect(afterMemoryDeletion.omissions.memory).toBe(false);
++
++      const conversationsBeforeEmptyContext = rowCount(database, 'project_conversations');
++      expect(service.buildContext(ownerId, emptyProjectId).userReports).toEqual([]);
++      expect(rowCount(database, 'project_conversations')).toBe(conversationsBeforeEmptyContext);
++
++      const olderReport = service.recordProgress(ownerId, projectId, {
++        clientMessageId: '00000000-0000-4000-8000-000000002903',
++        content: '旧'.repeat(4_000),
++      });
++      const middleReport = service.recordProgress(ownerId, projectId, {
++        clientMessageId: '00000000-0000-4000-8000-000000002904',
++        content: '中'.repeat(4_000),
++      });
++      const newestCorrection = service.recordProgress(ownerId, projectId, {
++        clientMessageId: '00000000-0000-4000-8000-000000002905',
++        content: '新'.repeat(8_000),
++      });
++      const boundedContext = service.buildContext(ownerId, projectId);
++      expect(boundedContext.userReports).toEqual([
++        {
++          messageId: newestCorrection.message.id,
++          sequence: newestCorrection.message.sequence,
++          content: '新'.repeat(8_000),
++          source: 'USER_REPORTED',
++        },
++      ]);
++      expect(boundedContext.omissions).toMatchObject({
++        olderMessages: true,
++        messageIds: [
++          firstReport.message.id,
++          correction.message.id,
++          olderReport.message.id,
++          middleReport.message.id,
++        ],
++        memory: false,
++      });
++
++      snapshotShouldFail = true;
++      const reportBeforeFailedContext = service.recordProgress(ownerId, projectId, {
++        clientMessageId: '00000000-0000-4000-8000-000000002906',
++        content: '快照读取失败后这条自述仍保留。',
++      });
++      expect(() => service.buildContext(ownerId, projectId)).toThrow('synthetic snapshot read failure');
++      expect(repository.listMessages(ownerId, projectId, { limit: 10 })).toContainEqual(reportBeforeFailedContext.message);
++
++      const snapshotReadsBeforeForbiddenOwner = snapshotCalls.length;
++      const memoryReadsBeforeForbiddenOwner = memoryCalls.length;
++      expectApiError(() => service.buildContext('pc02-other-owner', projectId), 404, 'PROJECT_SCOPE_NOT_FOUND');
++      expect(snapshotCalls).toHaveLength(snapshotReadsBeforeForbiddenOwner);
++      expect(memoryCalls).toHaveLength(memoryReadsBeforeForbiddenOwner);
++      expect(rowCount(database, 'actions')).toBe(0);
++      expect(rowCount(database, 'time_requests')).toBe(0);
++      expect(rowCount(database, 'proposals')).toBe(0);
++      expect(rowCount(database, 'events')).toBe(0);
++    } finally {
++      database.close();
++    }
++  });
++});
+
+

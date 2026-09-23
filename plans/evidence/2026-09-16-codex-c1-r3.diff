@@ -1,0 +1,23 @@
+--- R2/scripts/codex-container/Dockerfile
++++ R3/scripts/codex-container/Dockerfile
+@@
+-ENV HOME=/tmp/ev-codex \
+-    CODEX_HOME=/tmp/ev-codex
++ENV HOME=/home/ev-codex \
++    CODEX_HOME=/home/ev-codex
+@@
+-RUN mkdir -p /tmp/ev-codex /work \
++RUN mkdir -p /home/ev-codex /work \
+     && python /usr/local/lib/ev-codex/fetch-codex.py \
+     && /usr/local/bin/codex --version \
+-    && chown -R 65532:65532 /tmp/ev-codex /work \
++    && chown -R 65532:65532 /home/ev-codex /work \
+     && chmod 1777 /tmp
+--- R2/scripts/codex-container/fetch-codex.py
++++ R3/scripts/codex-container/fetch-codex.py
+@@
+-CODEX_SUFFIX = "package/vendor/x86_64-unknown-linux-musl/bin/codex"
++CODEX_ARCHIVE_MEMBER = "package/vendor/x86_64-unknown-linux-musl/bin/codex"
+@@
+-                member for member in archive.getmembers() if member.name.endswith(CODEX_SUFFIX)
++                member for member in archive.getmembers() if member.name == CODEX_ARCHIVE_MEMBER

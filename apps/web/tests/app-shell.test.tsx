@@ -31,6 +31,17 @@ function validSessionResponse(): Response {
   });
 }
 
+function configuredAndTestedCredentialResponse(): Response {
+  return jsonResponse({
+    data: {
+      providerKey: 'DEEPSEEK',
+      state: 'CONFIGURED',
+      updatedAt: '2026-09-16T01:00:00.000Z',
+      lastConnectionTest: { status: 'SUCCEEDED' },
+    },
+  });
+}
+
 function renderShell() {
   return render(
     <AppShell>
@@ -112,7 +123,11 @@ describe('AppShell navigation', () => {
   });
 
   it('owns successful logout and only navigates after validating the frozen response', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { success: true } }));
+    const fetchMock = vi.fn().mockImplementation((path: string) => (
+      path === '/api/core/providers/deepseek/credential'
+        ? configuredAndTestedCredentialResponse()
+        : jsonResponse({ data: { success: true } })
+    ));
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
 
@@ -134,7 +149,11 @@ describe('AppShell navigation', () => {
       '退出请求失败',
     ],
   ])('keeps the dashboard visible when logout receives a %s response', async (_kind, response, message) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((path: string) => (
+      path === '/api/core/providers/deepseek/credential'
+        ? configuredAndTestedCredentialResponse()
+        : response.clone()
+    )));
     const user = userEvent.setup();
 
     renderShell();
@@ -145,13 +164,17 @@ describe('AppShell navigation', () => {
     expect(screen.getByText('今天画布')).toBeInTheDocument();
   });
 
-  it('renders exactly one primary nav, one mobile nav, and one desktop Agent rail', () => {
+  it('renders exactly one primary nav, one mobile nav, and a live DeepSeek desktop rail', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(configuredAndTestedCredentialResponse()));
     renderShell();
 
     expect(screen.getAllByRole('navigation', { name: '主导航' })).toHaveLength(1);
     expect(screen.getAllByRole('navigation', { name: '移动端主导航' })).toHaveLength(1);
     expect(screen.getAllByLabelText('Agent 状态')).toHaveLength(1);
-    expect(screen.getByText('Agent API 未连接')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'DeepSeek：最近测试成功（不代表实时可达）' })).toBeInTheDocument();
+    expect(screen.getByText('DeepSeek 目前仅适用于每日计划与课程文本建议。')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '打开 DeepSeek 设置' })).toHaveAttribute('href', '/settings/providers');
+    expect(screen.getByRole('link', { name: '打开每日计划' })).toHaveAttribute('href', '/daily-plan');
   });
 });
 
@@ -242,7 +265,7 @@ describe('TodayDashboard canvas', () => {
             },
             tasks: [],
             yesterday: null,
-            agents: { deepSeek: 'NOT_CONFIGURED', codex: 'NOT_CONFIGURED' },
+            agents: { deepSeek: 'NOT_CONFIGURED' },
           },
         }),
       ),

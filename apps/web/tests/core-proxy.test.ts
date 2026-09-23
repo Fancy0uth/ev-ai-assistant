@@ -1,9 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { POST } from '../src/app/api/core/[...path]/route';
+import { GET, POST, PUT } from '../src/app/api/core/[...path]/route';
+
+const webOrigin = 'http://127.0.0.1:3217';
+const csrfToken = 'B'.repeat(43);
+
+function trustedMutationRequest(url: string, init: RequestInit): Request {
+  const headers = new Headers(init.headers);
+  headers.set('origin', webOrigin);
+  headers.set('x-ev-csrf-token', csrfToken);
+  const existingCookie = headers.get('cookie');
+  headers.set('cookie', existingCookie ? `${existingCookie}; ev_csrf=${csrfToken}` : `ev_csrf=${csrfToken}`);
+  return new Request(url, { ...init, headers });
+}
 
 describe('Core BFF proxy', () => {
   beforeEach(() => {
     vi.stubEnv('EV_CORE_URL', 'http://127.0.0.1:4311');
+    vi.stubEnv('EV_WEB_ORIGIN', webOrigin);
   });
 
   it('forwards only ev_session without changing its opaque value and returns the Core cookie', async () => {
@@ -18,7 +31,7 @@ describe('Core BFF proxy', () => {
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const request = new Request('http://web.local/api/core/auth/setup?source=web', {
+    const request = trustedMutationRequest('http://web.local/api/core/auth/setup?source=web', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -48,7 +61,7 @@ describe('Core BFF proxy', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await POST(
-      new Request('http://web.local/api/core/tasks', {
+      trustedMutationRequest('http://web.local/api/core/tasks', {
         method: 'POST',
         headers: { cookie: 'theme=dark; preference=compact' },
       }),
@@ -58,6 +71,59 @@ describe('Core BFF proxy', () => {
     expect(response.status).toBe(200);
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect((init.headers as Headers).get('cookie')).toBeNull();
+  });
+
+  it('forwards a versioned memory write through PUT', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { scope: 'GENERAL', version: 1 } }), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await PUT(
+      trustedMutationRequest('http://web.local/api/core/memory/GENERAL', {
+        method: 'PUT',
+        body: JSON.stringify({ content: '稳定偏好', expectedVersion: null }),
+      }),
+      { params: Promise.resolve({ path: ['memory', 'GENERAL'] }) },
+    );
+
+    expect(response.status).toBe(201);
+    const [target, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(target).toBe('http://127.0.0.1:4311/v1/memory/GENERAL');
+    expect(init.method).toBe('PUT');
+  });
+
+  it('rejects retired project registration without forwarding it to Core', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(
+      trustedMutationRequest('http://web.local/api/core/projects', { method: 'POST' }),
+      { params: Promise.resolve({ path: ['projects'] }) },
+    );
+
+    expect(response.status).toBe(405);
+    expect(await response.json()).toEqual({
+      error: { code: 'PROJECT_MODULE_RETIRED', message: '项目分析模块已退役，项目路径不可用' },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects every retired project subpath without forwarding it to Core', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(
+      new Request('http://web.local/api/core/projects/legacy-project/snapshot'),
+      { params: Promise.resolve({ path: ['projects', 'legacy-project', 'snapshot'] }) },
+    );
+
+    expect(response.status).toBe(405);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: 'PROJECT_MODULE_RETIRED', message: '项目分析模块已退役，项目路径不可用' },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -72,7 +138,7 @@ describe('Core BFF proxy', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await POST(
-      new Request('http://web.local/api/core/system/health?full=1', { method: 'POST' }),
+      trustedMutationRequest('http://web.local/api/core/system/health?full=1', { method: 'POST' }),
       { params: Promise.resolve({ path: ['system', 'health'] }) },
     );
 
@@ -95,7 +161,7 @@ describe('Core BFF proxy', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await POST(
-      new Request('http://web.local/api/core/auth/login', { method: 'POST' }),
+      trustedMutationRequest('http://web.local/api/core/auth/login', { method: 'POST' }),
       { params: Promise.resolve({ path: ['auth', 'login'] }) },
     );
 
@@ -116,7 +182,7 @@ describe('Core BFF proxy', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await POST(
-      new Request('http://web.local/api/core/auth/login', { method: 'POST' }),
+      trustedMutationRequest('http://web.local/api/core/auth/login', { method: 'POST' }),
       { params: Promise.resolve({ path: ['auth', 'login'] }) },
     );
 
@@ -129,7 +195,7 @@ describe('Core BFF proxy', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await POST(new Request('http://web.local/api/core/unsafe'), {
+    const response = await POST(trustedMutationRequest('http://web.local/api/core/unsafe', { method: 'POST' }), {
       params: Promise.resolve({ path: ['..'] }),
     });
 
@@ -142,7 +208,7 @@ describe('Core BFF proxy', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
 
     const response = await POST(
-      new Request('http://web.local/api/core/auth/login', { method: 'POST' }),
+      trustedMutationRequest('http://web.local/api/core/auth/login', { method: 'POST' }),
       { params: Promise.resolve({ path: ['auth', 'login'] }) },
     );
 
@@ -161,7 +227,7 @@ describe('Core BFF proxy', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await POST(
-      new Request('http://web.local/api/core/auth/login', { method: 'POST' }),
+      trustedMutationRequest('http://web.local/api/core/auth/login', { method: 'POST' }),
       { params: Promise.resolve({ path: ['auth', 'login'] }) },
     );
 
