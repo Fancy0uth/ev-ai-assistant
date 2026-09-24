@@ -46,4 +46,23 @@ describe('AppShell navigation', () => {
     expect(agentLink).toHaveAttribute('aria-current', 'location');
     expect(agentPanel?.open).toBe(true);
   });
+
+  it('keeps logout named and unavailable while the session is ending', async () => {
+    const onLogout = vi.fn();
+    render(
+      <AppShell agent={<p>桌面 Agent</p>} isLoggingOut onLogout={onLogout}>
+        <header id="today-overview">今天概览</header>
+      </AppShell>,
+    );
+    const user = userEvent.setup();
+    const desktopLogout = screen.getByRole('button', { name: '正在退出…' });
+    const mobileNavigation = screen.getByRole('navigation', { name: '移动端主导航' });
+    const mobileLogout = within(mobileNavigation).getByRole('button', { name: '退出' });
+
+    expect(desktopLogout).toBeDisabled();
+    expect(mobileLogout).toBeDisabled();
+    await user.click(desktopLogout);
+    await user.click(mobileLogout);
+    expect(onLogout).not.toHaveBeenCalled();
+  });
 });

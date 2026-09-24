@@ -23,6 +23,7 @@ export function TaskComposer({ isPending, onCreate }: TaskComposerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (isPending) return;
     const normalizedTitle = title.trim();
     if (!normalizedTitle) {
       setValidationError('请先写下任务内容');
@@ -44,6 +45,7 @@ export function TaskComposer({ isPending, onCreate }: TaskComposerProps) {
           <input
             id="new-task"
             value={title}
+            disabled={isPending}
             maxLength={200}
             placeholder="例如：完成 Agent 路由设计"
             aria-invalid={validationError ? true : undefined}
@@ -53,7 +55,12 @@ export function TaskComposer({ isPending, onCreate }: TaskComposerProps) {
         </div>
         <div className="composer-select-field">
           <label htmlFor="task-area">领域</label>
-          <select id="task-area" value={area} onChange={(event) => setArea(event.target.value as TaskArea)}>
+          <select
+            id="task-area"
+            value={area}
+            disabled={isPending}
+            onChange={(event) => setArea(event.target.value as TaskArea)}
+          >
             <option value="WORK">开发</option>
             <option value="STUDY">学习</option>
             <option value="LIFE">生活</option>
@@ -64,6 +71,7 @@ export function TaskComposer({ isPending, onCreate }: TaskComposerProps) {
           <select
             id="task-priority"
             value={priority}
+            disabled={isPending}
             onChange={(event) => setPriority(event.target.value as TaskPriority)}
           >
             <option value="LOW">低</option>

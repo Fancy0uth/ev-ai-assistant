@@ -5,14 +5,14 @@ import { Check, Clock3, RotateCcw } from 'lucide-react';
 
 interface TaskListProps {
   tasks: Task[];
-  updatingTaskId: string | null;
+  updatingTaskIds: ReadonlySet<string>;
   onStatusChange: (task: Task, status: TaskStatus) => Promise<void>;
 }
 
 const areaCopy = { WORK: '开发', STUDY: '学习', LIFE: '生活' } as const;
 const priorityCopy = { HIGH: '高', MEDIUM: '中', LOW: '低' } as const;
 
-export function TaskList({ tasks, updatingTaskId, onStatusChange }: TaskListProps) {
+export function TaskList({ tasks, updatingTaskIds, onStatusChange }: TaskListProps) {
   return (
     <section className="task-list-card" id="today-tasks" aria-labelledby="tasks-heading">
       <div className="task-list-card__header">
@@ -38,7 +38,7 @@ export function TaskList({ tasks, updatingTaskId, onStatusChange }: TaskListProp
           {tasks.map((task) => {
             const isDone = task.status === 'DONE';
             const isDeferred = task.status === 'DEFERRED';
-            const isUpdating = updatingTaskId === task.id;
+            const isUpdating = updatingTaskIds.has(task.id);
             return (
               <li className={isDone ? 'task-row task-row--done' : 'task-row'} key={task.id}>
                 <label className="task-check-target">

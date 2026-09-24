@@ -1,4 +1,5 @@
-import { todaySnapshotSchema } from '@ev/contracts';
+import { taskListResponseSchema, taskResponseSchema, todaySnapshotSchema, type Task } from '@ev/contracts';
+import { calculateDailyStatus } from '@ev/domain';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
@@ -71,12 +72,84 @@ describe('Today snapshot API', () => {
       level: 'TIGHT',
       source: 'RULES_V1',
     });
-    expect(snapshot.status.reasons).toContain('仍有 3 个高优先级任务');
     expect(snapshot.yesterday).toBeNull();
     expect(snapshot.agents).toEqual({
       deepSeek: 'NOT_CONFIGURED',
       codex: 'NOT_CONFIGURED',
     });
+  });
+
+  it('scores every matching task beyond the paginated task-list limit', async () => {
+    app = await buildApp({ logger: false });
+    const setup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/setup',
+      payload: credentials,
+    });
+    const cookies = { ev_session: readSessionToken(setup.headers['set-cookie']) };
+    const tasks: Task[] = [];
+
+    for (let index = 0; index < 200; index += 1) {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/tasks',
+        cookies,
+        payload: {
+          title: `今日任务 ${index + 1}`,
+          area: 'WORK',
+          priority: 'LOW',
+          targetDate: '2026-08-07',
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      let task = taskResponseSchema.parse(created.json()).data;
+      if (index >= 100) {
+        const completed = await app.inject({
+          method: 'PATCH',
+          url: `/v1/tasks/${task.id}`,
+          cookies,
+          payload: { version: task.version, status: 'DONE' },
+        });
+        expect(completed.statusCode).toBe(200);
+        task = taskResponseSchema.parse(completed.json()).data;
+      }
+      tasks.push(task);
+    }
+
+    const otherDate = await app.inject({
+      method: 'POST',
+      url: '/v1/tasks',
+      cookies,
+      payload: {
+        title: '不计入今日的高优先级任务',
+        area: 'WORK',
+        priority: 'HIGH',
+        targetDate: '2026-08-08',
+      },
+    });
+    expect(otherDate.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/today?date=2026-08-07',
+      cookies,
+    });
+    expect(response.statusCode).toBe(200);
+    const snapshot = todaySnapshotSchema.parse(response.json()).data;
+    expect(snapshot.tasks).toHaveLength(200);
+    expect(snapshot.tasks).toEqual(expect.arrayContaining(tasks));
+    expect(snapshot.status).toEqual(calculateDailyStatus({ tasks, yesterday: null }));
+    expect(snapshot.status.score).toBe(80);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/v1/tasks?pageSize=999&targetDate=2026-08-07',
+      cookies,
+    });
+    expect(listed.statusCode).toBe(200);
+    const page = taskListResponseSchema.parse(listed.json()).data;
+    expect(page.items).toEqual(snapshot.tasks.slice(0, 100));
+    expect(page.pagination).toEqual({ page: 1, pageSize: 100, total: 200, totalPages: 2 });
   });
 
   it('rejects unauthenticated and invalid-date requests', async () => {

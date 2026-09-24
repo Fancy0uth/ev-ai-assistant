@@ -64,8 +64,32 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
   await expect(page.getByText('已完成 1/1 个任务')).toBeVisible();
   await expect(page.getByRole('checkbox', { name: `重新打开任务：${taskTitle}` })).toBeChecked();
 
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const primaryNavigation = page.getByRole('navigation', { name: '主导航', exact: true });
+  const todayLink = primaryNavigation.getByRole('link', { name: '今天', exact: true });
+  const tasksLink = primaryNavigation.getByRole('link', { name: '任务', exact: true });
+  const agentLink = primaryNavigation.getByRole('link', { name: 'Agent 状态', exact: true });
+  const logoutButton = page.getByRole('button', { name: '退出', exact: true });
+  await expect(primaryNavigation).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '移动端主导航' })).toBeHidden();
+  for (const control of [todayLink, tasksLink, agentLink, logoutButton]) {
+    await expect(control).toBeVisible();
+  }
+  await todayLink.focus();
+  await page.keyboard.press('Tab');
+  await expect(tasksLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(tasksLink).toHaveAttribute('aria-current', 'location');
+  await expect(todayLink).not.toHaveAttribute('aria-current');
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('navigation', { name: '移动端主导航' })).toBeVisible();
+  const mobileNavigation = page.getByRole('navigation', { name: '移动端主导航' });
+  await expect(primaryNavigation).toBeHidden();
+  for (const name of ['今天', '任务', 'Agent']) {
+    await expect(mobileNavigation.getByRole('link', { name, exact: true })).toBeVisible();
+  }
+  await expect(mobileNavigation.getByRole('button', { name: '退出', exact: true })).toBeVisible();
   const mobileMetrics = await page.evaluate(() => {
     const root = document.documentElement;
     const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
@@ -87,11 +111,15 @@ test('owner setup, persistent task lifecycle and logout form one real local loop
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(page.getByRole('complementary', { name: 'Agent 状态' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '移动端主导航' })).toBeHidden();
+  for (const control of [todayLink, tasksLink, agentLink, logoutButton]) {
+    await expect(control).toBeVisible();
+  }
 
   const authenticatedResponse = await page.context().request.get('/api/core/tasks');
   expect(authenticatedResponse.status()).toBe(200);
 
-  await page.locator('.nav-rail').getByRole('button', { name: '退出' }).click();
+  await logoutButton.click();
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole('heading', { name: '返回你的控制台' })).toBeVisible();
 

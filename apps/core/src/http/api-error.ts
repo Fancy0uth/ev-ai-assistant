@@ -1,5 +1,5 @@
 import { apiErrorSchema } from '@ev/contracts';
-import type { FastifyInstance } from 'fastify';
+import { errorCodes, type FastifyInstance } from 'fastify';
 
 export class ApiError extends Error {
   readonly statusCode: number;
@@ -41,12 +41,35 @@ export function registerErrorHandling(app: FastifyInstance): void {
       );
     }
 
-    request.log.error({ error }, 'Unhandled Core request error');
-    return reply.status(500).send(
+    let statusCode = 500;
+    let code = 'INTERNAL_ERROR';
+    let message = '本地服务暂时无法完成请求';
+
+    if (
+      error instanceof errorCodes.FST_ERR_CTP_INVALID_JSON_BODY ||
+      error instanceof errorCodes.FST_ERR_CTP_EMPTY_JSON_BODY ||
+      error instanceof errorCodes.FST_ERR_CTP_INVALID_CONTENT_LENGTH
+    ) {
+      statusCode = 400;
+      code = 'BAD_REQUEST';
+      message = '请求正文格式无效';
+    } else if (error instanceof errorCodes.FST_ERR_CTP_INVALID_MEDIA_TYPE) {
+      statusCode = 415;
+      code = 'UNSUPPORTED_MEDIA_TYPE';
+      message = '不支持此请求正文类型';
+    } else if (error instanceof errorCodes.FST_ERR_CTP_BODY_TOO_LARGE) {
+      statusCode = 413;
+      code = 'PAYLOAD_TOO_LARGE';
+      message = '请求正文超出大小限制';
+    } else {
+      request.log.error({ error }, 'Unhandled Core request error');
+    }
+
+    return reply.status(statusCode).send(
       apiErrorSchema.parse({
         error: {
-          code: 'INTERNAL_ERROR',
-          message: '本地服务暂时无法完成请求',
+          code,
+          message,
         },
       }),
     );

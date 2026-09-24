@@ -50,6 +50,7 @@ export function AppShell({ children, agent, isLoggingOut, onLogout }: AppShellPr
           <a
             className={navigationClass('primary-nav__item', 'today', activeSection)}
             href="#today-overview"
+            aria-label="今天"
             aria-current={activeSection === 'today' ? 'location' : undefined}
             onClick={() => selectSection('today', 'today-overview')}
           >
@@ -59,6 +60,7 @@ export function AppShell({ children, agent, isLoggingOut, onLogout }: AppShellPr
           <a
             className={navigationClass('primary-nav__item', 'tasks', activeSection)}
             href="#today-tasks"
+            aria-label="任务"
             aria-current={activeSection === 'tasks' ? 'location' : undefined}
             onClick={() => selectSection('tasks', 'today-tasks')}
           >
@@ -68,6 +70,7 @@ export function AppShell({ children, agent, isLoggingOut, onLogout }: AppShellPr
           <a
             className={navigationClass('primary-nav__item', 'agent', activeSection)}
             href="#agent-status"
+            aria-label="Agent 状态"
             aria-current={activeSection === 'agent' ? 'location' : undefined}
             onClick={() => selectSection('agent', 'agent-status')}
           >
@@ -84,7 +87,13 @@ export function AppShell({ children, agent, isLoggingOut, onLogout }: AppShellPr
               <small>设备内会话</small>
             </div>
           </div>
-          <button className="logout-button" type="button" onClick={onLogout} disabled={isLoggingOut}>
+          <button
+            className="logout-button"
+            type="button"
+            aria-label={isLoggingOut ? '正在退出…' : '退出'}
+            onClick={onLogout}
+            disabled={isLoggingOut}
+          >
             <LogOut aria-hidden="true" size={16} />
             <span>{isLoggingOut ? '正在退出…' : '退出'}</span>
           </button>
